@@ -1157,7 +1157,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   let capShown = -1;
   function sync() {
     const ri = currentRound(T);
-    roundLbl.textContent = T < INTRO ? 'Deploying' : T >= BATTLE_END && T >= END - 0.01 ? `Round ${nRounds}/${nRounds}` : `Round ${Math.max(1, ri + 1)}/${nRounds}`;
+    roundLbl.textContent = T < INTRO ? 'Deploying' : !nRounds ? 'No fighting' : T >= BATTLE_END && T >= END - 0.01 ? `Round ${nRounds}/${nRounds}` : `Round ${Math.max(1, ri + 1)}/${nRounds}`;
     bPlay.innerHTML = playing ? '❚❚' : '▶';
     barFill.style.width = `${(T / END) * 100}%`;
     speedBtns.forEach(b => b.classList.toggle('bv-on', Number(b.dataset.v) === speed));
@@ -1179,6 +1179,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
 
   function frame(now: number) {
     if (closed) return;
+    // removed from the DOM by someone else (route change): stop the loop and drop listeners
+    if (!overlay.isConnected) { close(); return; }
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     if (playing) {
@@ -1203,9 +1205,11 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   };
 
   // ---------------------------------------------------------------- events
-  const ro = new ResizeObserver(() => layout());
+  const ro = new ResizeObserver(() => { if (!closed) layout(); });
   ro.observe(stage);
   const onKey = (e: KeyboardEvent) => {
+    if (!overlay.isConnected) { close(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === 'Escape') { e.preventDefault(); close(); }
     else if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); togglePlay(); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); nextRound(); }
@@ -1233,6 +1237,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   bar.addEventListener('pointerdown', e => { dragging = true; bar.setPointerCapture(e.pointerId); barSeek(e); });
   bar.addEventListener('pointermove', e => { if (dragging) barSeek(e); });
   bar.addEventListener('pointerup', () => { dragging = false; });
+  bar.addEventListener('pointercancel', () => { dragging = false; });
   const setMouse = (e: PointerEvent) => {
     const r = canvas.getBoundingClientRect();
     mouse = { x: e.clientX - r.left, y: e.clientY - r.top };

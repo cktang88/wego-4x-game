@@ -27,10 +27,11 @@ export interface GameMeta {
 
 export interface ChatMsg { at: number; seat: number | null; to: number | null; text: string }
 
+/** POST /api/games body. Everything is validated server-side; unknown/invalid rule keys are dropped. */
 export interface CreateGameReq {
   name?: string;
   seed?: number;
-  seats: { kind: 'human' | 'ai'; name?: string; aiLevel?: 'novice' | 'standard' | 'expert' }[];
+  seats?: { kind: 'human' | 'ai'; name?: string; aiLevel?: 'novice' | 'standard' | 'expert' }[];
   rules?: unknown;
   deadlineHours?: number;
 }
@@ -41,11 +42,11 @@ export type ServerMsg =
   | { type: 'meta'; meta: GameMeta }
   | { type: 'chat'; msg: ChatMsg }
   | { type: 'history'; turn: number; result: TurnResult | null }
-  | { type: 'error'; error: string };
+  | { type: 'error'; error: string; code?: string };
 
 /** Client -> server */
 export type ClientMsg =
-  | { type: 'submit'; submission: Submission }
+  | { type: 'submit'; submission: Submission; turn?: number }   // turn: the turn these orders were planned for (stale ones are rejected)
   | { type: 'unsubmit' }
   | { type: 'chat'; text: string; to: number | null }
   | { type: 'history'; turn: number }

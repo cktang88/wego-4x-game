@@ -25,8 +25,16 @@ export function overlay(html: string, closable = true): HTMLElement {
     const x = h('button', { class: 'small closex', title: 'Close (Esc)' }, '✕');
     x.addEventListener('click', () => o.remove());
     o.querySelector('.dialog')?.prepend(x);
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape' && o.isConnected) { e.stopPropagation(); o.remove(); } if (!o.isConnected) window.removeEventListener('keydown', esc, true); };
+    const esc = (e: KeyboardEvent) => {
+      if (!o.isConnected) { window.removeEventListener('keydown', esc, true); return; }
+      // only the topmost overlay handles Esc
+      const all = document.querySelectorAll('.overlay');
+      if (e.key === 'Escape' && all[all.length - 1] === o) { e.stopPropagation(); o.remove(); }
+    };
     window.addEventListener('keydown', esc, true);
+    // however the overlay goes away (button, backdrop, route change), drop the window listener with it
+    const remove = o.remove.bind(o);
+    o.remove = () => { window.removeEventListener('keydown', esc, true); remove(); };
   }
   document.body.appendChild(o);
   return o;

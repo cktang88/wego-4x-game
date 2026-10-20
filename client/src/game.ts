@@ -7,6 +7,8 @@ import { TRAITS, RELICS, NEUTRAL_COLOR } from '../../shared/config/content.ts';
 import { EDICTS } from '../../shared/sim/edicts.ts';
 import type { Doctrine, Fleet, GameEvent, GameState, Order, Pt, Region, Submission, TurnResult } from '../../shared/sim/types.ts';
 import { predictAssault } from '../../shared/sim/ai.ts';
+import { maxGarrison } from '../../shared/sim/setup.ts';
+import { defaultRules, mergeRules } from '../../shared/config/rules.ts';
 import type { GameSource } from './net.ts';
 import { LocalSource } from './net.ts';
 import { MapRenderer, regionLayout, type FleetDraw, type Fx } from './render/map.ts';
@@ -23,7 +25,9 @@ interface Replay {
   result: TurnResult;
   beats: Beat[];
   i: number;
-  t0: number;
+  /** progress through the current beat, 0..1 (advanced per frame, so pause/speed changes never jump) */
+  prog: number;
+  last: number;
   playing: boolean;
   speed: number;
   fleets: Map<number, ReplayFleet>;
@@ -32,7 +36,7 @@ interface Replay {
   endLayout: Map<number, Pt>;
   moving: Set<number>;
   pulse: number;
-  applied: boolean;
+  preview: boolean;
 }
 
 export class GameScreen {
@@ -58,6 +62,14 @@ export class GameScreen {
   previewing = false;
   autoPlay = false;
   odSticky = false;
+  planVersion = 0;
+  /** replay speed chosen by the user, kept across turns (Auto play) */
+  replaySpeed = 1;
+  victoryShown = false;
+  curtain: HTMLElement | null = null;
+  private ro: ResizeObserver | null = null;
+  private timers = new Set<number>();
+  private memo: { visSrc?: number[]; vis?: Set<number>; laySrc?: Fleet[]; layPx?: number; lay?: Map<number, Pt>; hlKey?: string; hl?: Map<number, string> } = {};
 
   constructor(parent: HTMLElement, public src: GameSource, public onExit: () => void) {
     this.root = h('div', { class: 'game' });
@@ -101,38 +113,92 @@ export class GameScreen {
     if (src instanceof LocalSource) src.onHandoff = seat => this.handoff(seat);
     window.addEventListener('resize', this.onResize);
     window.addEventListener('keydown', this.onKey);
+    window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('blur', this.onBlur);
+    // the stage can change size without a window resize (top bar wrapping, mobile URL bar)
+    if ('ResizeObserver' in window) { this.ro = new ResizeObserver(() => this.onResize()); this.ro.observe(this.el.stage); }
     if (window.innerWidth <= 700) this.el.right.classList.add('min');
     this.onResize();
-    this.lastSeenTurn = this.seenTurnKey() ? Number(localStorage.getItem(this.seenTurnKey()) ?? 0) : 0;
+    this.lastSeenTurn = this.readSeenTurn();
+    this.prunePlans();
     this.onSourceChange('view');
     const loop = () => { if (this.destroyed) return; this.frame(); this.raf = requestAnimationFrame(loop); };
     this.raf = requestAnimationFrame(loop);
   }
 
   destroy() {
+    if (this.destroyed) return;
     this.destroyed = true;
+    this.autoPlay = false;
     cancelAnimationFrame(this.raf);
+    this.timers.forEach(t => clearTimeout(t));
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('keydown', this.onKey);
+    window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('blur', this.onBlur);
+    document.removeEventListener('visibilitychange', this.onVisible);
+    this.ro?.disconnect();
+    this.src.onChange = () => {};
+    if (this.src instanceof LocalSource) this.src.onHandoff = () => {};
     this.src.close();
+    this.curtain?.remove();
     this.root.remove();
   }
+  /** setTimeout that is cancelled when the screen is destroyed. */
+  later(fn: () => void, ms: number) {
+    const t = window.setTimeout(() => { this.timers.delete(t); if (!this.destroyed) fn(); }, ms);
+    this.timers.add(t);
+  }
+  readSeenTurn(): number {
+    let n = 0;
+    try { n = Number(localStorage.getItem(this.seenTurnKey()) ?? 0) || 0; } catch { /* */ }
+    // a value from the future belongs to an older game that reused this key
+    return n >= this.st.turn ? 0 : n;
+  }
+  onVisible = () => { if (!document.hidden) { document.title = 'Three Crowns'; document.removeEventListener('visibilitychange', this.onVisible); } };
 
   // ================================================================== data helpers
   get st(): GameState { return this.src.view.state; }
   get you(): number | null { return this.src.view.you; }
   get submitted(): boolean { return !!this.src.mySubmission; }
   get canPlan(): boolean { return this.you !== null && !this.submitted && this.st.winner === null && !this.st.players[this.you].eliminated; }
-  seenTurnKey() { return `tc.seen.${this.src.meta?.id ?? 'x'}.${this.you ?? 's'}`; }
+  /** Identity of this game for localStorage keys. Local games all share meta.id 'local', so add the save slot + seed. */
+  gameKey() {
+    if (this.src instanceof LocalSource) return `${this.src.storageKey}:${this.st.seed}`;
+    return this.src.meta?.id ?? 'x';
+  }
+  seenTurnKey() { return `tc.seen.${this.gameKey()}.${this.you ?? 's'}`; }
   freshPlan(): Submission { return { orders: new Array(this.st.rules.orders.perTurn).fill(null), free: [] }; }
-  planKey() { return `tc.plan.${this.src.meta.id}.${this.you}.${this.st.turn}`; }
-  savePlan() { try { localStorage.setItem(this.planKey(), JSON.stringify(this.plan)); } catch { /* */ } }
+  planKey() { return `tc.plan.${this.gameKey()}.${this.you ?? 's'}.${this.st.turn}`; }
+  savePlan() { this.planVersion++; try { localStorage.setItem(this.planKey(), JSON.stringify(this.plan)); } catch { /* */ } }
+  /** Coerce a stored/submitted plan into the shape the UI expects (old saves, rule changes). */
+  normalizePlan(p: unknown): Submission | null {
+    if (!p || typeof p !== 'object' || !Array.isArray((p as Submission).orders)) return null;
+    const n = this.st.rules.orders.perTurn;
+    const orders = (p as Submission).orders.slice(0, n).map(o => (o && typeof o === 'object' && typeof (o as Order).type === 'string' && (o as Order).type in ORDER_INFO ? o : null));
+    while (orders.length < n) orders.push(null);
+    const free = Array.isArray((p as Submission).free) ? (p as Submission).free.filter(x => x && typeof x === 'object') : [];
+    return { orders, free };
+  }
   loadPlan() {
+    this.planVersion++;
     try {
-      const p = JSON.parse(localStorage.getItem(this.planKey()) ?? 'null');
-      if (p && Array.isArray(p.orders)) { this.plan = p; return; }
+      const p = this.normalizePlan(JSON.parse(localStorage.getItem(this.planKey()) ?? 'null'));
+      if (p) { this.plan = p; return; }
     } catch { /* */ }
     this.plan = this.freshPlan();
+  }
+  /** Drop stored plans of earlier turns of this game (they would otherwise pile up forever). */
+  prunePlans() {
+    try {
+      const pre = `tc.plan.${this.gameKey()}.`;
+      const drop: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k?.startsWith(pre) && Number(k.slice(k.lastIndexOf('.') + 1)) < this.st.turn) drop.push(k);
+      }
+      drop.forEach(k => localStorage.removeItem(k));
+    } catch { /* */ }
   }
   color(o: number | null | undefined) { return o === null || o === undefined || o < 0 ? (o === -1 ? '#e7b6ff' : NEUTRAL_COLOR) : this.st.players[o]?.color ?? NEUTRAL_COLOR; }
   pname(o: number | null | undefined) { return o === null || o === undefined ? 'Neutral' : o < 0 ? (this.st.wardenAwake && !this.st.wardenDefeated ? 'Neutral / Warden' : 'Neutral') : this.st.players[o]?.name ?? '?'; }
@@ -142,14 +208,17 @@ export class GameScreen {
     return fa && fa.type === 'doctrine' ? fa.doctrine : f.doctrine;
   }
 
-  /** Fleet positions after orders in slots < k (assumes moves/seizes succeed). */
+  /** Fleet positions after orders in slots < k (assumes moves/seizes succeed; joining fleets move in too). */
   projected(k: number): Map<number, number> {
     const pos = new Map(this.st.fleets.map(f => [f.id, f.region]));
     for (let i = 0; i < Math.min(k, this.plan.orders.length); i++) {
       const o = this.plan.orders[i];
       if (!o) continue;
-      if (o.type === 'move') pos.set(o.fleet, o.path[o.path.length - 1]);
-      if (o.type === 'seize') pos.set(o.fleet, o.target);
+      if (o.type === 'move' && o.path.length) pos.set(o.fleet, o.path[o.path.length - 1]);
+      if (o.type === 'seize') {
+        pos.set(o.fleet, o.target);
+        for (const id of o.also ?? []) if (pos.has(id)) pos.set(id, o.target);
+      }
     }
     return pos;
   }
@@ -159,7 +228,8 @@ export class GameScreen {
     const uses = new Map<number, number>();
     for (let i = 0; i <= k && i < this.plan.orders.length; i++) {
       const o = this.plan.orders[i];
-      if (o && 'fleet' in o && o.type !== 'build') uses.set(o.fleet, (uses.get(o.fleet) ?? 0) + 1);
+      if (!o || !('fleet' in o) || o.type === 'build') continue;
+      for (const id of [o.fleet, ...(o.type === 'seize' && i < k ? o.also ?? [] : [])]) uses.set(id, (uses.get(id) ?? 0) + 1);
     }
     for (const f of s.fleets) { f.region = pos.get(f.id) ?? f.region; f.ordersThisTurn = uses.get(f.id) ?? 0; }
     return s;
@@ -217,34 +287,66 @@ export class GameScreen {
     if (k === 'error') { toast(this.src.lastError); return; }
     if (k === 'meta') { this.renderTop(); if (this.tab === 'orders') this.renderTab(); return; }
     // full view
+    backfillRules(this.st);
     if (!this.map.fitted && this.map.w > 0) {
-      const cap = this.you !== null ? this.st.regions[this.st.players[this.you].capital].site : undefined;
+      const cap = this.you !== null ? this.st.regions[this.st.players[this.you]?.capital]?.site : undefined;
       this.map.fit(this.st, cap);
     }
-    this.loadPlan();
-    if (this.src.mySubmission) this.plan = structuredClone(this.src.mySubmission);
+    // the seat may have changed (hotseat) or a new turn begun: re-read the seen marker and the plan
+    const seenKey = this.seenTurnKey();
+    if (seenKey !== this.lastSeenKey) { this.lastSeenKey = seenKey; this.lastSeenTurn = this.readSeenTurn(); }
+    if (this.src.mySubmission) {
+      // sealed: the submission is the truth (it may come from another device); keep it so unsealing restores it
+      this.plan = this.normalizePlan(structuredClone(this.src.mySubmission)) ?? this.freshPlan();
+      this.savePlan();
+    } else this.loadPlan();
     if (this.sel?.kind === 'fleet' && !this.fleet(this.sel.id)) this.sel = null;
+    if (this.sel?.kind === 'region' && !this.st.regions[this.sel.id]) this.sel = null;
+    if (this.targetSlot !== null && this.targetSlot >= this.plan.orders.length) this.targetSlot = null;
+    if (this.mode && (!this.canPlan || ('fleet' in this.mode && !this.fleet(this.mode.fleet)))) this.mode = null;
     const last = this.st.last;
     if (last && last.turn > this.lastSeenTurn && this.st.turn > 1 && this.src.kind === 'remote' && document.hidden) {
       document.title = `(!) Turn ${this.st.turn} · Three Crowns`;
       try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Three Crowns', { body: `Turn ${last.turn} resolved. Your move, commander.` }); } catch { /* */ }
-      const back = () => { document.title = 'Three Crowns'; document.removeEventListener('visibilitychange', back); };
-      document.addEventListener('visibilitychange', back);
+      document.removeEventListener('visibilitychange', this.onVisible);
+      document.addEventListener('visibilitychange', this.onVisible);
     }
     if (last && last.turn > this.lastSeenTurn && this.st.turn > 1) {
       this.lastSeenTurn = last.turn;
-      try { localStorage.setItem(this.seenTurnKey(), String(last.turn)); } catch { /* */ }
+      try { localStorage.setItem(seenKey, String(last.turn)); } catch { /* */ }
       this.startReplay(last);
+      // hotseat: don't play the replay behind the curtain
+      if (this.replay && this.curtain) this.replay.playing = false;
     }
-    if (this.st.winner !== null) setTimeout(() => this.showVictory(), this.replay ? 500 : 0);
     this.renderAll();
+    this.maybeShowVictory();
+  }
+  lastSeenKey = '';
+
+  maybeShowVictory() {
+    if (this.st.winner === null || this.victoryShown || this.replay || this.curtain) return;
+    this.victoryShown = true;
+    this.later(() => this.showVictory(), 300);
   }
 
   handoff(seat: number) {
     const name = this.st.players[seat]?.name ?? '?';
+    // the previous player is still looking: hide everything until the next player confirms
+    this.sel = null; this.mode = null; this.targetSlot = null; this.hoverRegion = null;
+    this.el.tooltip.classList.add('hidden');
+    document.querySelectorAll('.overlay:not(.curtain)').forEach(x => x.remove());
+    this.curtain?.remove();
     const o = overlay(`<div class="dialog" style="text-align:center"><h1 style="color:${this.color(seat)}">${esc(name)}</h1>
       <p>Hotseat: pass the device to <b>${esc(name)}</b>. Other players look away!</p><button class="primary" data-x>I am ${esc(name)}</button></div>`, false);
-    o.querySelector('[data-x]')!.addEventListener('click', () => o.remove());
+    o.classList.add('curtain');
+    this.curtain = o;
+    o.querySelector('[data-x]')!.addEventListener('click', () => {
+      o.remove();
+      if (this.curtain === o) this.curtain = null;
+      if (this.replay) { this.replay.playing = true; this.replay.last = performance.now(); }
+      this.renderAll();
+      this.maybeShowVictory();
+    });
   }
 
   // ================================================================== rendering
@@ -255,7 +357,7 @@ export class GameScreen {
     this.el.turn.textContent = `TURN ${st.turn} / ${st.rules.victory.turnLimit}`;
     let phase = '';
     if (st.winner !== null) phase = `${this.pname(st.winner)} wins`;
-    else if (this.replay) phase = this.previewing ? 'PREVIEW: rivals assumed idle' : `Replaying turn ${this.replay.result.turn}`;
+    else if (this.replay) phase = this.replay.preview ? 'PREVIEW: rivals assumed idle' : `Replaying turn ${this.replay.result.turn}`;
     else if (this.you === null) phase = 'Spectating';
     else if (this.submitted) {
       const waiting = meta.seats.filter(s => !s.submitted).map(s => s.name);
@@ -283,8 +385,10 @@ export class GameScreen {
     const leader = currentLeader(st);
     this.el.players.innerHTML = st.players.map(p => {
       const s = meta.seats[p.id];
-      const shownVp = this.replay && !this.previewing ? p.vp - p.vpLog.filter(v => v.turn === this.replay!.result.turn).reduce((a, v) => a + v.amount, 0) : p.vp;
-      return `<div class="pchip ${p.id === this.you ? 'you' : ''}" style="border-color:${p.color};color:${p.color}" title="${esc(p.name)}${s?.kind === 'ai' ? ` (AI ${s.aiLevel})` : ''}${p.eliminated ? ' (eliminated)' : ''}">
+      // while replaying the last turn, show VP as it was before that turn
+      const rt = this.replay && !this.replay.preview && this.replay.result.turn === st.turn - 1 ? this.replay.result.turn : null;
+      const shownVp = rt !== null ? p.vp - p.vpLog.filter(v => v.turn === rt).reduce((a, v) => a + v.amount, 0) : p.vp;
+      return `<div class="pchip ${p.id === this.you ? 'you' : ''}" style="border-color:${esc(p.color)};color:${esc(p.color)}" title="${esc(p.name)}${s?.kind === 'ai' ? ` (AI ${esc(s.aiLevel)})` : ''}${p.eliminated ? ' (eliminated)' : ''}">
         <span class="dot ${s?.online ? 'on' : ''}"></span>
         <span style="color:var(--text)${p.eliminated ? ';text-decoration:line-through' : ''}">${esc(p.name)}</span>
         <span class="vp">${shownVp}${leader === p.id && !this.replay ? ' ♛' : ''}</span>
@@ -312,7 +416,7 @@ export class GameScreen {
       case 'score': b.innerHTML = this.scoreHtml(); b.querySelectorAll<HTMLElement>('[data-pact]').forEach(e => e.addEventListener('click', () => this.addOrder({ type: 'pact', with: Number(e.dataset.pact) }))); break;
       case 'chat': b.innerHTML = this.chatHtml(); this.bindChat(); break;
     }
-    b.querySelectorAll<HTMLElement>('[data-battle]').forEach(e => e.addEventListener('click', () => this.openBattle(Number(e.dataset.battle))));
+    b.querySelectorAll<HTMLElement>('[data-battle]').forEach(e => e.addEventListener('click', ev => { ev.preventDefault(); this.openBattle(Number(e.dataset.battle)); }));
     b.querySelectorAll<HTMLElement>('[data-region]').forEach(e => e.addEventListener('click', () => { this.select({ kind: 'region', id: Number(e.dataset.region) }); this.focus(this.st.regions[Number(e.dataset.region)].site); }));
   }
 
@@ -331,7 +435,7 @@ export class GameScreen {
         <div class="acts">${o && this.canPlan ? `<button data-up="${i}" title="earlier">▲</button><button data-down="${i}" title="later">▼</button><button data-del="${i}" title="remove">✕</button>` : ''}</div>
       </div>`;
     }).join('');
-    const free = this.plan.free.length ? `<div class="faint" style="font-size:12px;margin-top:6px">+ ${this.plan.free.length} free change(s): doctrine/merge/split/rename</div>` : '';
+    const free = this.plan.free.length ? `<h3>Free changes</h3><div class="feed">${this.plan.free.map((x, i) => `<div class="entry row" style="font-size:12px"><span class="grow">${esc(this.freeText(x))}</span>${this.canPlan ? `<button class="small" data-delfree="${i}" title="remove">✕</button>` : ''}</div>`).join('')}</div>` : '';
     const seats = this.src.meta.seats.map(s => `<span style="color:${this.color(s.seat)}">${esc(s.name)} ${s.submitted ? '✓' : '…'}</span>`).join(' · ');
     return `<h2>Orders: Turn ${st.turn}</h2>${this.canPlan ? this.advisorHtml() : ''}
       <div class="orderhelp">You get <b>${st.rules.orders.perTurn} orders</b> for your whole empire. The order in slot <b>${roman(1)}</b> resolves in pulse ${roman(1)} for everyone at once, and so on. Fleets and cities you don't order still defend themselves. Max <b>${st.rules.orders.maxPerFleet}</b> orders per fleet; a fleet's second order costs ${st.rules.orders.repeatFleetCredits}¢.</div>
@@ -347,6 +451,17 @@ export class GameScreen {
       <div style="margin-top:10px;font-size:13px" class="dim">${seats}</div>
       <h3>How to give orders</h3>
       <div class="orderhelp">Click one of <b>your fleets</b> (chevrons) for Move / Seize / Fortify / Excavate and its doctrine. Click a <b>region</b> for Build / Develop, or Influence / Scan / Feint. Click a slot to place the next order into that pulse. <span class="kbd">Esc</span> cancels.</div>`;
+  }
+
+  freeText(x: Submission['free'][number]): string {
+    const fn = (id: number) => this.fleet(id)?.name ?? `fleet #${id}`;
+    switch (x.type) {
+      case 'doctrine': return `${fn(x.fleet)}: doctrine ${x.doctrine.stance}, retreat ${Math.round(x.doctrine.retreatAt * 100)}%${x.doctrine.guard ? ', guard' : ''}`;
+      case 'rename': return `Rename ${fn(x.fleet)} to “${x.name}”`;
+      case 'merge': return `Merge ${fn(x.fleet)} into ${fn(x.into)}`;
+      case 'split': return `Split ${x.ships.length} ship(s) off ${fn(x.fleet)}`;
+      default: return (x as { type: string }).type;
+    }
   }
 
   /** Estimated odds of a seize, from the same predictor the AI uses. */
@@ -369,10 +484,12 @@ export class GameScreen {
   joinChips(o: Extract<Order, { type: 'seize' }>, slot: number): string {
     const pos = this.projected(slot);
     const t = this.st.regions[o.target];
-    const ok = this.st.fleets.filter(f => f.owner === this.you && f.id !== o.fleet && f.ships.length &&
-      (pos.get(f.id) === o.target || t.neighbors.includes(pos.get(f.id) ?? -1)));
-    if (!ok.length) return '';
-    return `<small>Join assault: ${ok.map(f => `<button class="small ${o.also?.includes(f.id) ? 'active' : ''}" data-join="${slot}:${f.id}" title="${f.ships.length} ships, power ${fleetPower(this.st, f)}. Uses one of this fleet's ${this.st.rules.orders.maxPerFleet} actions">${(o.also?.includes(f.id) ? '✓ ' : '+ ') + esc(f.name)}</button>`).join(' ')}</small>`;
+    const near = (f: Fleet) => pos.get(f.id) === o.target || t.neighbors.includes(pos.get(f.id) ?? -1);
+    // always list fleets already joined (even if a reorder made them ineligible) so they can be removed
+    const ok = this.st.fleets.filter(f => f.owner === this.you && f.id !== o.fleet && f.ships.length && (near(f) || o.also?.includes(f.id)));
+    const gone = (o.also ?? []).filter(id => !this.fleet(id));
+    if (!ok.length && !gone.length) return '';
+    return `<small>Join assault: ${ok.map(f => `<button class="small ${o.also?.includes(f.id) ? 'active' : ''}" data-join="${slot}:${f.id}" title="${f.ships.length} ships, power ${fleetPower(this.st, f)}. Uses one of this fleet's ${this.st.rules.orders.maxPerFleet} actions${near(f) ? '' : '. NOT adjacent at this pulse: it will not join'}">${(o.also?.includes(f.id) ? '✓ ' : '+ ') + esc(f.name)}${near(f) ? '' : ' ⚠'}</button>`).join(' ')}${gone.map(id => `<button class="small active" data-join="${slot}:${id}" title="This fleet no longer exists">✓ fleet #${id} ⚠</button>`).join(' ')}</small>`;
   }
 
   /** Short "this turn" hints: opportunities and threats a new player might miss. */
@@ -406,6 +523,7 @@ export class GameScreen {
       const [slot, fid] = e.dataset.join!.split(':').map(Number);
       const o = this.plan.orders[slot];
       if (!o || o.type !== 'seize') return;
+      if (!this.canPlan) return;
       const set = new Set(o.also ?? []);
       if (set.has(fid)) set.delete(fid); else set.add(fid);
       o.also = [...set];
@@ -419,13 +537,14 @@ export class GameScreen {
       this.renderTab();
     }));
     const swap = (i: number, j: number) => {
-      if (j < 0 || j >= this.plan.orders.length) return;
+      if (!this.canPlan || j < 0 || j >= this.plan.orders.length) return;
       [this.plan.orders[i], this.plan.orders[j]] = [this.plan.orders[j], this.plan.orders[i]];
       this.savePlan(); this.renderAll();
     };
     b.querySelectorAll<HTMLElement>('[data-up]').forEach(e => e.addEventListener('click', () => swap(Number(e.dataset.up), Number(e.dataset.up) - 1)));
     b.querySelectorAll<HTMLElement>('[data-down]').forEach(e => e.addEventListener('click', () => swap(Number(e.dataset.down), Number(e.dataset.down) + 1)));
     b.querySelectorAll<HTMLElement>('[data-del]').forEach(e => e.addEventListener('click', () => { this.plan.orders[Number(e.dataset.del)] = null; this.savePlan(); this.renderAll(); }));
+    b.querySelectorAll<HTMLElement>('[data-delfree]').forEach(e => e.addEventListener('click', () => { this.plan.free.splice(Number(e.dataset.delfree), 1); this.savePlan(); this.renderAll(); }));
     b.querySelector('[data-submit]')?.addEventListener('click', () => this.submit());
     b.querySelector('[data-unsubmit]')?.addEventListener('click', () => this.src.unsubmit());
     b.querySelector('[data-clear]')?.addEventListener('click', () => { if (!this.plan.orders.some(Boolean) && !this.plan.free.length) return; if (!confirm('Clear all planned orders and free changes?')) return; this.plan = this.freshPlan(); this.savePlan(); this.renderAll(); });
@@ -435,16 +554,19 @@ export class GameScreen {
 
   /** Ghost planner: run the real resolver on your fogged view, rivals giving no orders. */
   preview() {
-    if (this.you === null) return;
+    if (this.you === null || !this.canPlan) return;
     try {
       const st = structuredClone(this.st);
       if (!st.rngState) st.rngState = (st.seed ^ st.turn) >>> 0;
+      // fogged values are -1 in a player's view: give the resolver plausible numbers instead
+      for (const r of st.regions) if (r.garrison < 0) r.garrison = maxGarrison(st, r.id);
+      for (const p of st.players) if (p.id !== this.you) for (const k of ['industry', 'credits', 'influence'] as const) if (p.res[k] < 0) p.res[k] = 999;
       const subs: Record<number, Submission> = {};
       for (const p of st.players) subs[p.id] = p.id === this.you ? structuredClone(this.plan) : emptySubmission(st);
       const res = resolveTurn(st, subs).last;
       if (!res) return;
-      this.previewing = true;
-      this.startReplay(res);
+      this.startReplay(res, true);
+      if (!this.replay) { toast('Preview: nothing visible happens with this plan.'); return; }
       this.banner('PREVIEW');
       toast('Preview: rivals are assumed to sit still. Dice may differ. Nothing is submitted.');
     } catch (e) { toast(`Preview failed: ${e}`); }
@@ -474,8 +596,8 @@ export class GameScreen {
     return `<h2>Intel: Turn ${last?.turn ?? '-'}</h2>
       <div class="orderhelp">Every order leaves traces. Within your sensor range you see where rival fleets moved, when they arrived and roughly how big they were (small/medium/large). <i>Inferred</i> signals may be feints. Toggle <span class="kbd">I</span> to draw them on the map.</div>
       ${scans.length ? `<div class="dim" style="font-size:13px">Active scans: ${scans.map(s => esc(this.st.regions[s.region].name)).join(', ')}</div>` : ''}
-      <div class="feed">${sig.length ? sig.map(s => `<div class="entry signal ${s.confidence} click" data-region="${s.region}" style="border-left-color:${this.color(s.about)}">
-        <div class="t">PULSE ${roman(s.pulse)} · ${s.about === null ? 'UNKNOWN ORIGIN' : esc(this.pname(s.about)).toUpperCase()} · ${s.confidence.toUpperCase()}</div>${esc(s.text)}</div>`).join('') : '<div class="faint">No signals detected last turn.</div>'}</div>
+      <div class="feed">${sig.length ? sig.map(s => `<div class="entry signal ${esc(s.confidence)} click" data-region="${Number(s.region)}" style="border-left-color:${esc(this.color(s.about))}">
+        <div class="t">PULSE ${roman(s.pulse)} · ${s.about === null ? 'UNKNOWN ORIGIN' : esc(this.pname(s.about).toUpperCase())} · ${esc(String(s.confidence).toUpperCase())}</div>${esc(s.text)}</div>`).join('') : '<div class="faint">No signals detected last turn.</div>'}</div>
       ${fails.length ? `<h3>Your failed orders</h3><div class="feed">${fails.map(f => `<div class="entry" style="border-left-color:var(--bad)"><div class="t">PULSE ${roman(f.pulse)}</div>${esc(f.text)}</div>`).join('')}</div>` : ''}`;
   }
 
@@ -552,7 +674,11 @@ export class GameScreen {
     L.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-doc]').forEach(e => e.addEventListener('change', () => this.doctrineChanged()));
     L.querySelector<HTMLInputElement>('[data-rename]')?.addEventListener('change', e => {
       const v = (e.target as HTMLInputElement).value.trim();
-      if (this.sel?.kind === 'fleet' && v) { this.plan.free.push({ type: 'rename', fleet: this.sel.id, name: v }); this.savePlan(); toast('Renamed (applies when the turn resolves)'); }
+      if (!this.canPlan || this.sel?.kind !== 'fleet' || !v) return;
+      const id = this.sel.id;
+      this.plan.free = this.plan.free.filter(x => !(x.type === 'rename' && x.fleet === id));
+      if (v !== this.fleet(id)?.name) this.plan.free.push({ type: 'rename', fleet: id, name: v.slice(0, 40) });
+      this.savePlan(); this.renderTab(); toast('Renamed (applies when the turn resolves)');
     });
     L.querySelector('[data-close]')?.addEventListener('click', () => { this.sel = null; this.mode = null; this.renderLeft(); });
   }
@@ -648,7 +774,7 @@ export class GameScreen {
     }
     return `<div class="sel"><div class="row"><h2 class="grow" style="color:${this.color(f.owner)}">${esc(f.name)}</h2><button class="small" data-close>✕</button></div>
       <div class="dim" style="font-size:13px">${esc(this.pname(f.owner))} · at ${esc(st.regions[f.region].name)}${pos !== f.region ? ` → <b>${esc(st.regions[pos].name)}</b> (planned)` : ''} · speed ${fleetSpeed(st, f)} · power ${fleetPower(st, f)}${f.fortified ? ' · fortified' : ''}${f.fatigued ? ' · <span class="bad">fatigued</span>' : ''}</div>
-      ${mine ? `<input data-rename value="${esc(f.name)}" style="width:100%;margin-top:6px" title="Rename (free)">` : ''}
+      ${mine && this.canPlan ? `<input data-rename value="${esc(this.pendingName(f))}" maxlength="40" style="width:100%;margin-top:6px" title="Rename (free)">` : ''}
       <h3>Commander</h3>
       <div><b>${esc(c.name)}</b> <span class="faint">rank ${c.rank} · ${c.xp} xp · ${c.deeds.wins}W/${c.deeds.losses}L · ${c.deeds.kills} kills</span></div>
       <div>${c.traits.map(t => `<span class="trait" title="${esc(TRAITS[t]?.desc ?? '')}">${esc(TRAITS[t]?.name ?? t)}</span>`).join('') || '<span class="faint" style="font-size:12px">No reputation yet. Traits are earned through deeds.</span>'}</div>
@@ -658,7 +784,13 @@ export class GameScreen {
       ${f.history.length ? `<h3>Record</h3><div class="history scroll">${f.history.slice().reverse().map(x => esc(x)).join('<br>')}</div>` : ''}</div>`;
   }
 
+  pendingName(f: Fleet): string {
+    const r = [...this.plan.free].reverse().find(x => x.type === 'rename' && x.fleet === f.id);
+    return r && r.type === 'rename' ? r.name : f.name;
+  }
+
   doctrineChanged() {
+    if (!this.canPlan) return;
     if (this.sel?.kind !== 'fleet') return;
     const L = this.el.left;
     const v = (k: string) => L.querySelector<HTMLInputElement>(`[data-doc="${k}"]`)!;
@@ -675,14 +807,17 @@ export class GameScreen {
     const sel = this.sel;
     if (!sel || !this.canPlan) return;
     if (sel.kind === 'fleet') {
-      const f = this.fleet(sel.id)!;
+      const f = this.fleet(sel.id);
+      if (!f || f.owner !== this.you) return;
       switch (a) {
         case 'move': this.odSticky = false; this.mode = { type: 'move', fleet: f.id, overdrive: false }; break;
         case 'seize': this.mode = { type: 'seize', fleet: f.id }; break;
         case 'fortify': this.addOrder({ type: 'fortify', fleet: f.id }); break;
         case 'excavate': this.addOrder({ type: 'excavate', fleet: f.id }); break;
         case 'merge': {
-          const into = Number(this.el.left.querySelector<HTMLSelectElement>('[data-mergeinto]')!.value);
+          const into = Number(this.el.left.querySelector<HTMLSelectElement>('[data-mergeinto]')?.value);
+          if (!this.fleet(into)) return;
+          this.plan.free = this.plan.free.filter(x => !(x.type === 'merge' && x.fleet === f.id));
           this.plan.free.push({ type: 'merge', fleet: f.id, into }); this.savePlan(); toast('Merge queued (applies at the start of resolution, before pulse I). Order the merged fleet, not this one.'); break;
         }
         case 'split': {
@@ -719,8 +854,8 @@ export class GameScreen {
       this.el.rcontrols.innerHTML = `<button class="small" data-r="pause">${R.playing ? '❚❚' : '▶'}</button><button class="small" data-r="speed">${R.speed}×</button><button class="small" data-r="skip">Skip ⏭</button>`;
       this.el.rcontrols.querySelectorAll<HTMLElement>('[data-r]').forEach(b => b.addEventListener('click', () => {
         if (!this.replay) return;
-        if (b.dataset.r === 'pause') { this.replay.playing = !this.replay.playing; this.replay.t0 = performance.now() - (this.replay.applied ? 0 : 0); }
-        if (b.dataset.r === 'speed') this.replay.speed = this.replay.speed >= 4 ? 1 : this.replay.speed * 2;
+        if (b.dataset.r === 'pause') this.togglePause();
+        if (b.dataset.r === 'speed') this.replaySpeed = this.replay.speed = this.replay.speed >= 4 ? 1 : this.replay.speed * 2;
         if (b.dataset.r === 'skip') this.endReplay();
         this.renderBottom();
       }));
@@ -730,15 +865,23 @@ export class GameScreen {
       this.el.rcontrols.innerHTML = (watching ? `<button class="small primary" data-x="next" title="Resolve the next turn">Next turn ▶</button><button class="small ${this.autoPlay ? 'active' : ''}" data-x="auto" title="Keep playing turns automatically">Auto ⏵⏵</button>` : '')
         + (local ? `<button class="small" data-x="save" title="Download a save file">💾</button>` : '');
       this.el.rcontrols.querySelector('[data-x="save"]')?.addEventListener('click', () => this.exportSave());
-      this.el.rcontrols.querySelector('[data-x="next"]')?.addEventListener('click', () => local!.advance());
-      this.el.rcontrols.querySelector('[data-x="auto"]')?.addEventListener('click', () => { this.autoPlay = !this.autoPlay; if (this.autoPlay) local!.advance(); this.renderBottom(); });
-      if (watching && !this.el.ticker.innerHTML) this.el.ticker.innerHTML = '<span class="faint">Watching three AIs. Press Next turn, or Auto.</span>';
+      this.el.rcontrols.querySelector('[data-x="next"]')?.addEventListener('click', () => { if (!this.replay) local!.advance(); });
+      this.el.rcontrols.querySelector('[data-x="auto"]')?.addEventListener('click', () => { this.autoPlay = !this.autoPlay; if (this.autoPlay && !this.replay) local!.advance(); this.renderBottom(); });
+      if (watching && !this.el.ticker.innerHTML.trim()) this.el.ticker.innerHTML = '<span class="faint">Watching three AIs. Press Next turn, or Auto.</span>';
       if (!this.el.ticker.innerHTML) this.el.ticker.innerHTML = `<span class="faint">Plan your ${this.st.rules.orders.perTurn} orders, then seal them. Everyone's orders resolve together.</span>`;
     }
   }
 
   // ================================================================== replay
-  startReplay(result: TurnResult) {
+  togglePause() {
+    const R = this.replay;
+    if (!R) return;
+    R.playing = !R.playing;
+    R.last = performance.now();
+    this.renderBottom();
+  }
+
+  startReplay(result: TurnResult, preview = false) {
     const st = this.st;
     const fleets = new Map<number, ReplayFleet>();
     for (const f of result.startFleets) fleets.set(f.id, { id: f.id, owner: f.owner, ships: f.ships.length, region: f.region, alpha: 1, name: f.name });
@@ -758,12 +901,16 @@ export class GameScreen {
       else if (e.k === 'fail' || e.k === 'note' || e.k === 'blocked' || e.k === 'influence' || e.k === 'fortify' || e.k === 'scan') push(e.k === 'fail' ? 500 : 350, e);
     }
     if (!beats.length) return;
-    const owners = result.startOwners.slice();
-    this.replay = { result, beats, i: -1, t0: 0, playing: true, speed: 1, fleets, owners, startLayout: new Map(), endLayout: new Map(), moving: new Set(), pulse: 0, applied: true };
-    this.sel = null; this.mode = null;
+    // starting a replay while another runs (or a preview) replaces it cleanly
+    const speed = this.replaySpeed;
+    this.fx = [];
+    this.previewing = preview;
+    const owners = result.startOwners.length ? result.startOwners.slice() : st.regions.map(r => r.owner);
+    this.replay = { result, beats, i: -1, prog: 0, last: performance.now(), playing: true, speed, fleets, owners, startLayout: new Map(), endLayout: new Map(), moving: new Set(), pulse: 0, preview };
+    this.sel = null; this.mode = null; this.targetSlot = null;
+    this.el.tooltip.classList.add('hidden');
     this.nextBeat();
     this.renderAll();
-    void st;
   }
 
   nextBeat() {
@@ -771,8 +918,8 @@ export class GameScreen {
     R.i++;
     if (R.i >= R.beats.length) { this.endReplay(); return; }
     const beat = R.beats[R.i];
-    R.t0 = performance.now();
-    R.applied = false;
+    R.prog = 0;
+    R.last = performance.now();
     R.moving.clear();
     const st = this.st;
     const live = () => [...R.fleets.values()].filter(f => f.alpha > 0);
@@ -785,11 +932,11 @@ export class GameScreen {
         case 'pulse': R.pulse = e.pulse; this.banner(`PULSE ${roman(e.pulse)}`); break;
         case 'move': {
           let f = R.fleets.get(e.fleet);
-          if (!f) { f = { id: e.fleet, owner: e.owner, ships: e.ships, region: e.from, alpha: 1, name: this.fleet(e.fleet)?.name ?? 'fleet' }; R.fleets.set(e.fleet, f); R.startLayout.set(f.id, st.regions[e.from].site); }
+          if (!f) { f = { id: e.fleet, owner: e.owner, ships: e.ships, region: e.from, alpha: 1, name: this.fleet(e.fleet)?.name ?? 'fleet' }; R.fleets.set(e.fleet, f); if (st.regions[e.from]) R.startLayout.set(f.id, st.regions[e.from].site); }
           f.region = e.to; R.moving.add(e.fleet);
           break;
         }
-        case 'retreat': { const f = R.fleets.get(e.fleet); if (f) { f.region = e.to; R.moving.add(e.fleet); } break; }
+        case 'retreat': { const f = R.fleets.get(e.fleet); if (f) { f.region = e.to; f.alpha = 1; R.moving.add(e.fleet); } break; }
         case 'battle': this.fx.push({ kind: 'battle', pos: st.regions[e.region].site, color: '#ffb36b', t0: now, dur: 1100 * 1.3, text: e.name }); break;
         case 'clash': {
           const a = st.regions[e.a].site, b = st.regions[e.b].site;
@@ -820,21 +967,25 @@ export class GameScreen {
     }
     R.endLayout = regionLayout(st, live().map(f => ({ id: f.id, region: f.region })), this.map.px(1));
     this.el.ticker.innerHTML = text.filter(Boolean).slice(0, 3).join(' · ') || this.el.ticker.innerHTML;
-    this.el.ticker.querySelectorAll<HTMLElement>('[data-battle]').forEach(x => x.addEventListener('click', () => this.openBattle(Number(x.dataset.battle))));
+    // these are <a href="#">: without preventDefault the hash change would route back to the lobby
+    this.el.ticker.querySelectorAll<HTMLElement>('[data-battle]').forEach(x => x.addEventListener('click', ev => { ev.preventDefault(); this.openBattle(Number(x.dataset.battle)); }));
     this.renderBottom();
   }
 
   endReplay() {
     if (!this.replay) return;
     const res = this.replay.result;
+    const wasPreview = this.replay.preview;
     this.replay = null;
     this.fx = [];
-    if (this.previewing) { this.previewing = false; this.el.ticker.innerHTML = '<span class="faint">Preview finished. Your plan is unchanged.</span>'; this.renderAll(); return; }
+    this.previewing = false;
+    if (wasPreview) { this.el.ticker.innerHTML = '<span class="faint">Preview finished. Your plan is unchanged.</span>'; this.renderAll(); return; }
     const n = res.battles.length;
     this.el.ticker.innerHTML = `<b>Turn ${res.turn} resolved.</b> ${n ? `${n} battle${n > 1 ? 's' : ''}. <a href="#" data-tabch>See the Chronicle</a> to watch them.` : 'No battles.'} ${res.signals.length ? `${res.signals.length} intel signals.` : ''}`;
     this.el.ticker.querySelector('[data-tabch]')?.addEventListener('click', e => { e.preventDefault(); this.tab = 'chronicle'; this.renderTabs(); this.renderTab(); });
     this.renderAll();
-    if (this.autoPlay && this.src instanceof LocalSource && this.st.winner === null) setTimeout(() => { if (this.autoPlay && !this.destroyed) (this.src as LocalSource).advance(); }, 900);
+    this.maybeShowVictory();
+    if (this.autoPlay && this.src instanceof LocalSource && this.st.winner === null) this.later(() => { if (this.autoPlay && !this.replay) (this.src as LocalSource).advance(); }, 900);
   }
 
   banner(t: string) {
@@ -845,9 +996,10 @@ export class GameScreen {
   }
 
   openBattle(id: number) {
-    const rep = (this.previewing ? undefined : this.st.last?.battles.find(b => b.id === id)) ?? this.replay?.result.battles.find(b => b.id === id);
+    // the replay being shown (preview, or an older turn from the menu) owns its battle reports
+    const rep = this.replay?.result.battles.find(b => b.id === id) ?? (this.replay?.preview ? undefined : this.st.last?.battles.find(b => b.id === id));
     if (!rep) { toast('Battle report not available.'); return; }
-    if (this.replay) this.replay.playing = false;
+    if (this.replay?.playing) this.togglePause();
     openBattleViewer(rep, {
       rules: this.st.rules, you: this.you,
       playerName: o => o === -1 ? (rep.sides.some(x => x.owner === -1 && x.fleets.length) ? 'The Warden' : 'Neutral garrison') : this.pname(o), playerColor: o => this.color(o), regionName: id => this.st.regions[id]?.name ?? '?',
@@ -869,13 +1021,15 @@ export class GameScreen {
     if (this.replay) {
       const R = this.replay;
       const beat = R.beats[R.i];
+      // clamp dt so a backgrounded tab doesn't skip a whole beat on return
+      const dt = Math.min(250, Math.max(0, now - R.last));
+      R.last = now;
       if (R.playing && beat) {
-        const t = (now - R.t0) * R.speed / beat.dur;
-        if (t >= 1) this.nextBeat();
-      } else if (!R.playing) R.t0 = now - ((now - R.t0) % 1e9) * 0; // frozen
+        R.prog += dt * R.speed / beat.dur;
+        if (R.prog >= 1) this.nextBeat();
+      }
       if (this.replay) {
-        const beat2 = this.replay.beats[this.replay.i];
-        const t = Math.min(1, ((now - this.replay.t0) * this.replay.speed) / (beat2?.dur ?? 1));
+        const t = Math.min(1, this.replay.prog);
         const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
         owners = this.replay.owners;
         for (const f of this.replay.fleets.values()) {
@@ -888,31 +1042,42 @@ export class GameScreen {
         }
       }
     } else {
-      const lay = regionLayout(st, st.fleets, this.map.px(1));
-      fleets = st.fleets.map(f => ({ id: f.id, owner: f.owner, ships: f.ships.length, pos: lay.get(f.id)!, alpha: 1, name: f.name, fortified: f.fortified, selected: this.sel?.kind === 'fleet' && this.sel.id === f.id }));
+      const lay = this.fleetLayout();
+      fleets = st.fleets.map(f => ({ id: f.id, owner: f.owner, ships: f.ships.length, pos: lay.get(f.id) ?? st.regions[f.region].site, alpha: 1, name: f.name, fortified: f.fortified, selected: this.sel?.kind === 'fleet' && this.sel.id === f.id }));
     }
-    // highlights for modes
-    const highlight = new Map<number, string>();
+    // highlights for modes (memoized: path searches over every region are too costly to redo each frame)
+    let highlight = new Map<number, string>();
     let pathPreview: { pts: Pt[]; ok: boolean } | null = null;
     if (this.mode && !this.replay && this.you !== null) {
       const k = this.nextSlot() ?? 0;
-      if (this.mode.type === 'move' || this.mode.type === 'seize') {
-        const f = this.fleet(this.mode.fleet);
-        if (f) {
-          const from = this.projected(k).get(f.id) ?? f.region;
-          if (this.mode.type === 'seize') {
-            for (const n of [from, ...st.regions[from].neighbors]) if (st.regions[n].owner !== this.you) highlight.set(n, '#ff5d7a');
-          } else {
-            const sp = fleetSpeed(st, f) + (this.mode.overdrive ? st.rules.overdrive.speedBonus : 0);
-            for (const r of st.regions) { const p = findPath(st, from, r.id); if (p && p.length && p.length <= sp) highlight.set(r.id, '#6dffb0'); }
-            if (this.hoverRegion !== null && this.hoverRegion !== from) {
-              const p = this.safePath(from, this.hoverRegion);
-              if (p) { const stop = this.blockedAt(p); pathPreview = { pts: [from, ...p].map(x => st.regions[x].site), ok: p.length <= sp && (stop === null || stop === p[p.length - 1]) }; }
+      const hk = `${this.objKey(st)}|${this.planVersion}|${k}|${JSON.stringify(this.mode)}`;
+      if (this.memo.hlKey !== hk) {
+        const hl = new Map<number, string>();
+        if (this.mode.type === 'move' || this.mode.type === 'seize') {
+          const f = this.fleet(this.mode.fleet);
+          if (f) {
+            const from = this.projected(k).get(f.id) ?? f.region;
+            if (this.mode.type === 'seize') {
+              for (const n of [from, ...st.regions[from].neighbors]) if (st.regions[n].owner !== this.you) hl.set(n, '#ff5d7a');
+            } else {
+              const sp = fleetSpeed(st, f) + (this.mode.overdrive ? st.rules.overdrive.speedBonus : 0);
+              for (const [rid, d] of hops(st, from, sp)) if (d > 0) hl.set(rid, '#6dffb0');
             }
           }
+        } else if (this.mode.type === 'target') {
+          for (const r of st.regions) if (!validateOrder(st, this.you, { type: this.mode.order, target: r.id } as Order)) hl.set(r.id, '#b78bff');
         }
-      } else if (this.mode.type === 'target') {
-        for (const r of st.regions) if (!validateOrder(st, this.you, { type: this.mode.order, target: r.id } as Order)) highlight.set(r.id, '#b78bff');
+        this.memo.hlKey = hk; this.memo.hl = hl;
+      }
+      highlight = this.memo.hl!;
+      if (this.mode.type === 'move' && this.hoverRegion !== null) {
+        const f = this.fleet(this.mode.fleet);
+        const from = f ? this.projected(k).get(f.id) ?? f.region : null;
+        if (f && from !== null && this.hoverRegion !== from) {
+          const sp = fleetSpeed(st, f) + (this.mode.overdrive ? st.rules.overdrive.speedBonus : 0);
+          const p = this.safePath(from, this.hoverRegion);
+          if (p && p.length) { const stop = this.blockedAt(p); pathPreview = { pts: [from, ...p].map(x => st.regions[x].site), ok: p.length <= sp && (stop === null || stop === p[p.length - 1]) }; }
+        }
       }
     }
     // planned order arrows
@@ -925,16 +1090,16 @@ export class GameScreen {
         if (o.type === 'move') {
           let from = pos.get(o.fleet);
           if (from === undefined) return;
-          for (const r of o.path) { plannedArrows.push({ from: st.regions[from].site, to: st.regions[r].site, label: r === o.path[o.path.length - 1] ? roman(i + 1) : '', color: col, kind: 'move' }); from = r; }
+          for (const r of o.path) { if (!st.regions[r] || !st.regions[from]) break; plannedArrows.push({ from: st.regions[from].site, to: st.regions[r].site, label: r === o.path[o.path.length - 1] ? roman(i + 1) : '', color: col, kind: 'move' }); from = r; }
         } else if (o.type === 'seize') {
           const from = pos.get(o.fleet);
           if (from === undefined) return;
-          if (from !== o.target) plannedArrows.push({ from: st.regions[from].site, to: st.regions[o.target].site, label: roman(i + 1), color: '#ff5d7a', kind: 'seize' });
+          if (from !== o.target && st.regions[o.target]) plannedArrows.push({ from: st.regions[from].site, to: st.regions[o.target].site, label: roman(i + 1), color: '#ff5d7a', kind: 'seize' });
         }
       });
     }
     this.map.draw({
-      state: st, you: this.you, visible: new Set(this.src.view.visible), owners, fleets,
+      state: st, you: this.you, visible: this.visibleSet(), owners, fleets,
       selectedRegion: this.sel?.kind === 'region' ? this.sel.id : null, hoverRegion: this.hoverRegion,
       highlight, plannedArrows, pathPreview,
       signals: this.replay ? [] : this.st.last?.signals ?? [], showSignals: this.showSignals,
@@ -957,32 +1122,63 @@ export class GameScreen {
     } else if (!this.mode) { hint.classList.add('hidden'); hint.dataset.key = ''; }
   }
 
-  // ================================================================== input
-  onResize = () => { this.map.resize(); };
-  onKey = (e: KeyboardEvent) => {
-    if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA' || (e.target as HTMLElement)?.tagName === 'SELECT') return;
-    if (document.querySelector('.bv-overlay, .overlay')) return;
-    if (e.key === 'Escape') { if (this.mode) this.mode = null; else if (this.targetSlot !== null) this.targetSlot = null; else this.sel = null; this.renderAll(); }
-    if (e.key === ' ' && this.replay) { this.replay.playing = !this.replay.playing; this.renderBottom(); e.preventDefault(); }
-    if (e.key === 'Enter' && e.ctrlKey) this.submit();
-    if (/^[1-9]$/.test(e.key)) { const i = Number(e.key) - 1; if (i < this.plan.orders.length) { this.targetSlot = this.targetSlot === i ? null : i; this.renderTab(); } }
-    if (this.sel?.kind === 'fleet' && this.fleet(this.sel.id)?.owner === this.you) {
-      if (e.key === 'm') this.action('move', {});
-      if (e.key === 's') this.action('seize', {});
-      if (e.key === 'f') this.action('fortify', {});
+  objKey(o: object): number { let v = objIds.get(o); if (v === undefined) { v = nextObjId++; objIds.set(o, v); } return v; }
+  visibleSet(): Set<number> {
+    const v = this.src.view.visible;
+    if (this.memo.visSrc !== v) { this.memo.visSrc = v; this.memo.vis = new Set(v); }
+    return this.memo.vis!;
+  }
+  /** Token positions of the current fleets (memoized per state and zoom). */
+  fleetLayout(): Map<number, Pt> {
+    const px = this.map.px(1);
+    if (this.memo.laySrc !== this.st.fleets || this.memo.layPx !== px) {
+      this.memo.laySrc = this.st.fleets; this.memo.layPx = px;
+      this.memo.lay = regionLayout(this.st, this.st.fleets, px);
     }
-    if (e.key === 'i') { this.showSignals = !this.showSignals; }
-    if (e.key === 'p') this.toolbar('panel');
-    if (e.key === 'h' || e.key === '?') this.toolbar('help');
-    if (e.key === 'r') this.toolbar('replay');
-    if (e.key === 'Shift' && this.mode?.type === 'move') this.mode.overdrive = true;
+    return this.memo.lay!;
+  }
+
+  // ================================================================== input
+  onResize = () => {
+    if (this.destroyed) return;
+    this.map.resize();
+    if (!this.map.fitted && this.map.w > 0) this.map.fit(this.st, this.you !== null ? this.st.regions[this.st.players[this.you]?.capital]?.site : undefined);
   };
+  onKey = (e: KeyboardEvent) => {
+    if (this.destroyed || e.defaultPrevented) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+    if (this.curtain || document.querySelector('.bv-overlay, .overlay')) return;
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.submit(); return; }
+    // leave browser shortcuts (Ctrl+R, Ctrl+F, Cmd+P…) alone
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === 'Shift') { if (this.mode?.type === 'move') this.mode.overdrive = true; return; }
+    // a focused button activates on Space/Enter: don't double-handle
+    if ((e.key === ' ' || e.key === 'Enter') && t?.tagName === 'BUTTON') return;
+    if (e.key === 'Escape') { if (this.mode) this.mode = null; else if (this.targetSlot !== null) this.targetSlot = null; else this.sel = null; this.renderAll(); return; }
+    if (e.key === ' ' && this.replay) { this.togglePause(); e.preventDefault(); return; }
+    if (e.repeat) return;
+    const k = e.key.toLowerCase();
+    if (/^[1-9]$/.test(k) && this.canPlan && !this.replay) { const i = Number(k) - 1; if (i < this.plan.orders.length) { this.targetSlot = this.targetSlot === i ? null : i; this.renderTab(); } return; }
+    if (this.sel?.kind === 'fleet' && this.fleet(this.sel.id)?.owner === this.you && !this.replay) {
+      if (k === 'm') { this.action('move', {}); return; }
+      if (k === 's') { this.action('seize', {}); return; }
+      if (k === 'f') { this.action('fortify', {}); return; }
+    }
+    if (k === 'i') this.toolbar('signals');
+    else if (k === 'p') this.toolbar('panel');
+    else if (k === 'h' || e.key === '?') this.toolbar('help');
+    else if (k === 'r') this.toolbar('replay');
+  };
+  onKeyUp = (e: KeyboardEvent) => { if (e.key === 'Shift' && this.mode?.type === 'move') this.mode.overdrive = this.odSticky; };
+  onBlur = () => { this.pointers.clear(); this.drag = null; this.pinch = null; };
 
   bindInput() {
     const c = this.el.canvas;
-    window.addEventListener('keyup', e => { if (e.key === 'Shift' && this.mode?.type === 'move') this.mode.overdrive = false; });
     c.addEventListener('pointerdown', e => {
-      c.setPointerCapture(e.pointerId);
+      // only the primary mouse button pans/clicks (right-click cancels via contextmenu)
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      try { c.setPointerCapture(e.pointerId); } catch { /* */ }
       this.pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
       if (this.pointers.size === 2) {
         const [a, b] = [...this.pointers.values()];
@@ -994,7 +1190,12 @@ export class GameScreen {
       if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
       if (this.pinch && this.pointers.size === 2) {
         const [a, b] = [...this.pointers.values()];
-        this.map.cam.z = clampZ(this.pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / this.pinch.d);
+        // zoom about the midpoint of the two fingers
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        const before = this.map.toWorld(mx, my);
+        this.map.cam.z = clampZ(this.pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / Math.max(1, this.pinch.d));
+        const after = this.map.toWorld(mx, my);
+        this.map.cam.x += before.x - after.x; this.map.cam.y += before.y - after.y;
         return;
       }
       if (this.drag) {
@@ -1002,6 +1203,7 @@ export class GameScreen {
         if (Math.abs(dx) + Math.abs(dy) > 4) this.drag.moved = true;
         if (this.drag.moved) { this.map.cam.x = this.drag.cx - dx / this.map.cam.z; this.map.cam.y = this.drag.cy - dy / this.map.cam.z; }
       }
+      if (e.pointerType === 'touch') return; // no hover on touch
       this.hoverRegion = this.map.regionAt(this.st, e.offsetX, e.offsetY);
       if (this.mode?.type === 'move') this.mode.overdrive = e.shiftKey || this.odSticky;
       this.tooltip(e);
@@ -1011,11 +1213,11 @@ export class GameScreen {
       if (this.pointers.size < 2) this.pinch = null;
       const d = this.drag;
       this.drag = null;
-      if (d && !d.moved && e.type === 'pointerup') this.click(e.offsetX, e.offsetY, e.shiftKey);
+      if (d && !d.moved && e.type === 'pointerup' && this.pointers.size === 0) this.click(e.offsetX, e.offsetY, e.shiftKey);
     };
     c.addEventListener('pointerup', up);
     c.addEventListener('pointercancel', up);
-    c.addEventListener('pointerleave', () => { this.el.tooltip.classList.add('hidden'); });
+    c.addEventListener('pointerleave', () => { this.el.tooltip.classList.add('hidden'); if (!this.drag) this.hoverRegion = null; });
     c.addEventListener('wheel', e => {
       e.preventDefault();
       const before = this.map.toWorld(e.offsetX, e.offsetY);
@@ -1027,8 +1229,8 @@ export class GameScreen {
   }
 
   currentFleetDraws(): FleetDraw[] {
-    const lay = regionLayout(this.st, this.st.fleets, this.map.px(1));
-    return this.st.fleets.map(f => ({ id: f.id, owner: f.owner, ships: f.ships.length, pos: lay.get(f.id)!, alpha: 1, name: f.name }));
+    const lay = this.fleetLayout();
+    return this.st.fleets.map(f => ({ id: f.id, owner: f.owner, ships: f.ships.length, pos: lay.get(f.id) ?? this.st.regions[f.region].site, alpha: 1, name: f.name }));
   }
 
   click(x: number, y: number, shift: boolean) {
@@ -1091,10 +1293,10 @@ export class GameScreen {
     let html = '';
     if (f) {
       const fl = this.fleet(f.id);
-      if (fl) html = `<b style="color:${this.color(fl.owner)}">${esc(fl.name)}</b><br>${esc(this.pname(fl.owner))} · ${fl.ships.length} ship${fl.ships.length === 1 ? '' : 's'} · power ${fleetPower(this.st, fl)}<br><span class="dim">${esc(fl.commander.name)}${fl.commander.traits.length ? ' · ' + fl.commander.traits.map(x => TRAITS[x]?.name ?? x).join(', ') : ''}</span>`;
+      if (fl) html = `<b style="color:${this.color(fl.owner)}">${esc(fl.name)}</b><br>${esc(this.pname(fl.owner))} · ${fl.ships.length} ship${fl.ships.length === 1 ? '' : 's'} · power ${fleetPower(this.st, fl)}<br><span class="dim">${esc(fl.commander.name)}${fl.commander.traits.length ? ' · ' + esc(fl.commander.traits.map(x => TRAITS[x]?.name ?? x).join(', ')) : ''}</span>`;
     } else if (this.hoverRegion !== null) {
       const r = this.st.regions[this.hoverRegion];
-      html = `<b style="color:${this.color(r.owner)}">${esc(r.name)}</b> <span class="dim">${r.kind}${r.feature !== 'none' ? ' · ' + r.feature : ''}</span><br>${esc(this.pname(r.owner))} · garrison ${r.garrison < 0 ? '?' : r.garrison}`;
+      html = `<b style="color:${this.color(r.owner)}">${esc(r.name)}</b> <span class="dim">${esc(r.kind)}${r.feature !== 'none' ? ' · ' + esc(r.feature) : ''}</span><br>${esc(this.pname(r.owner))} · garrison ${r.garrison < 0 ? '?' : r.garrison}`;
       if (this.mode?.type === 'seize') {
         const k = this.nextSlot() ?? 0;
         const fl = this.fleet(this.mode.fleet);
@@ -1172,6 +1374,29 @@ export class GameScreen {
 }
 
 // ---------------------------------------------------------------- helpers
+/** Games created by an older version lack newer rule groups: fill them in from the defaults so the UI (and a local sim) can't crash. */
+export function backfillRules(st: GameState) {
+  if (!st?.rules || (st.rules as { __filled?: boolean }).__filled) return;
+  const merged = mergeRules(defaultRules(), st.rules);
+  Object.defineProperty(merged, '__filled', { value: true, enumerable: false });
+  st.rules = merged;
+}
+
+const objIds = new WeakMap<object, number>();
+let nextObjId = 1;
+
+/** BFS hop counts from `from`, up to `max` jumps. */
+function hops(st: GameState, from: number, max: number): Map<number, number> {
+  const d = new Map<number, number>([[from, 0]]);
+  let frontier = [from];
+  for (let k = 1; k <= max && frontier.length; k++) {
+    const next: number[] = [];
+    for (const c of frontier) for (const n of st.regions[c]?.neighbors ?? []) if (!d.has(n)) { d.set(n, k); next.push(n); }
+    frontier = next;
+  }
+  return d;
+}
+
 function clampZ(z: number) { return Math.max(0.12, Math.min(3, z)); }
 
 function glyph(cls: string): string {
@@ -1185,7 +1410,7 @@ export function eventText(st: GameState, e: GameEvent, you: number | null): stri
   switch (e.k) {
     case 'pulse': return `<b>Pulse ${roman(e.pulse)}</b>`;
     case 'move': return e.guard ? `${pn(e.owner)} guard ${fn(e.fleet)} rushes to ${rn(e.to)}` : `${pn(e.owner)} ${fn(e.fleet)} → ${rn(e.to)}`;
-    case 'blocked': return `${pn(e.owner)} ${fn(e.fleet)} stopped at ${rn(e.at)} (${e.reason})`;
+    case 'blocked': return `${pn(e.owner)} ${fn(e.fleet)} stopped at ${rn(e.at)} (${esc(e.reason)})`;
     case 'clash': return `Fleets clash on the ${rn(e.a)}–${rn(e.b)} border!`;
     case 'battle': return `<a href="#" data-battle="${e.battle}">⚔ ${esc(e.name)}</a>`;
     case 'retreat': return `${pn(e.owner)} ${fn(e.fleet)} retreats to ${rn(e.to)}`;

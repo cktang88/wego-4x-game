@@ -32,6 +32,9 @@ export class MapRenderer {
   cam = { x: 0, y: 0, z: 0.4 };
   w = 0; h = 0; dpr = 1;
   private stars: HTMLCanvasElement | null = null;
+  private starPattern: CanvasPattern | null = null;
+  private bgCanvas: HTMLCanvasElement | null = null;
+  private haze: { c: HTMLCanvasElement; x: number; y: number; w: number; h: number } | null = null;
   private asteroidCache = new Map<number, Pt[]>();
   private nebulaBlobs: { p: Pt; r: number; c: string }[] = [];
   private seed = -1;
@@ -40,15 +43,22 @@ export class MapRenderer {
 
   constructor(public canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
+    // labels are cached in the static layer: redraw once web fonts arrive
+    document.fonts?.ready.then(() => this.invalidate()).catch(() => { /* */ });
   }
 
   resize() {
     const r = this.canvas.getBoundingClientRect();
-    this.dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
+    if (W === this.canvas.width && H === this.canvas.height && dpr === this.dpr && r.width === this.w && r.height === this.h) return;
+    this.dpr = dpr;
     this.w = r.width; this.h = r.height;
-    this.canvas.width = Math.round(r.width * this.dpr);
-    this.canvas.height = Math.round(r.height * this.dpr);
+    this.canvas.width = W;
+    this.canvas.height = H;
     this.stars = null;
+    this.bgCanvas = null;
+    this.layerKey = '';
   }
 
   fit(state: GameState, focus?: Pt) {
@@ -86,20 +96,77 @@ export class MapRenderer {
   /** Screen-constant size in world units. */
   px(n: number) { return n / this.cam.z; }
 
+  /** Cached static layer (background, regions, borders, labels): redrawn only when its inputs change. */
+  private layer: HTMLCanvasElement | null = null;
+  private layerKey = '';
+  private ids = new WeakMap<object, number>();
+  private nextObjId = 1;
+  private objId(o: object): number { let v = this.ids.get(o); if (v === undefined) { v = this.nextObjId++; this.ids.set(o, v); } return v; }
+  /** Force the static layer to be rebuilt on the next draw (e.g. web fonts finished loading). */
+  invalidate() { this.layerKey = ''; }
+
   draw(I: DrawInput) {
-    const { ctx } = this;
     const st = I.state;
     if (this.seed !== st.seed) this.prepare(st);
+    const W = this.canvas.width, H = this.canvas.height;
+    if (!W || !H) return;
+    const key = [this.objId(st), this.objId(I.visible), I.you, I.owners.join(','), I.selectedRegion, I.hoverRegion,
+      this.cam.x, this.cam.y, this.cam.z, W, H, this.dpr].join('|');
+    if (!this.layer || this.layer.width !== W || this.layer.height !== H) {
+      this.layer = document.createElement('canvas');
+      this.layer.width = W; this.layer.height = H;
+      this.layerKey = '';
+    }
+    if (key !== this.layerKey) {
+      const main = this.ctx;
+      this.ctx = this.layer.getContext('2d')!;
+      try { this.drawStatic(I); } finally { this.ctx = main; }
+      this.layerKey = key;
+    }
+    const { ctx } = this;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(this.layer, 0, 0);
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    // ---------------------------------------------------------------- background
-    const bg = ctx.createRadialGradient(this.w * 0.5, this.h * 0.45, 0, this.w * 0.5, this.h * 0.5, Math.max(this.w, this.h) * 0.8);
-    bg.addColorStop(0, '#1a1030'); bg.addColorStop(0.6, '#0d0819'); bg.addColorStop(1, '#05030b');
-    ctx.fillStyle = bg; ctx.fillRect(0, 0, this.w, this.h);
-    if (!this.stars) this.stars = makeStars(this.w, this.h, st.seed);
     ctx.save();
-    const par = { x: -this.cam.x * this.cam.z * 0.05, y: -this.cam.y * this.cam.z * 0.05 };
-    for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) ctx.drawImage(this.stars, ((par.x % this.w) + ox * this.w), ((par.y % this.h) + oy * this.h), this.w, this.h);
+    ctx.translate(this.w / 2, this.h / 2);
+    ctx.scale(this.cam.z, this.cam.z);
+    ctx.translate(-this.cam.x, -this.cam.y);
+    // pulsing move/target highlights
+    if (I.highlight.size) {
+      const a = 0.13 + 0.06 * Math.sin(I.now / 250);
+      for (const [rid, col] of I.highlight) {
+        const r = st.regions[rid];
+        if (!r) continue;
+        path(ctx, r.poly); ctx.fillStyle = hexA(col, a); ctx.fill();
+      }
+    }
+    // animated parts of sites
+    for (const r of st.regions) this.drawSiteAnim(r, I, this.colorOf(st, I.owners[r.id]));
+    this.drawDynamic(I);
     ctx.restore();
+  }
+
+  private colorOf(st: GameState, o: number | null | undefined) { return o === null || o === undefined || o < 0 ? NEUTRAL_COLOR : st.players[o]?.color ?? NEUTRAL_COLOR; }
+
+  private drawStatic(I: DrawInput) {
+    const { ctx } = this;
+    const st = I.state;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    // ---------------------------------------------------------------- background (pre-rendered gradient + one star-pattern pass)
+    if (!this.stars || !this.bgCanvas) {
+      this.stars = makeStars(this.w, this.h, st.seed);
+      this.starPattern = ctx.createPattern(this.stars, 'repeat');
+      this.bgCanvas = makeBackdrop(this.w, this.h);
+    }
+    ctx.drawImage(this.bgCanvas, 0, 0, this.w, this.h);
+    if (this.starPattern) {
+      const par = { x: -this.cam.x * this.cam.z * 0.05, y: -this.cam.y * this.cam.z * 0.05 };
+      ctx.save();
+      ctx.translate(((par.x % this.w) + this.w) % this.w, ((par.y % this.h) + this.h) % this.h);
+      ctx.fillStyle = this.starPattern;
+      ctx.fillRect(-this.w, -this.h, this.w * 2, this.h * 2);
+      ctx.restore();
+    }
 
     // ---------------------------------------------------------------- world
     ctx.save();
@@ -107,20 +174,16 @@ export class MapRenderer {
     ctx.scale(this.cam.z, this.cam.z);
     ctx.translate(-this.cam.x, -this.cam.y);
 
-    // deep-space nebula haze
-    for (const b of this.nebulaBlobs) {
-      const g = ctx.createRadialGradient(b.p.x, b.p.y, 0, b.p.x, b.p.y, b.r);
-      g.addColorStop(0, b.c); g.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b.p.x, b.p.y, b.r, 0, TAU); ctx.fill();
-    }
+    // deep-space nebula haze: soft, so a low-resolution bake scaled up looks the same and costs one blit
+    if (this.haze) ctx.drawImage(this.haze.c, this.haze.x, this.haze.y, this.haze.w, this.haze.h);
 
-    const colorOf = (o: number | null | undefined) => (o === null || o === undefined || o < 0 ? NEUTRAL_COLOR : st.players[o]?.color ?? NEUTRAL_COLOR);
+    const colorOf = (o: number | null | undefined) => this.colorOf(st, o);
 
     // region fills
     for (const r of st.regions) {
       const owner = I.owners[r.id];
       path(ctx, r.poly);
-      ctx.fillStyle = owner === null ? 'rgba(40,30,70,0.30)' : hexA(colorOf(owner), 0.13);
+      ctx.fillStyle = owner === null || owner === undefined ? 'rgba(40,30,70,0.30)' : hexA(colorOf(owner), 0.13);
       ctx.fill();
       if (r.feature === 'nebula') {
         const g = ctx.createRadialGradient(r.centroid.x, r.centroid.y, 0, r.centroid.x, r.centroid.y, 260);
@@ -134,62 +197,22 @@ export class MapRenderer {
       if (r.kind === 'void') {
         ctx.fillStyle = 'rgba(0,0,0,0.25)'; path(ctx, r.poly); ctx.fill();
       }
-      if (I.highlight.has(r.id)) {
-        path(ctx, r.poly);
-        ctx.fillStyle = hexA(I.highlight.get(r.id)!, 0.13 + 0.06 * Math.sin(I.now / 250));
-        ctx.fill();
-      }
       if (I.hoverRegion === r.id) { path(ctx, r.poly); ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fill(); }
       if (I.you !== null && !I.visible.has(r.id)) { path(ctx, r.poly); ctx.fillStyle = 'rgba(3,2,8,0.42)'; ctx.fill(); }
     }
-
-    // wreckage: persistent scars of old battles
-    for (const r of st.regions) {
-      if (!r.wreckage) continue;
-      const rng = new Rng(hashString(`wreck${r.id}`));
-      ctx.fillStyle = 'rgba(255,170,120,0.25)';
-      const n = Math.min(40, r.wreckage * 3);
-      for (let i = 0; i < n; i++) {
-        const a = rng.next() * TAU, d = 30 + rng.next() * 70;
-        ctx.save(); ctx.translate(r.site.x + Math.cos(a) * d, r.site.y + Math.sin(a) * d); ctx.rotate(rng.next() * TAU);
-        ctx.fillRect(-3, -1, 6 + rng.next() * 4, 2); ctx.restore();
-      }
-    }
-
-    // neon inset borders (clip to region, stroke wide => inner half shows)
-    for (const r of st.regions) {
-      const owner = I.owners[r.id];
-      const c = colorOf(owner);
-      ctx.save();
-      path(ctx, r.poly); ctx.clip();
-      path(ctx, r.poly);
-      ctx.lineJoin = 'round';
-      if (owner !== null) {
-        ctx.strokeStyle = hexA(c, 0.85); ctx.lineWidth = 16; ctx.stroke();
-        ctx.strokeStyle = hexA(c, 0.25); ctx.lineWidth = 34; ctx.stroke();
-      } else {
-        ctx.strokeStyle = 'rgba(150,140,190,0.32)'; ctx.lineWidth = 9; ctx.stroke();
-      }
-      if (r.kind === 'crown' || r.kind === 'throne') {
-        ctx.setLineDash([14, 10]); ctx.strokeStyle = 'rgba(255,215,120,0.55)'; ctx.lineWidth = 26; ctx.stroke(); ctx.setLineDash([]);
-      }
-      ctx.restore();
-    }
-    // separating seams
-    ctx.strokeStyle = 'rgba(4,2,10,0.95)'; ctx.lineWidth = 3;
-    for (const r of st.regions) { path(ctx, r.poly); ctx.stroke(); }
-    if (I.selectedRegion !== null) {
-      const r = st.regions[I.selectedRegion];
-      ctx.save(); path(ctx, r.poly); ctx.clip(); path(ctx, r.poly);
-      ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 7; ctx.stroke(); ctx.restore();
-    }
-    // outer rim glow
-    // (drawn implicitly by region borders)
 
     // ---------------------------------------------------------------- sites & labels
     this.labelBoxes = [];
     const prio = (r: Region) => ({ throne: 0, crown: 1, home: 2, relic: 3, colony: 4, void: 5 })[r.kind];
     for (const r of st.regions.slice().sort((a, b) => prio(a) - prio(b))) this.drawSite(r, I, colorOf(I.owners[r.id]));
+    ctx.restore();
+  }
+
+  /** Everything that changes every frame: signals, planned orders, fleets, effects (world transform already set). */
+  private drawDynamic(I: DrawInput) {
+    const { ctx } = this;
+    const st = I.state;
+    const colorOf = (o: number | null | undefined) => this.colorOf(st, o);
 
     // ---------------------------------------------------------------- signals (intel)
     if (I.showSignals) {
@@ -244,15 +267,45 @@ export class MapRenderer {
         ctx.fillText(fx.text, fx.pos.x, fx.pos.y - this.px(36) - t * this.px(18));
       }
     }
-    ctx.restore();
+  }
+
+  private siteSize(r: Region) {
+    const k = this.px(1);
+    return (r.kind === 'throne' ? 15 : r.kind === 'home' ? 12 : r.kind === 'crown' ? 12 : r.kind === 'void' ? 3 : 7 + r.dev) * Math.max(1, Math.min(2.2, k * 1.6));
+  }
+
+  /** The animated parts of a site (rotating rings, the Warden's pulse): drawn every frame over the cached layer. */
+  private drawSiteAnim(r: Region, I: DrawInput, c: string) {
+    const { ctx } = this;
+    const p = r.site;
+    const t = I.now / 1000;
+    const k = this.px(1);
+    const size = this.siteSize(r);
+    ctx.lineWidth = Math.max(1.5, k * 1.8);
+    if (r.kind === 'throne') {
+      ctx.strokeStyle = '#ffe9a8';
+      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(p.x, p.y, size * (1.2 + i * 0.55), t * (i % 2 ? -0.4 : 0.3) + i, t * (i % 2 ? -0.4 : 0.3) + i + Math.PI * 1.4); ctx.stroke(); }
+      if (I.state.fleets.some(f => f.owner === -1)) {
+        ctx.strokeStyle = `rgba(220,120,255,${0.5 + 0.4 * Math.sin(t * 3)})`; ctx.lineWidth = k * 3;
+        ctx.beginPath(); ctx.arc(p.x, p.y, size * 3.2, 0, TAU); ctx.stroke();
+      }
+    } else if (r.kind === 'home') {
+      ctx.strokeStyle = hexA(c, 0.95);
+      ctx.beginPath(); ctx.arc(p.x, p.y, size * 1.8, t * 0.5, t * 0.5 + Math.PI * 1.5); ctx.stroke();
+    } else if (r.kind === 'relic' && r.relic === 'unclaimed') {
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.PI / 4 + t * 0.6);
+      ctx.strokeStyle = '#7ff7ff';
+      ctx.strokeRect(-size, -size, size * 2, size * 2);
+      ctx.fillStyle = 'rgba(127,247,255,0.5)'; ctx.fillRect(-size * 0.45, -size * 0.45, size * 0.9, size * 0.9);
+      ctx.restore();
+    }
   }
 
   private drawSite(r: Region, I: DrawInput, c: string) {
     const { ctx } = this;
     const p = r.site;
-    const t = I.now / 1000;
     const k = this.px(1);
-    const size = (r.kind === 'throne' ? 15 : r.kind === 'home' ? 12 : r.kind === 'crown' ? 12 : r.kind === 'void' ? 3 : 7 + r.dev) * Math.max(1, Math.min(2.2, k * 1.6));
+    const size = this.siteSize(r);
     // glow
     const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, size * 4);
     g.addColorStop(0, hexA(c, 0.55)); g.addColorStop(1, hexA(c, 0));
@@ -261,13 +314,7 @@ export class MapRenderer {
     if (r.kind === 'void') {
       ctx.fillStyle = 'rgba(200,200,255,0.5)'; ctx.beginPath(); ctx.arc(p.x, p.y, size, 0, TAU); ctx.fill();
     } else if (r.kind === 'throne') {
-      ctx.strokeStyle = '#ffe9a8';
-      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(p.x, p.y, size * (1.2 + i * 0.55), t * (i % 2 ? -0.4 : 0.3) + i, t * (i % 2 ? -0.4 : 0.3) + i + Math.PI * 1.4); ctx.stroke(); }
       star(ctx, p, size * 0.9, 8, '#fff6d8');
-      if (I.state.fleets.some(f => f.owner === -1)) {
-        ctx.strokeStyle = `rgba(220,120,255,${0.5 + 0.4 * Math.sin(t * 3)})`; ctx.lineWidth = k * 3;
-        ctx.beginPath(); ctx.arc(p.x, p.y, size * 3.2, 0, TAU); ctx.stroke();
-      }
     } else if (r.kind === 'crown') {
       ctx.strokeStyle = '#ffd86b';
       ctx.beginPath(); ctx.arc(p.x, p.y, size * 1.5, 0, TAU); ctx.stroke();
@@ -275,14 +322,15 @@ export class MapRenderer {
     } else if (r.kind === 'home') {
       ctx.strokeStyle = hexA(c, 0.95);
       ctx.beginPath(); ctx.arc(p.x, p.y, size * 1.25, 0, TAU); ctx.stroke();
-      ctx.beginPath(); ctx.arc(p.x, p.y, size * 1.8, t * 0.5, t * 0.5 + Math.PI * 1.5); ctx.stroke();
       planet(ctx, p, size * 0.8, c);
     } else if (r.kind === 'relic') {
-      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.PI / 4 + (r.relic === 'unclaimed' ? t * 0.6 : 0));
-      ctx.strokeStyle = r.relic === 'unclaimed' ? '#7ff7ff' : 'rgba(127,247,255,0.35)';
-      ctx.strokeRect(-size, -size, size * 2, size * 2);
-      ctx.fillStyle = r.relic === 'unclaimed' ? 'rgba(127,247,255,0.5)' : 'rgba(127,247,255,0.15)'; ctx.fillRect(-size * 0.45, -size * 0.45, size * 0.9, size * 0.9);
-      ctx.restore();
+      if (r.relic !== 'unclaimed') {
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.PI / 4);
+        ctx.strokeStyle = 'rgba(127,247,255,0.35)';
+        ctx.strokeRect(-size, -size, size * 2, size * 2);
+        ctx.fillStyle = 'rgba(127,247,255,0.15)'; ctx.fillRect(-size * 0.45, -size * 0.45, size * 0.9, size * 0.9);
+        ctx.restore();
+      }
     } else {
       planet(ctx, p, size, c);
     }
@@ -420,6 +468,21 @@ export class MapRenderer {
     const rng = new Rng(hashString(`neb${st.seed}`));
     const cols = ['rgba(120,50,200,0.22)', 'rgba(40,90,200,0.18)', 'rgba(200,50,140,0.14)', 'rgba(60,160,190,0.12)'];
     this.nebulaBlobs = Array.from({ length: 14 }, () => ({ p: { x: (rng.next() - 0.5) * 2600, y: (rng.next() - 0.5) * 2600 }, r: 250 + rng.next() * 600, c: rng.pick(cols) }));
+    this.stars = null;
+    // bake the haze at 1px per 6 world units
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const b of this.nebulaBlobs) { minX = Math.min(minX, b.p.x - b.r); minY = Math.min(minY, b.p.y - b.r); maxX = Math.max(maxX, b.p.x + b.r); maxY = Math.max(maxY, b.p.y + b.r); }
+    const S = 6;
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.ceil((maxX - minX) / S)); c.height = Math.max(1, Math.ceil((maxY - minY) / S));
+    const x = c.getContext('2d')!;
+    x.scale(1 / S, 1 / S); x.translate(-minX, -minY);
+    for (const b of this.nebulaBlobs) {
+      const g = x.createRadialGradient(b.p.x, b.p.y, 0, b.p.x, b.p.y, b.r);
+      g.addColorStop(0, b.c); g.addColorStop(1, 'rgba(0,0,0,0)');
+      x.fillStyle = g; x.beginPath(); x.arc(b.p.x, b.p.y, b.r, 0, TAU); x.fill();
+    }
+    this.haze = { c, x: minX, y: minY, w: c.width * S, h: c.height * S };
   }
 }
 
@@ -489,6 +552,17 @@ function crown(ctx: CanvasRenderingContext2D, p: Pt, r: number, c: string) {
   ctx.moveTo(p.x - r, p.y + r * 0.6); ctx.lineTo(p.x - r, p.y - r * 0.3); ctx.lineTo(p.x - r * 0.5, p.y + r * 0.1);
   ctx.lineTo(p.x, p.y - r * 0.8); ctx.lineTo(p.x + r * 0.5, p.y + r * 0.1); ctx.lineTo(p.x + r, p.y - r * 0.3); ctx.lineTo(p.x + r, p.y + r * 0.6);
   ctx.closePath(); ctx.fill();
+}
+
+function makeBackdrop(w: number, h: number): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w / 2)); c.height = Math.max(1, Math.round(h / 2));
+  const x = c.getContext('2d')!;
+  x.scale(0.5, 0.5);
+  const bg = x.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.5, Math.max(w, h) * 0.8);
+  bg.addColorStop(0, '#1a1030'); bg.addColorStop(0.6, '#0d0819'); bg.addColorStop(1, '#05030b');
+  x.fillStyle = bg; x.fillRect(0, 0, w, h);
+  return c;
 }
 
 function makeStars(w: number, h: number, seed: number): HTMLCanvasElement {

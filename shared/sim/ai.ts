@@ -23,10 +23,10 @@ interface Cand { o: Order; v: number; tag: string }
 type Level = 'novice' | 'standard' | 'expert';
 
 export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submission {
-  const lvl = level ?? s0.players[pid].aiLevel;
   const sub = emptySubmission(s0);
   const me = s0.players[pid];
-  if (me.eliminated) return sub;
+  if (!me || me.eliminated) return sub;
+  const lvl = level ?? me.aiLevel;
   const rng = new Rng((s0.seed ^ (s0.turn * 7919) ^ (pid * 104729)) >>> 0);
   const s = perceive(s0, pid);
   const R = s.rules;
@@ -36,7 +36,6 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
   const edictsNow = s.edicts.filter(e => e.scoresTurn === s.turn).map(e => e.id); // judged at the end of THIS turn
   const myFleets = () => s.fleets.filter(f => f.owner === pid && f.ships.length && f.id >= 0);
   const warden = () => s.fleets.find(f => f.owner === -1 && f.ships.length);
-  const throneId = s.regions.find(r => r.kind === 'throne')!.id;
   const crowns = s.regions.filter(r => r.kind === 'crown');
   const myCrowns = crowns.filter(r => r.owner === pid).length;
   const simCache = new Map<string, SimResult>();
@@ -706,6 +705,8 @@ export function predictAssault(s: GameState, pid: PlayerId, fleetIds: number[], 
 /** The AI's view of the world: fleets it can't see are removed (unless cheatVision). */
 function perceive(s0: GameState, pid: PlayerId): GameState {
   const s = structuredClone({ ...s0, last: null, log: [] }) as GameState;
+  // a fogged (viewFor) state hides rival garrisons as -1: plan against the likely strength instead
+  for (const r of s.regions) if (!(r.garrison >= 0)) r.garrison = r.owner === null ? Math.max(0, r.baseGarrison ?? 0) : maxGarrison(s, r.id);
   if (s.rules.ai.cheatVision) return s;
   const cov = coverage(s, pid);
   s.fleets = s.fleets.filter(f => f.owner === pid || seesFleetsIn(s, pid, f.region, cov));

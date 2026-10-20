@@ -1,6 +1,6 @@
 // Entry point + lobby. Routes:  #/  lobby · #/local  local game · #/g/<id>[/<token>]  online game
 import './style.css';
-import { GameScreen } from './game.ts';
+import { GameScreen, backfillRules } from './game.ts';
 import { LocalSource, RemoteSource, api, tokens, type LocalSave } from './net.ts';
 import { esc, toast, overlay } from './ui/dom.ts';
 import { openTweaks, loadOverrides } from './ui/tweaks.ts';
@@ -8,10 +8,20 @@ import type { GameMeta } from '../../shared/protocol.ts';
 
 const app = document.getElementById('app')!;
 let screen: GameScreen | null = null;
+/** Bumped on every route change so async work from a previous route can tell it is stale. */
+let routeGen = 0;
+/** A remote source still connecting (closed if the user navigates away first). */
+let pending: RemoteSource | null = null;
 
 function route() {
+  routeGen++;
   screen?.destroy();
   screen = null;
+  pending?.close();
+  pending = null;
+  // modal dialogs, battle viewers and toasts live on <body>: don't let them leak into the next screen
+  document.querySelectorAll('.overlay, .bv-overlay, .toast, .tooltip').forEach(e => { if (!app.contains(e)) e.remove(); });
+  document.title = 'Three Crowns';
   app.innerHTML = '';
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   if (parts[0] === 'local') return openLocal('tc.local.autosave');
@@ -24,8 +34,26 @@ window.addEventListener('hashchange', route);
 function openLocal(key: string) {
   const raw = localStorage.getItem(key);
   if (!raw) { location.hash = '#/'; return; }
-  const src = new LocalSource(JSON.parse(raw) as LocalSave, key);
-  screen = new GameScreen(app, src, () => (location.hash = '#/'));
+  let save: LocalSave;
+  try {
+    save = JSON.parse(raw) as LocalSave;
+    if (!save?.state?.regions || !Array.isArray(save.seats)) throw new Error('bad save');
+    save.pending ??= {}; save.history ??= []; save.current ??= 0;
+    backfillRules(save.state);
+  } catch {
+    toast('That saved game could not be read.');
+    location.hash = '#/';
+    return;
+  }
+  try {
+    const src = new LocalSource(save, key);
+    screen = new GameScreen(app, src, () => (location.hash = '#/'));
+  } catch (e) {
+    console.error(e);
+    screen?.destroy(); screen = null;
+    app.innerHTML = `<div class="lobby"><div class="lobby-inner"><p class="bad">This saved game could not be opened (${esc(String(e))}).</p><a href="#/">Back to lobby</a></div></div>`;
+    return;
+  }
   expose();
 }
 
@@ -38,18 +66,23 @@ function expose() {
 }
 
 async function openRemote(id: string, tokenFromUrl?: string) {
+  const gen = routeGen;
   if (tokenFromUrl) {
     // seat links carry the token; remember it and clean the URL
     const seat = await seatFromToken(id, tokenFromUrl);
+    if (gen !== routeGen) return;
     tokens.set(id, { token: tokenFromUrl, seat });
-    history.replaceState(null, '', `#/g/${id}`);
+    history.replaceState(null, '', `#/g/${encodeURIComponent(id)}`);
   }
   const tk = tokens.get(id);
   app.innerHTML = `<div class="lobby"><div class="lobby-inner"><p class="dim">Connecting to game ${esc(id)}…</p></div></div>`;
   const src = new RemoteSource(id, tk?.token ?? null);
-  const timeout = setTimeout(() => { if (!screen) app.innerHTML = `<div class="lobby"><div class="lobby-inner"><p class="bad">Could not reach the game server. Is it running? (<code>npm run server</code>)</p><a href="#/">Back</a></div></div>`; }, 6000);
+  pending = src;
+  const timeout = setTimeout(() => { if (gen === routeGen && !screen) app.innerHTML = `<div class="lobby"><div class="lobby-inner"><p class="bad">Could not reach the game server. Is it running? (<code>npm run server</code>)</p><a href="#/">Back</a></div></div>`; }, 6000);
   await src.waitReady();
   clearTimeout(timeout);
+  if (gen !== routeGen) { src.close(); return; }   // the user navigated away while connecting
+  pending = null;
   app.innerHTML = '';
   if (!tk) {
     // not seated: offer to join an open seat, else spectate
@@ -65,7 +98,7 @@ async function openRemote(id: string, tokenFromUrl?: string) {
 
 async function seatFromToken(id: string, token: string): Promise<number> {
   try {
-    const r = await (await fetch(`/api/games/${id}/view?token=${token}`)).json();
+    const r = await (await fetch(`/api/games/${encodeURIComponent(id)}/view?token=${encodeURIComponent(token)}`)).json();
     return r.view?.you ?? -1;
   } catch { return -1; }
 }
@@ -74,8 +107,8 @@ function joinDialog(meta: GameMeta) {
   app.innerHTML = `<div class="lobby"><div class="lobby-inner"><div class="card" style="max-width:520px;margin:40px auto">
     <h2>Join “${esc(meta.name)}”</h2>
     <div class="form"><span>Your name</span><input data-name value="${esc(localStorage.getItem('tc.name') ?? '')}" placeholder="Commander"></div>
-    <div class="col" style="margin-top:12px">${meta.seats.map(s => `<div class="row"><span class="grow">${esc(s.name)} <span class="faint">${s.kind === 'ai' ? `AI (${s.aiLevel})` : s.claimed ? 'taken' : 'open'}</span></span>
-      ${s.kind === 'human' && !s.claimed ? `<button class="primary" data-seat="${s.seat}">Take this seat</button>` : ''}</div>`).join('')}</div>
+    <div class="col" style="margin-top:12px">${meta.seats.map(s => `<div class="row"><span class="grow">${esc(s.name)} <span class="faint">${s.kind === 'ai' ? `AI (${esc(s.aiLevel)})` : s.claimed ? 'taken' : 'open'}</span></span>
+      ${s.kind === 'human' && !s.claimed ? `<button class="primary" data-seat="${Number(s.seat)}">Take this seat</button>` : ''}</div>`).join('')}</div>
     <div class="row" style="margin-top:14px"><button data-spec>Spectate instead</button><a href="#/">Back to lobby</a></div></div></div></div>`;
   app.querySelectorAll<HTMLButtonElement>('[data-seat]').forEach(b => b.addEventListener('click', async () => {
     const name = app.querySelector<HTMLInputElement>('[data-name]')!.value.trim();
@@ -87,9 +120,17 @@ function joinDialog(meta: GameMeta) {
     } catch (e: any) { toast(e.message); }
   }));
   app.querySelector('[data-spec]')!.addEventListener('click', () => {
+    const gen = routeGen;
     const src = new RemoteSource(meta.id, null);
-    src.waitReady().then(() => { app.innerHTML = ''; screen = new GameScreen(app, src, () => (location.hash = '#/')); });
-  });
+    pending = src;
+    src.waitReady().then(() => {
+      if (gen !== routeGen || screen) { src.close(); return; }
+      pending = null;
+      app.innerHTML = '';
+      screen = new GameScreen(app, src, () => (location.hash = '#/'));
+      expose();
+    });
+  }, { once: true });
 }
 
 // ===================================================================== lobby
@@ -155,8 +196,13 @@ function lobby() {
     const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json,application/json';
     inp.onchange = async () => {
       const f = inp.files?.[0]; if (!f) return;
-      try { const save = JSON.parse(await f.text()); if (!save.state) throw new Error('not a save'); localStorage.setItem('tc.local.autosave', JSON.stringify(save)); location.hash = '#/local'; route(); }
-      catch { toast('That file is not a Three Crowns save.'); }
+      try {
+        const save = JSON.parse(await f.text());
+        if (!save?.state?.regions || !Array.isArray(save.seats)) throw new Error('not a save');
+        localStorage.setItem('tc.local.autosave', JSON.stringify(save));
+        // hashchange triggers the route; if we're already there, route explicitly
+        if (location.hash === '#/local') route(); else location.hash = '#/local';
+      } catch { toast('That file is not a Three Crowns save.'); }
     };
     inp.click();
   });
@@ -187,17 +233,19 @@ function lobby() {
       o.querySelector('[data-go]')!.addEventListener('click', () => { o.remove(); location.hash = `#/g/${r.id}`; });
     } catch (e: any) { toast(`Could not create game: ${e.message ?? e}. Is the server running?`); }
   });
+  const gen = routeGen;
   api.list().then(games => {
+    if (gen !== routeGen) return;
     const el = q('[data-o="list"]');
     if (!games.length) { el.innerHTML = '<span class="faint">No games yet.</span>'; return; }
     el.innerHTML = games.slice(0, 30).map(g => {
       const mine = tokens.get(g.id);
       const open = g.seats.filter(s => s.kind === 'human' && !s.claimed).length;
-      return `<div class="gamerow"><div class="row"><b class="grow">${esc(g.name)}</b><span class="faint">turn ${g.turn}${g.winner !== null ? ' · finished' : ''}</span></div>
-        <div class="seatline">${g.seats.map(s => `<span class="tag" title="${s.kind === 'ai' ? 'AI ' + s.aiLevel : s.claimed ? 'human' : 'open seat'}">${s.online && s.kind === 'human' ? '● ' : ''}${esc(s.name)}${s.kind === 'ai' ? ' (AI)' : s.claimed ? '' : ' (open)'}${s.submitted && s.kind === 'human' ? ' ✓' : ''}</span>`).join('')}
-        <span class="grow"></span><a href="#/g/${g.id}">${mine ? 'Continue' : open ? 'Join' : 'Watch'}</a></div></div>`;
+      return `<div class="gamerow"><div class="row"><b class="grow">${esc(g.name)}</b><span class="faint">turn ${Number(g.turn)}${g.winner !== null ? ' · finished' : ''}</span></div>
+        <div class="seatline">${g.seats.map(s => `<span class="tag" title="${s.kind === 'ai' ? 'AI ' + esc(s.aiLevel) : s.claimed ? 'human' : 'open seat'}">${s.online && s.kind === 'human' ? '● ' : ''}${esc(s.name)}${s.kind === 'ai' ? ' (AI)' : s.claimed ? '' : ' (open)'}${s.submitted && s.kind === 'human' ? ' ✓' : ''}</span>`).join('')}
+        <span class="grow"></span><a href="#/g/${esc(encodeURIComponent(g.id))}">${mine ? 'Continue' : open ? 'Join' : 'Watch'}</a></div></div>`;
     }).join('');
-  }).catch(() => { q('[data-o="list"]').innerHTML = '<span class="faint">Server not reachable. Run <code>npm run server</code> for online play. Local games work without it.</span>'; });
+  }).catch(() => { if (gen !== routeGen) return; q('[data-o="list"]').innerHTML = '<span class="faint">Server not reachable. Run <code>npm run server</code> for online play. Local games work without it.</span>'; });
 }
 
 route();

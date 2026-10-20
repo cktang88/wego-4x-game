@@ -22,11 +22,11 @@ export function orderCost(s: GameState, o: Order, p: PlayerId): Partial<Res> {
   const I = s.rules.influence;
   switch (o.type) {
     case 'build': {
-      const c = { ...s.rules.ships[o.cls]?.cost };
+      const c = { ...(Object.hasOwn(s.rules.ships, o.cls) ? s.rules.ships[o.cls].cost : undefined) };
       if (s.players[p]?.relics.includes('loom') && c.industry) c.industry = Math.round(c.industry * 0.85);
       return c;
     }
-    case 'develop': return { ...s.rules.projects[o.project]?.cost };
+    case 'develop': return { ...(Object.hasOwn(s.rules.projects, o.project) ? s.rules.projects[o.project].cost : undefined) };
     case 'influence': {
       const r = s.regions[o.target];
       return { influence: r && r.owner !== null && r.owner !== p ? I.rivalSubvertCost : I.orderCost };
@@ -95,25 +95,28 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
   }
   if (usesFleet && fleet!.bornTurn === s.turn && s.turn > 1) return 'this fleet was only just formed and can act next turn';
   if (usesFleet && fleet!.ordersThisTurn > s.rules.orders.maxPerFleet) return `a fleet can take at most ${s.rules.orders.maxPerFleet} orders per turn`;
-  const own = (rid: number) => s.regions[rid]?.owner === p;
+  // ids may come from untrusted clients: only plain integer indices name a region
+  const reg = (rid: unknown) => (Number.isInteger(rid) ? s.regions[rid as number] : undefined);
+  const own = (rid: number) => reg(rid)?.owner === p;
   switch (o.type) {
     case 'move': {
-      if (!o.path.length) return 'empty path';
+      if (!Array.isArray(o.path) || !o.path.length) return 'empty path';
+      const sp = fleetSpeed(s, fleet!) + (o.overdrive ? s.rules.overdrive.speedBonus : 0);
+      if (o.path.length > sp) return `too far (speed ${sp})`;
       let cur = fleet!.region;
       for (const r of o.path) {
         if (!s.regions[cur].neighbors.includes(r)) return 'path is not connected';
         cur = r;
       }
-      const sp = fleetSpeed(s, fleet!) + (o.overdrive ? s.rules.overdrive.speedBonus : 0);
       if (o.overdrive && fleet!.fatigued) return 'fleet is fatigued and cannot overdrive';
-      if (o.path.length > sp) return `too far (speed ${sp})`;
       return null;
     }
     case 'seize': {
-      const t = s.regions[o.target];
+      const t = reg(o.target);
       if (!t) return 'no such region';
       if (t.owner === p) return 'already yours';
       if (fleet!.region !== o.target && !s.regions[fleet!.region].neighbors.includes(o.target)) return 'target must be adjacent';
+      if (o.also !== undefined && (!Array.isArray(o.also) || o.also.length > 8)) return 'bad joining fleets';
       for (const id of o.also ?? []) {
         const g = s.fleets.find(x => x.id === id);
         if (!g || g.owner !== p || !g.ships.length) return 'a joining fleet is not yours';
@@ -122,8 +125,9 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       return null;
     }
     case 'build': {
-      const r = s.regions[o.region];
-      const d = s.rules.ships[o.cls];
+      const r = reg(o.region);
+      if (!r) return 'no such region';
+      const d = Object.hasOwn(s.rules.ships, o.cls) ? s.rules.ships[o.cls] : undefined;
       if (!d) return 'unknown ship class';
       if (!own(o.region)) return 'not your region';
       if ((r.buildings.shipyard ?? 0) < d.needsShipyard) return `needs shipyard level ${d.needsShipyard}`;
@@ -135,8 +139,9 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       return null;
     }
     case 'develop': {
-      const r = s.regions[o.region];
-      const pd = s.rules.projects[o.project];
+      const r = reg(o.region);
+      if (!r) return 'no such region';
+      const pd = Object.hasOwn(s.rules.projects, o.project) ? s.rules.projects[o.project] : undefined;
       if (!pd) return 'unknown project';
       if (!own(o.region)) return 'not your region';
       if (r.project) return 'a project is already underway here';
@@ -147,7 +152,7 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
     }
     case 'fortify': return null;
     case 'influence': {
-      const r = s.regions[o.target];
+      const r = reg(o.target);
       if (!r) return 'no such region';
       if (r.owner === p) return r.loyalty.some((x, i) => i !== p && x > 0) ? null : 'no rival agents to purge here';
       if (r.kind === 'void') return 'nobody lives there';
@@ -157,7 +162,7 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       if (!near) return 'must border a region you own (or have a fleet there)';
       return null;
     }
-    case 'scan': case 'feint': return s.regions[o.target] ? null : 'no such region';
+    case 'scan': case 'feint': return reg(o.target) ? null : 'no such region';
     case 'conceal': return null;
     case 'excavate': {
       const r = s.regions[fleet!.region];
@@ -166,8 +171,9 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       return null;
     }
     case 'pact': {
-      if (o.with === p || !s.players[o.with] || s.players[o.with].eliminated) return 'invalid partner';
+      if (o.with === p || !Number.isInteger(o.with) || !s.players[o.with] || s.players[o.with].eliminated) return 'invalid partner';
       return null;
     }
   }
+  return 'unknown order';
 }

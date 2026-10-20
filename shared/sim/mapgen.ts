@@ -14,14 +14,22 @@ const d2 = (a: Pt, b: Pt) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
 export interface GeneratedMap { regions: Region[]; homes: number[] }
 
 export function generateMap(rules: Rules, seed: number): GeneratedMap {
-  for (let attempt = 0; attempt < 50; attempt++) {
-    const m = tryGenerate(rules, seed + attempt * 7919);
+  // The first 50 attempts are the original sequence, so every seed that used to work keeps its map.
+  // Some seeds (≈1 in 2000 with default rules) and small/sparse maps need more tries, and very
+  // small maps can't satisfy the pacing distances at all: then fall back to a connected map that
+  // only ignores those distances (still 3-fold symmetric, so still fair).
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const m = tryGenerate(rules, seed + attempt * 7919, true);
     if (m) return m;
   }
-  throw new Error('map generation failed');
+  for (let attempt = 400; attempt < 450; attempt++) {
+    const m = tryGenerate(rules, seed + attempt * 7919, false);
+    if (m) return m;
+  }
+  throw new Error('map generation failed (check rules.map: regionsPerWedge, minSiteDist, radius)');
 }
 
-function tryGenerate(rules: Rules, seed: number): GeneratedMap | null {
+function tryGenerate(rules: Rules, seed: number, strict: boolean): GeneratedMap | null {
   const rng = new Rng(seed);
   const R = rules.map.radius;
   const TAU = Math.PI * 2;
@@ -35,7 +43,7 @@ function tryGenerate(rules: Rules, seed: number): GeneratedMap | null {
   const all = (pts: Pt[]) => { const out: Pt[] = [{ x: 0, y: 0 }]; for (const p of pts) for (let w = 0; w < 3; w++) out.push(rot(p, w * W)); return out; };
   const ok = (p: Pt) => all(tmpl.map(t => t.p)).every(q => d2(p, q) >= rules.map.minSiteDist ** 2) &&
     [1, 2].every(w => d2(p, rot(p, w * W)) >= rules.map.minSiteDist ** 2);
-  const want = Math.max(3, rules.map.regionsPerWedge);
+  const want = Math.max(4, rules.map.regionsPerWedge); // fewer than 4 sites per wedge is rejected below anyway
   let relicPlaced = 0;
   for (let tries = 0; tmpl.length < want && tries < 4000; tries++) {
     const a = (rng.next() - 0.5) * W;
@@ -108,7 +116,7 @@ function tryGenerate(rules: Rules, seed: number): GeneratedMap | null {
   if (seen.size !== n) return null;
   // fairness / pacing constraints
   const bfs = (from: number) => { const d = new Array(n).fill(99); d[from] = 0; const qq = [from]; while (qq.length) { const c = qq.shift()!; for (const nb of neighbors[c]) if (d[nb] === 99) { d[nb] = d[c] + 1; qq.push(nb); } } return d; };
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < n && strict; i++) {
     if (sites[i].kind !== 'home') continue;
     const d = bfs(i);
     for (let j = 0; j < n; j++) {

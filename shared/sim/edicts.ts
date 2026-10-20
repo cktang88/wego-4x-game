@@ -11,13 +11,15 @@ export interface EdictDef {
 }
 
 const alive = (s: GameState) => s.players.filter(p => !p.eliminated).map(p => p.id);
+/** Capitals of living rivals that they still hold (an eliminated / homeless player's `capital` is stale). */
+const rivalCapitals = (s: GameState, p: PlayerId) =>
+  s.players.filter(o => o.id !== p && !o.eliminated && s.regions[o.capital]?.owner === o.id).map(o => o.capital);
 
 export const EDICTS: Record<string, EdictDef> = {
   border_raid: {
     name: 'Edict of the Open Gate', vp: 3,
     desc: 'Own a region adjacent to a rival capital.',
-    check: s => alive(s).filter(p => s.players.some(o => o.id !== p &&
-      s.regions[o.capital].neighbors.some(n => s.regions[n].owner === p))),
+    check: s => alive(s).filter(p => rivalCapitals(s, p).some(c => s.regions[c].neighbors.some(n => s.regions[n].owner === p))),
   },
   crown_battle: {
     name: 'Edict of Crowned Blood', vp: 3,
@@ -42,7 +44,7 @@ export const EDICTS: Record<string, EdictDef> = {
   deep_strike: {
     name: 'Edict of the Knife', vp: 4,
     desc: 'End the turn with a fleet in a rival\'s capital.',
-    check: s => alive(s).filter(p => s.fleets.some(f => f.owner === p && s.players.some(o => o.id !== p && o.capital === f.region))),
+    check: s => alive(s).filter(p => { const caps = rivalCapitals(s, p); return s.fleets.some(f => f.owner === p && f.ships.length && caps.includes(f.region)); }),
   },
   relic_hoard: {
     name: 'Edict of Memory', vp: 2,

@@ -55,7 +55,16 @@ npm run sim -- --games 40 --rules '{"orders":{"perTurn":4}}'  # try a rule chang
 npm run play -- new --save g.json --ai expert,expert           # play in the terminal (you are seat 0)
 npm run play -- show --save g.json
 npm run play -- orders --save g.json '{"orders":[{"type":"seize","fleet":1,"target":5},null,null,null,null],"free":[]}'
-npm test                                                       # determinism, fairness, rules tests
+npm test                                                       # 58 tests: determinism, fairness, rules, exploits, fog leaks, server security
+```
+
+Browser checks (need `npm run dev` + `npm run server` running; Chromium via `playwright-core`):
+
+```bash
+node scripts/play-e2e.mjs <outdir>        # plays a few turns through the UI, screenshots
+node scripts/mp-e2e.mjs                   # 3 isolated browsers create/join/seal an online game
+node scripts/review-e2e.mjs               # long soak: Watch AIs on auto, replays, battles, listener leaks
+node scripts/mp-test.mjs                  # REST + WebSocket protocol smoke test against :8787
 ```
 
 `sim` prints win rates by AI level (does skill matter?), game length, battles per turn, VP sources, Warden wake rate, and more.
@@ -69,7 +78,7 @@ In the browser console, `tc.state` / `tc.rules` / `tc.screen` give you the live 
 3. **After pulse V**: the Warden acts, then income/upkeep/repairs/projects, then pacts. Then scoring, which uses the final state only.
 4. **Replay**: every client animates what *they* could see. Battles open in the battle viewer.
 
-Victory: first to the VP target, most VP at the turn limit, or hold all three Crowns at the end of a turn.
+Victory: first to the VP target, most VP at the turn limit, or hold all three Crowns for 3 consecutive turns.
 
 ## Architecture
 
@@ -85,6 +94,13 @@ tests/    vitest
 ```
 
 The sim is fully deterministic from the game seed and the orders, through a seeded PRNG with no `Math.random`. The server is authoritative, and each client receives only its fog-of-war-filtered view.
+
+## Multiplayer safety
+
+- The server is authoritative. Each client receives only its fog-of-war-filtered view: no rival fleets outside sensors, no rival resources, doctrines or scans, and no combat RNG state. Spectators of a running game see public info only. Finished games are fully revealed.
+- Seat tokens are random, stored hashed and compared in constant time. Submissions, rule overrides and chat are validated and size-capped, and malformed or hostile input can't crash the resolver.
+- If a resolution ever throws, the game keeps its previous state and the sealed orders, so nothing is corrupted.
+- Saves are written atomically to `data/games/*.json`. Chat and turn history are capped.
 
 ## Design notes
 

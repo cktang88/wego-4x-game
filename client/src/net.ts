@@ -2,7 +2,7 @@
 // hotseat) and a REMOTE game (authoritative server over WebSocket).
 import { createGame, resolveTurn, planTurn, viewFor, filterResultFor } from '../../shared/index.ts';
 import type { GameState, PlayerView, Submission, TurnResult } from '../../shared/index.ts';
-import type { ChatMsg, GameMeta, ServerMsg } from '../../shared/protocol.ts';
+import type { ChatMsg, ClientMsg, GameMeta, ServerMsg } from '../../shared/protocol.ts';
 
 export type ChangeKind = 'view' | 'meta' | 'chat' | 'error';
 
@@ -114,6 +114,8 @@ export class LocalSource implements GameSource {
 }
 
 // ============================================================ remote
+const HISTORY_TIMEOUT_MS = 8000;
+
 export class RemoteSource implements GameSource {
   kind = 'remote' as const;
   meta!: GameMeta;
@@ -122,66 +124,130 @@ export class RemoteSource implements GameSource {
   chat: ChatMsg[] = [];
   lastError = '';
   onChange: (k: ChangeKind) => void = () => {};
-  private ws!: WebSocket;
+  private ws: WebSocket | null = null;
   private closed = false;
-  private pendingHistory = new Map<number, (r: TurnResult | null) => void>();
+  private pendingHistory = new Map<number, Set<(r: TurnResult | null) => void>>();
   private ready: Promise<void>;
   private resolveReady!: () => void;
   private retry = 500;
   private pinger: number | undefined;
+  private reconnectTimer: number | undefined;
 
   constructor(public gameId: string, public token: string | null) {
     this.ready = new Promise(r => (this.resolveReady = r));
     this.connect();
   }
   waitReady() { return this.ready; }
+  get connected() { return this.ws?.readyState === 1; }
 
   private connect() {
+    if (this.closed) return;
+    this.reconnectTimer = undefined;
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${location.host}/ws?game=${encodeURIComponent(this.gameId)}${this.token ? `&token=${this.token}` : ''}`;
-    this.ws = new WebSocket(url);
-    this.ws.onopen = () => { this.retry = 500; };
-    this.ws.onmessage = ev => {
-      const m = JSON.parse(ev.data) as ServerMsg;
+    const url = `${proto}://${location.host}/ws?game=${encodeURIComponent(this.gameId)}${this.token ? `&token=${encodeURIComponent(this.token)}` : ''}`;
+    const ws = new WebSocket(url);
+    this.ws = ws;
+    ws.onopen = () => { if (ws === this.ws) this.retry = 500; };
+    ws.onmessage = ev => {
+      if (ws !== this.ws || this.closed) return;   // ignore stragglers from a replaced socket
+      let m: ServerMsg;
+      try { m = JSON.parse(String(ev.data)) as ServerMsg; } catch { return; }
       switch (m.type) {
         case 'view':
           this.meta = m.meta; this.view = m.view; this.mySubmission = m.mySubmission; this.chat = m.chat;
           this.resolveReady(); this.onChange('view'); break;
         case 'meta': this.meta = m.meta; this.onChange('meta'); break;
-        case 'chat': this.chat.push(m.msg); this.onChange('chat'); break;
-        case 'history': this.pendingHistory.get(m.turn)?.(m.result); this.pendingHistory.delete(m.turn); break;
-        case 'error': this.lastError = m.error; this.onChange('error'); break;
+        case 'chat': this.chat.push(m.msg); if (this.chat.length > 500) this.chat.splice(0, this.chat.length - 500); this.onChange('chat'); break;
+        case 'history': this.settleHistory(m.turn, m.result); break;
+        case 'error':
+          this.lastError = m.error;
+          if (m.code === 'no_game') this.shutdown();   // don't hammer the server for a game that doesn't exist
+          this.onChange('error'); break;
       }
     };
-    this.ws.onclose = () => {
+    ws.onclose = () => {
+      if (ws !== this.ws) return;
+      clearInterval(this.pinger); this.pinger = undefined;
+      // answers to in-flight history requests will never arrive on this socket
+      for (const turn of [...this.pendingHistory.keys()]) this.settleHistory(turn, null);
       if (this.closed) return;
-      setTimeout(() => this.connect(), this.retry);
+      const delay = this.retry * (0.75 + Math.random() * 0.5);
       this.retry = Math.min(8000, this.retry * 2);
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = window.setTimeout(() => this.connect(), delay);
     };
     clearInterval(this.pinger);
     this.pinger = window.setInterval(() => this.send({ type: 'ping' }), 25000);
   }
-  private send(m: unknown) { if (this.ws.readyState === 1) this.ws.send(JSON.stringify(m)); }
-  submit(sub: Submission) { this.send({ type: 'submit', submission: sub }); }
-  unsubmit() { this.send({ type: 'unsubmit' }); }
-  sendChat(text: string, to: number | null) { this.send({ type: 'chat', text, to }); }
-  history(turn: number): Promise<TurnResult | null> {
-    return new Promise(res => { this.pendingHistory.set(turn, res); this.send({ type: 'history', turn }); setTimeout(() => res(null), 5000); });
+  private settleHistory(turn: number, r: TurnResult | null) {
+    const waiters = this.pendingHistory.get(turn);
+    if (!waiters) return;
+    this.pendingHistory.delete(turn);
+    for (const w of waiters) w(r);
   }
-  close() { this.closed = true; clearInterval(this.pinger); this.ws.close(); }
+  private send(m: ClientMsg): boolean {
+    if (!this.ws || this.ws.readyState !== 1) return false;
+    this.ws.send(JSON.stringify(m));
+    return true;
+  }
+  private sendOrWarn(m: ClientMsg) {
+    if (this.send(m)) return;
+    this.lastError = 'Not connected to the server; reconnecting. Please try again in a moment.';
+    this.onChange('error');
+  }
+  submit(sub: Submission) { this.sendOrWarn({ type: 'submit', submission: sub, turn: this.meta?.turn }); }
+  unsubmit() { this.sendOrWarn({ type: 'unsubmit' }); }
+  sendChat(text: string, to: number | null) { this.sendOrWarn({ type: 'chat', text, to }); }
+  history(turn: number): Promise<TurnResult | null> {
+    return new Promise(res => {
+      let done = false;
+      const finish = (r: TurnResult | null) => { if (done) return; done = true; clearTimeout(timer); res(r); };
+      const timer = window.setTimeout(() => {
+        const set = this.pendingHistory.get(turn);
+        set?.delete(finish);
+        if (set && !set.size) this.pendingHistory.delete(turn);
+        finish(null);
+      }, HISTORY_TIMEOUT_MS);
+      const set = this.pendingHistory.get(turn);
+      const first = !set;
+      if (set) set.add(finish); else this.pendingHistory.set(turn, new Set([finish]));
+      // one request per turn is enough; concurrent callers share the answer
+      if (first && !this.send({ type: 'history', turn })) this.settleHistory(turn, null);
+    });
+  }
+  private shutdown() {
+    this.closed = true;
+    clearInterval(this.pinger); this.pinger = undefined;
+    clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined;
+    for (const turn of [...this.pendingHistory.keys()]) this.settleHistory(turn, null);
+  }
+  close() {
+    this.shutdown();
+    const ws = this.ws;
+    this.ws = null;
+    try { ws?.close(); } catch { /* ignore */ }
+  }
 }
 
 // ============================================================ lobby REST
+async function errorText(r: Response): Promise<string> {
+  try { return (await r.json()).error ?? `HTTP ${r.status}`; } catch { return `HTTP ${r.status}`; }
+}
+
 export const api = {
-  async list(): Promise<GameMeta[]> { return (await fetch('/api/games')).json(); },
+  async list(): Promise<GameMeta[]> {
+    const r = await fetch('/api/games');
+    if (!r.ok) throw new Error(await errorText(r));
+    return r.json();
+  },
   async create(body: unknown): Promise<{ id: string; meta: GameMeta }> {
     const r = await fetch('/api/games', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    if (!r.ok) throw new Error((await r.json()).error);
+    if (!r.ok) throw new Error(await errorText(r));
     return r.json();
   },
   async join(id: string, seat: number, name: string): Promise<{ token: string; seat: number }> {
-    const r = await fetch(`/api/games/${id}/join`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seat, name }) });
-    if (!r.ok) throw new Error((await r.json()).error);
+    const r = await fetch(`/api/games/${encodeURIComponent(id)}/join`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seat, name }) });
+    if (!r.ok) throw new Error(await errorText(r));
     return r.json();
   },
 };
@@ -190,5 +256,5 @@ export const tokens = {
   get(id: string): { token: string; seat: number } | null {
     try { return JSON.parse(localStorage.getItem(`tc.token.${id}`) ?? 'null'); } catch { return null; }
   },
-  set(id: string, v: { token: string; seat: number }) { localStorage.setItem(`tc.token.${id}`, JSON.stringify(v)); },
+  set(id: string, v: { token: string; seat: number }) { try { localStorage.setItem(`tc.token.${id}`, JSON.stringify(v)); } catch { /* storage blocked */ } },
 };

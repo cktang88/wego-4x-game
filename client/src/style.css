@@ -209,3 +209,5 @@ h3 { font-size: 12px; text-transform: uppercase; color: var(--dim); margin-top: 
   .targeting .left { display: none; }
   .targeting .right { display: none; }
 }
+/* hotseat hand-off: fully opaque so the previous player can't glimpse the next player's view */
+.overlay.curtain { background: var(--bg); backdrop-filter: none; z-index: 70; }

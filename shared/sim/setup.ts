@@ -6,19 +6,36 @@ import type { Commander, Fleet, GameState, Player, PlayerId, RegionId, Ship } fr
 import { EDICTS } from './edicts.ts';
 
 export interface PlayerSetup { name?: string; kind: 'human' | 'ai'; aiLevel?: Player['aiLevel'] }
-export interface GameSetup { seed?: number; players: PlayerSetup[]; rules?: unknown; id?: string; homeRotation?: number }
+export interface GameSetup {
+  seed?: number;            // public: drives the map (clients see it)
+  /**
+   * Private entropy for the combat/edict RNG (state.rngState). It must not be derivable from the
+   * public seed, or clients could predict battle rolls and the edict deck. Servers should always
+   * pass a fresh random value. If omitted: a fresh random value when `seed` is omitted too, else
+   * derived from `seed` (legacy, reproducible tests/sims).
+   */
+  rngSeed?: number;
+  players: PlayerSetup[];
+  rules?: unknown;
+  id?: string;
+  homeRotation?: number;
+}
 
 export function createGame(setup: GameSetup): GameState {
   const rules: Rules = mergeRules(defaultRules(), setup.rules);
-  const seed = (setup.seed ?? Math.floor(Math.random() * 2 ** 31)) >>> 0;
+  const seed = (Number.isFinite(setup.seed) ? setup.seed! : Math.floor(Math.random() * 2 ** 31)) >>> 0;
   const { regions, homes: wedgeHomes } = generateMap(rules, seed);
   // which wedge each seat gets is decided by the seed, so any residual positional quirk isn't tied to a seat
-  const rot = (((setup.homeRotation ?? seed) % 3) + 3) % 3;
+  const hr = Number.isFinite(setup.homeRotation) ? Math.trunc(setup.homeRotation!) : seed;
+  const rot = ((hr % 3) + 3) % 3;
+  const rngSeed = Number.isFinite(setup.rngSeed) ? setup.rngSeed! >>> 0
+    : !Number.isFinite(setup.seed) ? Math.floor(Math.random() * 2 ** 32) >>> 0
+    : (seed ^ 0x9e3779b9) >>> 0;
   const homes = [0, 1, 2].map(i => wedgeHomes[(i + rot) % 3]);
   const s: GameState = {
     id: setup.id ?? `g${seed.toString(36)}`,
     seed, turn: 1, rules, regions, fleets: [], pacts: [], nextId: 1,
-    rngState: (seed ^ 0x9e3779b9) >>> 0,
+    rngState: rngSeed,
     players: [], loreFound: 0, battleCount: 0, winner: null, winReason: '', chronicle: [], scans: [],
     last: null, log: [],
     throne: { owner: null, streak: 0 },
@@ -30,11 +47,11 @@ export function createGame(setup: GameSetup): GameState {
   s.edictDeck = rng.shuffle(Object.keys(EDICTS));
 
   for (let i = 0; i < 3; i++) {
-    const ps = setup.players[i] ?? { kind: 'ai' };
+    const ps: PlayerSetup = setup.players?.[i] ?? { kind: 'ai' };
     const home = homes[i];
     const p: Player = {
-      id: i, name: ps.name || PLAYER_DEFAULT_NAMES[i], color: PLAYER_COLORS[i], kind: ps.kind,
-      aiLevel: ps.aiLevel ?? 'standard', res: { ...rules.start.resources }, vp: 0, vpLog: [], relics: [],
+      id: i, name: ps.name || PLAYER_DEFAULT_NAMES[i], color: PLAYER_COLORS[i], kind: ps.kind === 'human' ? 'human' : 'ai',
+      aiLevel: ps.aiLevel === 'novice' || ps.aiLevel === 'expert' ? ps.aiLevel : 'standard', res: { ...rules.start.resources }, vp: 0, vpLog: [], relics: [],
       capital: home, eliminated: false, pactOffers: [], missedTurns: 0, reserveCommanders: [],
     };
     s.players.push(p);
@@ -66,7 +83,7 @@ export function newCommander(rng: Rng): Commander {
 
 export function newFleet(s: GameState, rng: Rng, owner: PlayerId, region: RegionId, name?: string): Fleet {
   const p = s.players[owner];
-  const commander = p && p.reserveCommanders.length ? p.reserveCommanders.shift()! : newCommander(rng);
+  const commander = p && p.reserveCommanders?.length ? p.reserveCommanders.shift()! : newCommander(rng);
   const f: Fleet = {
     id: s.nextId++, owner, region, ships: [], commander,
     name: name ?? `${ordinal(s.fleets.filter(x => x.owner === owner).length + 1)} Squadron`,

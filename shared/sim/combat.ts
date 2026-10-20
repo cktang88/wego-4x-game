@@ -266,17 +266,17 @@ export function runBattle(
       if (!wants) continue;
       const to = retreatDest(f);
       const stranded = f.ships.filter(x => !x.sys.engines);
-      if (to === null || stranded.length === f.ships.length) {
+      const cornered = () => {
         if (forced === f.owner) { // nowhere to go and the battle is lost: scuttle
           for (const x of f.ships) { x.hp = 0; report.losses[f.owner] = (report.losses[f.owner] ?? 0) + 1; region.wreckage++; }
           f.ships = [];
           destroyedFleets.push(f);
           hl(`${f.name} is cornered with nowhere to run and is destroyed to the last hull.`);
-          continue;
+          return;
         }
         if (!lastStand.has(f.id)) { lastStand.add(f.id); hl(`LAST STAND: ${f.name} can't escape and fights to the end.`); }
-        continue;
-      }
+      };
+      if (to === null || stranded.length === f.ships.length) { cornered(); continue; }
       // pursuit volley at the retreating fleet
       if (!f.commander.traits.includes('survivor') && R.combat.retreatPursuitShots > 0) {
         const all2 = units();
@@ -290,6 +290,7 @@ export function runBattle(
       }
       // ships without engines are left behind and fight on
       const left = f.ships.filter(x => !x.sys.engines);
+      if (left.length === f.ships.length) { cornered(); continue; } // the pursuit crippled every engine
       if (left.length && left.length < f.ships.length) {
         f.ships = f.ships.filter(x => x.sys.engines);
         const rem: Fleet = {
@@ -329,11 +330,17 @@ export function runBattle(
 
   function retreatDest(f: Fleet): RegionId | null {
     const enemyAt = (r: RegionId) => s.fleets.some(x => x.region === r && x.ships.length && hostile(s, x.owner, f.owner) && !active.includes(x));
+    // a hostile garrison would just shoot the fleet again: only flee into one as a last resort
+    const enemyGarrison = (r: RegionId) => { const g = s.regions[r]; return g.owner !== null && g.garrison > 0 && hostile(s, g.owner, f.owner); };
     const cf = cameFrom.get(f.id);
-    if (cf !== undefined && cf !== rid && !enemyAt(cf)) return cf;
+    const cfOk = cf !== undefined && cf !== rid && !enemyAt(cf);
+    if (cfOk && !enemyGarrison(cf)) return cf;
     const opts = region.neighbors.filter(n => !enemyAt(n));
     const own = opts.filter(n => s.regions[n].owner === f.owner);
     if (own.length) return rng.pick(own);
+    const calm = opts.filter(n => !enemyGarrison(n));
+    if (calm.length) return rng.pick(calm);
+    if (cfOk) return cf;
     return opts.length ? rng.pick(opts) : null;
   }
 
@@ -393,7 +400,7 @@ export function runBattle(
       hl(`${c.name} goes down with ${f.name}.`);
     } else {
       c.alive = true;
-      s.players[f.owner].reserveCommanders.push(c);
+      (s.players[f.owner].reserveCommanders ??= []).push(c);
       hl(`${c.name} escapes the wreck of ${f.name} and will command again.`);
     }
   }
