@@ -15,7 +15,7 @@ export function helpHtml(st: GameState): string {
   <h2>Inside each pulse (always in this order)</h2>
   <ol>
     <li><b>Prepare</b>: Fortify, Scan, Feint, Conceal, Pact offers.</li>
-    <li><b>Influence</b>: loyalty pushes (one per region per turn, capped at the threshold). A neutral at ${R.influence.flipThreshold} loyalty defects; a rival region needs ${R.influence.rivalFlipThreshold} (+${R.influenceLimits.perFortress} per fortress level; capitals never). It won't defect while another hostile fleet occupies it. Influencing your <b>own</b> region purges rival agents.</li>
+    <li><b>Influence</b>: loyalty pushes (one per region per turn, capped at the threshold). A neutral at ${R.influence.flipThreshold} loyalty defects; a rival region needs ${R.influence.rivalFlipThreshold} (+${R.influenceLimits.perFortress} per fortress level; capitals never). Crowns and the Throne need ×${R.influenceLimits.crownMult}. It won't defect while another hostile fleet occupies it. Influencing your <b>own</b> region purges rival agents.</li>
     <li><b>Movement</b>: every moving fleet advances one region per step, simultaneously.
       <ul><li>Two hostile fleets moving through each other's regions <b>clash</b> on the border. There are no bounces: someone wins, and the winner keeps going.</li>
       <li>Entering a region with hostile fleets or a <b>rival-owned</b> garrison stops you. Neutral garrisons let you pass.</li>
@@ -38,6 +38,7 @@ export function helpHtml(st: GameState): string {
   <li><b>Feint</b> broadcasts fake movements. <b>Scan</b> exposes feints and fleets hidden in nebulae. <b>Conceal</b> hides all your signals but makes your capital jam loudly.</li></ul>
   <h2>Winning</h2>
   <ul><li>First to <b>${R.victory.vpTarget} VP</b>, or most VP after turn ${R.victory.turnLimit}, or hold <b>all three Crowns</b> at the end of ${R.crowns.holdTurnsToWin} consecutive turns.</li>
+  <li>Falling ${R.comeback.gap}+ VP behind the leader gives you +${Math.round(R.comeback.incomeBonus * 100)}% income (never extra orders).</li>
   <li>Crowns and the Throne only pay VP if you already held them when the turn began, so a last-pulse grab denies VP but doesn't score it.</li>
   <li>Crowns: ${R.victory.vpPerCrownPerTurn} VP/turn each, +${R.victory.crownMajorityVp} for holding 2 or more. The <b>Hollow Throne</b> pays 1, 2, 3… up to ${R.throne.streakMaxVp} VP for each consecutive turn held, and its occupants are visible to everyone.</li>
   <li>Relics: ${R.victory.vpPerRelic} VP, a permanent bonus, and a fragment of the truth. After ${R.warden.wakeAtLore} fragments, the Warden wakes in the Throne${R.wardenHunt.enabled ? ' and <b>marches on the VP leader</b>, razing their regions' : ''}. Killing it is worth ${R.warden.defeatVp} VP.</li>

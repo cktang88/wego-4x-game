@@ -410,8 +410,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   const warden = s.fleets.find(f => f.owner === -1);
   if (warden) {
     if (R.wardenHunt.enabled) {
-      const live = s.players.filter(p => !p.eliminated).sort((x, y) => y.vp - x.vp);
-      const lead = live.length > 1 && live[0].vp > live[1].vp ? live[0].id : null;
+      const lead = currentLeader(s);   // only hunts a clear leader (bounty.leaderMinLead)
       if (lead !== null && s.regions[warden.region].owner !== lead) {
         let best: RegionId[] | null = null;
         for (const r of s.regions) {
@@ -455,7 +454,9 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   for (const p of s.players) {
     if (p.eliminated) continue;
     const inc = income(s, p.id);
-    p.res.industry += inc.industry; p.res.credits += inc.credits; p.res.influence += inc.influence;
+    const top = Math.max(...s.players.filter(x => !x.eliminated).map(x => x.vp));
+    const boost = top - p.vp >= R.comeback.gap ? 1 + R.comeback.incomeBonus : 1;
+    p.res.industry += Math.round(inc.industry * boost); p.res.credits += Math.round(inc.credits * boost); p.res.influence += inc.influence;
     const upkeep = s.fleets.filter(f => f.owner === p.id).reduce((a, f) => a + f.ships.reduce((b, sh) => b + (R.ships[sh.cls]?.upkeep ?? 0), 0), 0);
     p.res.credits -= upkeep;
   }
@@ -750,6 +751,7 @@ export function checkVictory(s: GameState) {
 /** Loyalty needed for a region to defect to you. */
 export function flipThreshold(s: GameState, rid: RegionId): number {
   const r = s.regions[rid];
-  if (r.owner === null) return s.rules.influence.flipThreshold;
-  return s.rules.influence.rivalFlipThreshold + (r.buildings.fortress ?? 0) * s.rules.influenceLimits.perFortress;
+  const mult = r.kind === 'crown' || r.kind === 'throne' ? s.rules.influenceLimits.crownMult : 1;
+  if (r.owner === null) return s.rules.influence.flipThreshold * mult;
+  return (s.rules.influence.rivalFlipThreshold + (r.buildings.fortress ?? 0) * s.rules.influenceLimits.perFortress) * mult;
 }

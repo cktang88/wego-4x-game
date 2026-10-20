@@ -60,6 +60,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       fl.sort((a, b) => b.ships.length - a.ships.length);
       for (let i = 1; i < fl.length; i++) {
         if (fl[0].ships.length + fl[i].ships.length > R.maxShipsPerFleet) continue;
+        // keep two real task forces: each fleet gets its own Orders (combined seizes can still mass them)
+        if (fl[i].ships.length >= 3 && fl[0].ships.length >= 3) continue;
         sub.free.push({ type: 'merge', fleet: fl[i].id, into: fl[0].id } as FreeAction);
         fl[0].ships.push(...fl[i].ships); fl[i].ships = [];
       }
@@ -123,7 +125,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     if (o.type === 'seize') {
       const f = s.fleets.find(x => x.id === o.fleet)!;
       f.region = o.target; f.fortified = false;
-      usedTargets.add(`seize:${o.target}`); // optimistic: assume it falls (so we don't seize it twice)
+      usedTargets.add(`seize:${o.target}`); // optimistic: assume it falls (so we don't seize or influence it again)
+      usedTargets.add(`inf:${o.target}`);
       for (const id of o.also ?? []) {
         const g = s.fleets.find(x => x.id === id);
         if (g) { g.region = o.target; g.fortified = false; fleetUses.set(id, (fleetUses.get(id) ?? 0) + 1); }
@@ -168,6 +171,9 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       if (edictsNow.includes('border_raid') && s.players.some(o => o.id !== pid && s.regions[o.capital].neighbors.includes(r.id))) v += 3;
       if (edictsNow.includes('relic_hoard') && r.kind === 'relic') v += 2;
       v += r.neighbors.filter(n => s.regions[n].owner === pid).length * 0.4;                 // easier to hold
+      // income over the rest of the game: land early, it compounds
+      const y = R.economy.yields[r.kind] ?? R.economy.yields.colony;
+      v += (y.industry + y.credits) * Math.max(1, r.dev) * 0.25 * Math.max(0, Math.min(1, (R.victory.turnLimit - s.turn - 8) / 12));
       if (r.kind === 'throne') {
         const w = warden();
         if (w) v = w.region === r.id ? -5 : v;                                                // the Warden judges whoever sits there
@@ -183,22 +189,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
   }
 
   // ---------------------------------------------------------------- strength estimates
-  /** Old crude defense estimate (novice / standard). */
-  function defense(r: Region, attacker: PlayerId): number {
-    let d = r.owner === null && novice ? r.garrison * 0.5 : r.garrison * 1.15 + (r.buildings.fortress ?? 0) * 5;
-    for (const f of s.fleets) {
-      if (!f.ships.length || !hostile(s, f.owner, attacker)) continue;
-      if (f.region === r.id) d += fleetPower(s, f) * (f.fortified ? 1.3 : 1);
-      else if (!novice && r.owner !== null && f.owner === r.owner && f.doctrine.guard && r.neighbors.includes(f.region)) d += fleetPower(s, f) * 0.7;
-    }
-    return d;
-  }
-  function winP(att: number, def: number): number {
-    if (def <= 0) return 0.98;
-    return 1 / (1 + Math.exp(-((att / def) - 1.25) * 3.2));
-  }
-
-  /** Expert: predicted chance that `units` (attacking from outside) take region t this pulse, and expected losses. */
+  /** Predicted chance that `units` (attacking from outside) take region t this pulse, and expected losses. */
   function seizeOdds(units: SimUnit[], t: Region, key: string): SimResult {
     const ck = `${t.id}:${key}`;
     const hit = simCache.get(ck);
@@ -368,7 +359,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         const joinable = myFleets().find(f => f.region === r.id && f.ships.length < R.maxShipsPerFleet && !isScoutFleet(f));
         if (expert) {
           const b = expertBuild(r, need, joinable, mainArmy);
-          if (b) out.push({ o: { type: 'build', region: r.id, cls: b.cls, fleet: joinable ? joinable.id : null }, v: b.v, tag: `build:${r.id}:${b.cls}` });
+          if (b) out.push({ o: { type: 'build', region: r.id, cls: b.cls, fleet: joinable ? joinable.id : null }, v: b.v, tag: `build:${r.id}:${sub.orders.filter(o => o?.type === 'build').length}` });
         } else {
           for (const [cls, d] of Object.entries(R.ships)) {
             if (d.needsShipyard > yard || cls === 'scout') continue;
@@ -553,7 +544,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     const hardTarget = s.regions.some(t => t.owner !== pid && t.garrison >= 28 && (t.kind === 'crown' || t.kind === 'throne' || t.kind === 'home') &&
       (!mainArmy || within(s, mainArmy.region, 3).has(t.id)));
     let cls: string | null = null;
-    if (hardTarget && bombards < 1 + Math.floor(army.length / 4) && ok('bombard')) cls = 'bombard';
+    const allBombards = myFleets().reduce((n, f) => n + f.ships.filter(x => (R.ships[x.cls]?.siege ?? 0) >= 5).length, 0);
+    if (hardTarget && bombards < 1 + Math.floor(army.length / 5) && allBombards < 3 && ok('bombard')) cls = 'bombard';
     else if (ok('dread') && res.industry > 100) cls = 'dread';
     else if (ok('cruiser')) cls = 'cruiser';
     else if (ok('frigate')) cls = 'frigate';
@@ -562,8 +554,9 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     // urgent at a threatened yard; otherwise scale with how outgunned we are and how much we can afford
     const threat = threatened.get(r.id) ?? 0;
     const order = { scout: 0, corvette: 1, frigate: 2, bombard: 2.5, cruiser: 3, dread: 4 }[cls] ?? 1;
-    let v = 3.5 + need * 2.2 + order * 0.6 + threat * 8;
-    if (s.turn <= 2 && !threat) v -= 1.5; // grow the economy first
+    // armies win this game: keep the yards busy (each build is one Order, so prefer big hulls)
+    let v = 5.5 + need * 2.5 + order * 0.8 + threat * 8;
+    if (s.turn <= 1 && !threat) v -= 1.5; // grow the economy first
     if (!joinable && myFleets().length >= R.maxFleets - 1) v -= 3;
     return { cls, v };
   }
@@ -584,7 +577,9 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       add('develop', 1.5 + (y.industry + y.credits) * 0.3 + early * 1.5);
     }
     if ((r.buildings.mine ?? 0) < 2 && r.kind !== 'void') add('mine', 3 + early);
-    if ((r.buildings.tradehub ?? 0) < 1 && me0().res.credits < 25) add('tradehub', 3);
+    // credits are usually the binding resource: turn spare industry into trade
+    const res = me0().res;
+    if ((r.buildings.tradehub ?? 0) < 2 && r.kind !== 'void' && res.industry > res.credits * 1.5) add('tradehub', 3.5 + early + Math.min(2, (res.industry - res.credits) / 40));
     if ((r.buildings.fortress ?? 0) < 2 && (r.kind === 'crown' || r.kind === 'throne')) add('fortress', 2.5 + threat * 6);
   }
 }

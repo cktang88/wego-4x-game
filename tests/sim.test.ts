@@ -120,7 +120,7 @@ describe('playtest fixes', () => {
     for (const r of t.regions) if (r.kind === 'crown') r.owner = 1;
     let x = resolveTurn(t, { 0: emptySubmission(t), 1: emptySubmission(t), 2: emptySubmission(t) });
     expect(x.winner).toBeNull();
-    x = resolveTurn(x, { 0: emptySubmission(x), 1: emptySubmission(x), 2: emptySubmission(x) });
+    for (let i = 1; i < x.rules.crowns.holdTurnsToWin; i++) { expect(x.winner).toBeNull(); x = resolveTurn(x, { 0: emptySubmission(x), 1: emptySubmission(x), 2: emptySubmission(x) }); }
     expect(x.winner).toBe(1);
   });
 });

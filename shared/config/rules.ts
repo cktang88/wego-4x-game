@@ -88,7 +88,7 @@ export const DEFAULT_RULES = {
 
   // ---------------------------------------------------------------- projects
   projects: {
-    develop:  { name: 'Develop',  cost: { industry: 30, credits: 20 }, turns: 2, max: 5, desc: '+1 development: more yield of every kind.' },
+    develop:  { name: 'Develop',  cost: { industry: 35, credits: 15 }, turns: 2, max: 5, desc: '+1 development: more yield of every kind.' },
     shipyard: { name: 'Shipyard', cost: { industry: 40, credits: 15 }, turns: 2, max: 3, desc: 'Build bigger ships here; repairs ships faster.' },
     fortress: { name: 'Fortress', cost: { industry: 30, credits: 15 }, turns: 2, max: 3, desc: '+garrison and garrison firepower.' },
     mine:     { name: 'Mine',     cost: { industry: 25 },              turns: 1, max: 3, desc: '+industry per turn.' },
@@ -125,10 +125,10 @@ export const DEFAULT_RULES = {
     // are "order-efficient" while small hulls are "resource-efficient".
     scout:    { name: 'Scout',    role: 'Fast eyes. Fragile.', hp: 5,  attack: 1, shots: 1, shields: 0, speed: 3, siege: 0, sensor: 1, evasion: 0.15, cost: { industry: 10 },               needsShipyard: 1, upkeep: 1, glyph: 'dart' },
     corvette: { name: 'Corvette', role: 'Cheap, quick raider.', hp: 8,  attack: 3, shots: 1, shields: 0, speed: 3, siege: 0, sensor: 0, evasion: 0.15, cost: { industry: 12, credits: 4 },  needsShipyard: 1, upkeep: 1, glyph: 'arrow' },
-    frigate:  { name: 'Frigate',  role: 'Line workhorse.',     hp: 14, attack: 3, shots: 2, shields: 1, speed: 2, siege: 1, sensor: 0, evasion: 0.05, cost: { industry: 26, credits: 12 },  needsShipyard: 1, upkeep: 2, glyph: 'wedge' },
-    bombard:  { name: 'Bombard',  role: 'Cracks planets.',     hp: 18, attack: 1, shots: 2, shields: 2, speed: 1, siege: 6, sensor: 0, evasion: 0.00, cost: { industry: 34, credits: 20 },  needsShipyard: 2, upkeep: 2, glyph: 'block' },
-    cruiser:  { name: 'Cruiser',  role: 'Shielded brawler.',   hp: 28, attack: 4, shots: 3, shields: 2, speed: 2, siege: 2, sensor: 0, evasion: 0.00, cost: { industry: 44, credits: 32 },  needsShipyard: 2, upkeep: 4, glyph: 'long' },
-    dread:    { name: 'Dreadnought', role: 'Slow apocalypse.', hp: 56, attack: 8, shots: 3, shields: 3, speed: 1, siege: 4, sensor: 0, evasion: 0.00, cost: { industry: 80, credits: 60 }, needsShipyard: 3, upkeep: 7, glyph: 'dread' },
+    frigate:  { name: 'Frigate',  role: 'Line workhorse.',     hp: 14, attack: 3, shots: 2, shields: 1, speed: 2, siege: 1, sensor: 0, evasion: 0.05, cost: { industry: 28, credits: 10 },  needsShipyard: 1, upkeep: 2, glyph: 'wedge' },
+    bombard:  { name: 'Bombard',  role: 'Cracks planets.',     hp: 18, attack: 1, shots: 2, shields: 2, speed: 1, siege: 6, sensor: 0, evasion: 0.00, cost: { industry: 38, credits: 16 },  needsShipyard: 2, upkeep: 2, glyph: 'block' },
+    cruiser:  { name: 'Cruiser',  role: 'Shielded brawler.',   hp: 28, attack: 4, shots: 3, shields: 2, speed: 2, siege: 2, sensor: 0, evasion: 0.00, cost: { industry: 50, credits: 26 },  needsShipyard: 2, upkeep: 4, glyph: 'long' },
+    dread:    { name: 'Dreadnought', role: 'Slow apocalypse.', hp: 56, attack: 8, shots: 3, shields: 3, speed: 1, siege: 4, sensor: 0, evasion: 0.00, cost: { industry: 90, credits: 50 }, needsShipyard: 3, upkeep: 7, glyph: 'dread' },
   } as Record<string, ShipClassDef>,
   maxShipsPerFleet: 8,
   maxFleets: 6,
@@ -234,7 +234,7 @@ export function mergeRules<T>(base: T, over: unknown): T {
 // Extra knobs added after the research pass (kept separate so they're easy to find).
 export const EXTRA_DEFAULTS = {
   throne: {
-    streakMaxVp: 5,            // Throne pays 1,2,3..max VP for consecutive turns held
+    streakMaxVp: 3,            // Throne pays 1,2,3..max VP for consecutive turns held
     holderVisible: true,       // fleets in the Throne are visible to everyone
   },
   bounty: {
@@ -275,7 +275,7 @@ export const EXTRA_DEFAULTS = {
 // Knobs added after the first playtest round (engine-level counterplay rules).
 export const PLAYTEST_DEFAULTS = {
   crowns: {
-    holdTurnsToWin: 2,          // must hold all three Crowns at the end of this many consecutive turns
+    holdTurnsToWin: 3,          // must hold all three Crowns at the end of this many consecutive turns
     mustHoldAtTurnStart: true,  // Crown/Throne VP only if you held it when the turn began (no pulse-5 snipes)
     capturedGarrisonBonus: { crown: 12, throne: 16 } as Record<string, number>, // extra garrison left after taking one
     crownKeyFlatVp: 1,          // Crown Key relic: +this VP/turn while holding any Crown
@@ -288,6 +288,7 @@ export const PLAYTEST_DEFAULTS = {
     capAtThreshold: true,       // loyalty can't exceed the flip threshold
     purgeAmount: 45,            // Influence on your OWN region removes this much rival loyalty
     perFortress: 15,            // each fortress level adds this to the rival flip threshold
+    crownMult: 2,               // Crowns and the Throne need this many times the normal loyalty
   },
   bountyCap: {
     maxPerTurn: 3,              // total bounty + honors VP a player can earn per turn
@@ -299,6 +300,10 @@ export const PLAYTEST_DEFAULTS = {
     enabled: true,              // once awake, the Warden marches toward the VP leader
     stepsPerTurn: 1,
     razes: true,                // a leader region whose garrison it destroys becomes neutral
+  },
+  comeback: {
+    gap: 10,                    // players at least this many VP behind the leader…
+    incomeBonus: 0.25,          // …get this much extra income (never extra orders)
   },
   intel: {
     ghostEchoChance: 0.35,      // chance per unclaimed relic per turn of a fake "unidentified movement"
