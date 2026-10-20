@@ -1,0 +1,27 @@
+{
+  "name": "three-crowns",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Three Crowns: a 3-player competitive WEGO 4X prototype with a fixed 5-order action economy.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "sim": "vite-node scripts/simulate.ts --"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0",
+    "vite-node": "^3.2.0",
+    "vitest": "^3.2.0"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  }
+}
