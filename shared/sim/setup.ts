@@ -6,12 +6,15 @@ import type { Commander, Fleet, GameState, Player, PlayerId, RegionId, Ship } fr
 import { EDICTS } from './edicts.ts';
 
 export interface PlayerSetup { name?: string; kind: 'human' | 'ai'; aiLevel?: Player['aiLevel'] }
-export interface GameSetup { seed?: number; players: PlayerSetup[]; rules?: unknown; id?: string }
+export interface GameSetup { seed?: number; players: PlayerSetup[]; rules?: unknown; id?: string; homeRotation?: number }
 
 export function createGame(setup: GameSetup): GameState {
   const rules: Rules = mergeRules(defaultRules(), setup.rules);
   const seed = (setup.seed ?? Math.floor(Math.random() * 2 ** 31)) >>> 0;
-  const { regions, homes } = generateMap(rules, seed);
+  const { regions, homes: wedgeHomes } = generateMap(rules, seed);
+  // which wedge each seat gets is decided by the seed, so any residual positional quirk isn't tied to a seat
+  const rot = (((setup.homeRotation ?? seed) % 3) + 3) % 3;
+  const homes = [0, 1, 2].map(i => wedgeHomes[(i + rot) % 3]);
   const s: GameState = {
     id: setup.id ?? `g${seed.toString(36)}`,
     seed, turn: 1, rules, regions, fleets: [], pacts: [], nextId: 1,

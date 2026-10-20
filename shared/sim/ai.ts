@@ -95,6 +95,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
   for (let slot = 0; slot < R.orders.perTurn; slot++) {
     const valid = candidates().filter(c => c.v > 0.3 && !usedTargets.has(c.tag) && !validateOrder(s, pid, c.o) && canAfford(me0().res, orderCost(s, c.o, pid), s.rules));
     if (!valid.length) continue;
+    // tiny seeded jitter so exact ties never break by region id (which would favour one map wedge)
+    for (const c of valid) c.v += rng.next() * 0.02;
     valid.sort((a, b) => b.v - a.v);
     let pick: Cand;
     if (novice) {

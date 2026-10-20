@@ -6,6 +6,7 @@ import { income, currentLeader, resolveTurn, emptySubmission, flipThreshold } fr
 import { TRAITS, RELICS, NEUTRAL_COLOR } from '../../shared/config/content.ts';
 import { EDICTS } from '../../shared/sim/edicts.ts';
 import type { Doctrine, Fleet, GameEvent, GameState, Order, Pt, Region, Submission, TurnResult } from '../../shared/sim/types.ts';
+import { predictAssault } from '../../shared/sim/ai.ts';
 import type { GameSource } from './net.ts';
 import { LocalSource } from './net.ts';
 import { MapRenderer, regionLayout, type FleetDraw, type Fx } from './render/map.ts';
@@ -326,7 +327,7 @@ export class GameScreen {
       if (o && o.type === 'seize') for (const id of o.also ?? []) if (this.plan.orders.slice(0, i).some(x => x && 'fleet' in x && x.type !== 'build' && x.fleet === id)) c.credits = (c.credits ?? 0) + st.rules.orders.repeatFleetCredits;
       return `<div class="slot ${o ? 'filled' : ''} ${this.nextSlot() === i && this.canPlan ? 'target' : ''} ${err ? 'invalid' : ''}" data-slot="${i}">
         <div class="num">${roman(i + 1)}</div>
-        <div class="desc">${o ? `${ORDER_INFO[o.type].icon} ${esc(describeOrder(st, o))}<small>${costText(c) || 'free'}${err ? ` · <span class="bad">${esc(err)}</span>` : ''}</small>${o.type === 'seize' && this.canPlan ? this.joinChips(o, i) : ''}` : `<span class="faint">— pulse ${roman(i + 1)}: empty —</span>`}</div>
+        <div class="desc">${o ? `${ORDER_INFO[o.type].icon} ${esc(describeOrder(st, o))}<small>${costText(c) || 'free'}${err ? ` · <span class="bad">${esc(err)}</span>` : ''}</small>${o.type === 'seize' && this.canPlan ? this.oddsHtml(o, i) + this.joinChips(o, i) : ''}` : `<span class="faint">— pulse ${roman(i + 1)}: empty —</span>`}</div>
         <div class="acts">${o && this.canPlan ? `<button data-up="${i}" title="earlier">▲</button><button data-down="${i}" title="later">▼</button><button data-del="${i}" title="remove">✕</button>` : ''}</div>
       </div>`;
     }).join('');
@@ -346,6 +347,22 @@ export class GameScreen {
       <div style="margin-top:10px;font-size:13px" class="dim">${seats}</div>
       <h3>How to give orders</h3>
       <div class="orderhelp">Click one of <b>your fleets</b> (chevrons) for Move / Seize / Fortify / Excavate and its doctrine. Click a <b>region</b> for Build / Develop, or Influence / Scan / Feint. Click a slot to place the next order into that pulse. <span class="kbd">Esc</span> cancels.</div>`;
+  }
+
+  /** Estimated odds of a seize, from the same predictor the AI uses. */
+  odds(fleetIds: number[], target: number, slot: number): { p: number; note: string } | null {
+    if (this.you === null) return null;
+    try {
+      const ps = this.projectedState(slot);
+      const r = predictAssault(ps, this.you, fleetIds, target);
+      return { p: r.p, note: r.note };
+    } catch { return null; }
+  }
+  oddsHtml(o: Extract<Order, { type: 'seize' }>, slot: number): string {
+    const r = this.odds([o.fleet, ...(o.also ?? [])], o.target, slot);
+    if (!r) return '';
+    const pct = Math.round(r.p * 100);
+    return `<small>Odds ≈ <span class="odds ${pct >= 65 ? 'hi' : pct >= 40 ? 'mid' : 'lo'}">${pct}%</span>${r.note ? ` · ${esc(r.note)}` : ''} <span class="faint">(vs. what you can see)</span></small>`;
   }
 
   /** Toggle chips for fleets that can join a seize (combined assault). */
@@ -1078,6 +1095,15 @@ export class GameScreen {
     } else if (this.hoverRegion !== null) {
       const r = this.st.regions[this.hoverRegion];
       html = `<b style="color:${this.color(r.owner)}">${esc(r.name)}</b> <span class="dim">${r.kind}${r.feature !== 'none' ? ' · ' + r.feature : ''}</span><br>${esc(this.pname(r.owner))} · garrison ${r.garrison < 0 ? '?' : r.garrison}`;
+      if (this.mode?.type === 'seize') {
+        const k = this.nextSlot() ?? 0;
+        const fl = this.fleet(this.mode.fleet);
+        const from = fl ? this.projected(k).get(fl.id) ?? fl.region : -1;
+        if (fl && (from === r.id || this.st.regions[from]?.neighbors.includes(r.id)) && r.owner !== this.you) {
+          const od = this.odds([fl.id], r.id, k);
+          if (od) html += `<br>Seize odds ≈ <span class="odds ${od.p >= 0.65 ? 'hi' : od.p >= 0.4 ? 'mid' : 'lo'}">${Math.round(od.p * 100)}%</span>${od.note ? `<br><span class="dim">${esc(od.note)}</span>` : ''}`;
+        }
+      }
       if (this.mode?.type === 'move') {
         const fl = this.fleet(this.mode.fleet);
         if (fl) {

@@ -61,6 +61,9 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     if (err) freeFails.push({ k: 'fail', pulse: 0, owner: p.id, text: `${fa.type} failed: ${err}` });
   }
 
+  // iterate regions from a turn-dependent offset so no part of the map always resolves first
+  const rOff = (s.turn * 7) % s.regions.length;
+  const rotatedRegions = [...s.regions.slice(rOff), ...s.regions.slice(0, rOff)];
   const startFleets = structuredClone(s.fleets);
   const startOwners = s.regions.map(r => r.owner);
   const leader = currentLeader(s);
@@ -108,7 +111,9 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   for (let pulse = 1; pulse <= R.orders.pulses; pulse++) {
     emit({ k: 'pulse', pulse });
     const orders: { p: PlayerId; o: Order }[] = [];
-    for (const p of s.players) {
+    // rotate who is processed first each turn so same-pulse ties never favour a seat
+    const rot = s.turn % s.players.length;
+    for (const p of [...s.players.slice(rot), ...s.players.slice(0, rot)]) {
       if (p.eliminated) continue;
       const o = subs[p.id].orders[pulse - 1];
       if (o) orders.push({ p: p.id, o });
@@ -300,7 +305,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         }
       }
       // --- guard reactions (free standing order)
-      for (const r of s.regions) {
+      for (const r of rotatedRegions) {
         if (r.owner === null) continue;
         const invaders = s.fleets.filter(x => x.region === r.id && x.ships.length && hostile(s, x.owner, r.owner!) && x.owner !== -1
           && x.doctrine.stance !== 'evasive' && !x.ships.every(sh => sh.cls === 'scout'));
@@ -389,7 +394,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   }
 
   function fightEverywhere(pulse: number, cameFrom: Map<number, RegionId>) {
-    for (const r of s.regions) {
+    for (const r of rotatedRegions) {
       const here = s.fleets.filter(f => f.region === r.id && f.ships.length);
       if (!here.length) continue;
       let wants = false;
@@ -756,7 +761,8 @@ export function checkVictory(s: GameState) {
   }
   const rank = () => live.slice().sort((a, b) => b.vp - a.vp
     || (s.throne.owner === b.id ? 1 : 0) - (s.throne.owner === a.id ? 1 : 0)
-    || s.regions.filter(r => r.kind === 'crown' && r.owner === b.id).length - s.regions.filter(r => r.kind === 'crown' && r.owner === a.id).length);
+    || s.regions.filter(r => r.kind === 'crown' && r.owner === b.id).length - s.regions.filter(r => r.kind === 'crown' && r.owner === a.id).length
+    || (a.id + s.seed) % 3 - (b.id + s.seed) % 3);
   if (V.mode === 'vp') {
     const top = rank()[0];
     if (top.vp >= V.vpTarget) { s.winner = top.id; s.winReason = `Reached ${V.vpTarget} VP.`; return; }

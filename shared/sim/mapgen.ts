@@ -53,7 +53,8 @@ function tryGenerate(rules: Rules, seed: number): GeneratedMap | null {
 
   // ---- realise all sites (throne + 3 rotated wedges)
   const sites: Site[] = [{ p: { x: 0, y: 0 }, kind: 'throne', feature: 'none', garrisonRoll: 1, wedge: -1, relic: false }];
-  for (let w = 0; w < 3; w++) for (const t of tmpl) sites.push({ ...t, p: rot(rot(t.p, base), w * W), wedge: w });
+  // interleave wedges (ids 1,2,3 = same template slot in wedges 0,1,2) so id-order tie-breaks don't favour a wedge
+  for (const t of tmpl) for (let w = 0; w < 3; w++) sites.push({ ...t, p: rot(rot(t.p, base), w * W), wedge: w });
 
   // ---- bounding polygon: wobbly circle, also 3-fold symmetric
   const B: Pt[] = [];

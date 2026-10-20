@@ -333,8 +333,8 @@ export function runBattle(
     if (cf !== undefined && cf !== rid && !enemyAt(cf)) return cf;
     const opts = region.neighbors.filter(n => !enemyAt(n));
     const own = opts.filter(n => s.regions[n].owner === f.owner);
-    if (own.length) return own[0];
-    return opts.length ? opts[0] : null;
+    if (own.length) return rng.pick(own);
+    return opts.length ? rng.pick(opts) : null;
   }
 
   // ---------------------------------------------------------------- aftermath

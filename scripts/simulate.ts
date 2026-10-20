@@ -44,7 +44,7 @@ for (const lvStr of suite) {
   for (let g = 0; g < games; g++) {
     // rotate seats so map position doesn't bias the level comparison
     const lv = levels.map((_, i) => levels[(i + g) % levels.length]);
-    let s: GameState = createGame({ seed: seed0 + g, players: lv.map(l => ({ kind: 'ai' as const, aiLevel: l })), rules });
+    let s: GameState = createGame({ homeRotation: arg('rot', '') === '' ? undefined : Number(arg('rot', '0')), seed: seed0 + g, players: lv.map(l => ({ kind: 'ai' as const, aiLevel: l })), rules });
     let leaderT6: number | null = null;
     while (s.winner === null && s.turn < 200) {
       const subs: any = {};
