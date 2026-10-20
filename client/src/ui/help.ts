@@ -12,6 +12,15 @@ export function helpHtml(st: GameState): string {
     <li>A fleet can take at most <b>${R.orders.maxPerFleet}</b> orders per turn, and the second one costs ${R.orders.repeatFleetCredits}¢ (fatigue).</li>
     <li>Anything you don't order still works: regions produce, garrisons regenerate, projects progress, and fleets follow their <b>doctrine</b> (free to change).</li>
   </ul>
+  <h2>Live mode (if you picked it)</h2>
+  <ul>
+    <li>No turns to seal. The galaxy <b>ticks</b> on a real clock: a tick every ${R.live.tickMinutes} minutes at normal speed. Each tick is one pulse (below).</li>
+    <li>You <b>earn one order every ${R.live.orderEveryHours} hours</b> and can bank up to ${R.live.bankCap}. Spend them right away or save them for a big turn. A full bank wastes new orders, so spend before it overflows.</li>
+    <li>Spent orders act at the <b>next tick</b>. Until then you can take them back (refunded).</li>
+    <li>Moves can go <b>any distance</b>. Fleets travel in real time, and you can see their route and arrival time. So can rivals whose sensors cover them. <b>Halt</b> is free.</li>
+    <li>Every ${R.live.ticksPerCycle} ticks a <b>cycle</b> ends: income, upkeep, scoring and edicts. A cycle is the same as a WEGO turn.</li>
+    <li>Doctrine, splits, merges and renames stay free.</li>
+  </ul>
   <h2>Inside each pulse (always in this order)</h2>
   <ol>
     <li><b>Prepare</b>: Fortify, Scan, Feint, Conceal, Pact offers.</li>

@@ -330,4 +330,28 @@ describe('static files & limits', () => {
       expect(codes).toEqual([200, 200, 429, 429]);
     } finally { await s2.close(); rmSync(dir, { recursive: true, force: true }); }
   });
+
+  it('runs LIVE games: banked orders over WS, private banks, WEGO submit refused', async () => {
+    const { id, toks } = await newGame({ mode: 'live', liveSpeed: 'blitz' });
+    const a = new Client(id, toks[0]); const b = new Client(id, toks[1]);
+    await Promise.all([a.open(), b.open()]);
+    const v0 = await a.next(m => m.type === 'view') as Extract<ServerMsg, { type: 'view' }>;
+    expect(v0.meta.mode).toBe('live');
+    const st = v0.view.state;
+    const bank = st.live!.bank[0];
+    expect(bank).toBeGreaterThan(0);
+    a.send({ type: 'liveOrder', order: { type: 'build', region: st.players[0].capital, cls: 'corvette', fleet: null } });
+    const v1 = await a.next(m => m.type === 'view' && m.view.state.live!.bank[0] === bank - 1) as Extract<ServerMsg, { type: 'view' }>;
+    expect(v1.view.state.live!.queue[0]).toHaveLength(1);
+    // the rival sees neither the bank nor the queue
+    const vb = await b.next(m => m.type === 'view') as Extract<ServerMsg, { type: 'view' }>;
+    expect(vb.view.state.live!.bank[0]).toBe(-1);
+    expect(vb.view.state.live!.queue[0]).toBeUndefined();
+    // a seat can't spend for another seat, and malformed orders bounce
+    a.send({ type: 'liveOrder', order: { type: 'nonsense' } });
+    await a.next(m => m.type === 'error');
+    a.send({ type: 'submit', submission: empty });
+    await a.next(m => m.type === 'error');
+    a.close(); b.close();
+  });
 });

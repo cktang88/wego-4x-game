@@ -15,6 +15,18 @@ import { MapRenderer, regionLayout, type FleetDraw, type Fx } from './render/map
 import { openBattleViewer } from './render/battle.ts';
 import { h, esc, toast, overlay, roman } from './ui/dom.ts';
 import { helpHtml } from './ui/help.ts';
+import { nextTickAt, tickMs, orderMs, etaTicks, tickInCycle } from '../../shared/sim/live.ts';
+import type { FreeAction } from '../../shared/sim/types.ts';
+
+/** "2h 05m", "4m 10s", "12s" */
+export function fmtDur(ms: number): string {
+  ms = Math.max(0, ms);
+  const s = Math.floor(ms / 1000), m = Math.floor(s / 60), h = Math.floor(m / 60), d = Math.floor(h / 24);
+  if (d > 0) return `${d}d ${h % 24}h`;
+  if (h > 0) return `${h}h ${String(m % 60).padStart(2, '0')}m`;
+  if (m > 0) return `${m}m ${String(s % 60).padStart(2, '0')}s`;
+  return `${s}s`;
+}
 
 type Mode = null | { type: 'move'; fleet: number; overdrive: boolean } | { type: 'seize'; fleet: number } | { type: 'target'; order: 'influence' | 'scan' | 'feint' };
 type Tab = 'orders' | 'intel' | 'chronicle' | 'score' | 'chat';
@@ -61,6 +73,8 @@ export class GameScreen {
   destroyed = false;
   previewing = false;
   autoPlay = false;
+  flashOrder = 0;
+  lastClock = 0;
   odSticky = false;
   planVersion = 0;
   /** replay speed chosen by the user, kept across turns (Auto play) */
@@ -161,7 +175,17 @@ export class GameScreen {
   get st(): GameState { return this.src.view.state; }
   get you(): number | null { return this.src.view.you; }
   get submitted(): boolean { return !!this.src.mySubmission; }
-  get canPlan(): boolean { return this.you !== null && !this.submitted && this.st.winner === null && !this.st.players[this.you].eliminated; }
+  get canPlan(): boolean { return this.you !== null && (this.live || !this.submitted) && this.st.winner === null && !this.st.players[this.you].eliminated; }
+  /** LIVE mode (real time, banked orders) instead of WEGO turns. */
+  get live(): boolean { return !!this.st.live; }
+  get bank(): number { return this.you !== null ? Math.max(0, this.st.live?.bank[this.you] ?? 0) : 0; }
+  get queue(): Order[] { return this.you !== null ? this.st.live?.queue[this.you] ?? [] : []; }
+  /** Free actions go into the plan (WEGO) or straight to the server (LIVE). */
+  pushFree(fa: FreeAction) {
+    if (this.live) { this.src.liveFree?.(fa); return; }
+    this.plan.free.push(fa);
+    this.savePlan();
+  }
   /** Identity of this game for localStorage keys. Local games all share meta.id 'local', so add the save slot + seed. */
   gameKey() {
     if (this.src instanceof LocalSource) return `${this.src.storageKey}:${this.st.seed}`;
@@ -265,6 +289,20 @@ export class GameScreen {
 
   addOrder(o: Order) {
     if (!this.canPlan) return;
+    if (this.live) {
+      if (this.bank < 1) { toast(`No orders banked. The next one arrives in ${fmtDur((this.st.live!.nextOrderAt[this.you!] ?? 0) - Date.now())}.`); return; }
+      const s2: GameState = { ...this.st, fleets: this.st.fleets.map(f => ({ ...f })) };
+      for (const q of [...this.queue, o]) if ('fleet' in q && q.type !== 'build') { const f = s2.fleets.find(x => x.id === q.fleet); if (f) f.ordersThisTurn++; }
+      const err = validateOrder(s2, this.you!, o);
+      if (err) { toast(`Can't: ${err}`); return; }
+      this.src.liveOrder?.(o);
+      this.mode = null;
+      if (this.phone) this.sel = null;
+      this.flashOrder = performance.now();
+      toast(`${ORDER_INFO[o.type].icon} ${describeOrder(this.st, o)}: happens at the next tick (in ${fmtDur(nextTickAt(this.st) - Date.now())}).`);
+      this.renderAll();
+      return;
+    }
     const k = this.nextSlot();
     if (k === null) { toast(`All ${this.plan.orders.length} orders are used. Remove one first (that's the point!).`); return; }
     const err = this.validateAt(o, k);
@@ -312,7 +350,16 @@ export class GameScreen {
       document.removeEventListener('visibilitychange', this.onVisible);
       document.addEventListener('visibilitychange', this.onVisible);
     }
-    if (last && last.turn > this.lastSeenTurn && this.st.turn > 1) {
+    if (this.live) {
+      // LIVE: play each new tick as a quick, skippable animation (only if something visible happened)
+      if (last && (last.tick ?? 0) > this.lastSeenTick) {
+        const first = this.lastSeenTick === -1;
+        this.lastSeenTick = last.tick ?? 0;
+        const interesting = last.events.some(e => e.k === 'move' || e.k === 'battle' || e.k === 'capture' || e.k === 'destroyed' || e.k === 'build' || e.k === 'clash');
+        if (!first && interesting && !this.replay && !document.hidden) { this.startReplay(last); const r = this.replay as { speed: number } | null; if (r) r.speed = Math.max(this.replaySpeed, 3); }
+        else if (!this.replay) this.pulseFx();
+      }
+    } else if (last && last.turn > this.lastSeenTurn && this.st.turn > 1) {
       this.lastSeenTurn = last.turn;
       try { localStorage.setItem(seenKey, String(last.turn)); } catch { /* */ }
       this.startReplay(last);
@@ -323,6 +370,12 @@ export class GameScreen {
     this.maybeShowVictory();
   }
   lastSeenKey = '';
+  lastSeenTick = -1;
+  /** A soft ripple from every fleet & battle when a quiet tick passes, so the world feels alive. */
+  pulseFx() {
+    const now = performance.now();
+    for (const e of this.st.engagements ?? []) this.fx.push({ kind: 'battle', pos: this.st.regions[e.region].site, color: '#ffb36b', t0: now, dur: 900 });
+  }
 
   maybeShowVictory() {
     if (this.st.winner === null || this.victoryShown || this.replay || this.curtain) return;
@@ -370,7 +423,11 @@ export class GameScreen {
     this.root.classList.toggle('sheet-open', this.sheetOpen);
     this.root.classList.toggle('sel-open', !!this.sel);
     if (!this.phone) { d.innerHTML = ''; return; }
-    if (this.replay || this.you === null || this.st.winner !== null) {
+    if (this.live && this.you !== null && this.st.winner === null) {
+      const cap = this.st.rules.live.bankCap;
+      d.innerHTML = `<div class="pills livebank" data-d="sheet">${Array.from({ length: cap }, (_, i) => `<span class="pip ${i < this.bank ? 'on' : ''}"></span>`).join('')}<small>${this.bank >= cap ? 'bank full' : `+1 in <b data-countdown="${this.st.live!.nextOrderAt[this.you] ?? 0}"></b>`}</small></div>
+        <button class="dockbtn" data-d="sheet" aria-label="Open panel">${this.sheetOpen ? '▾' : '▴'}</button>`;
+    } else if (this.replay || this.you === null || this.st.winner !== null) {
       d.innerHTML = `<button class="dockbtn grow" data-d="sheet">${this.sheetOpen ? 'Hide panel ▾' : 'Intel · Chronicle · Score ▴'}</button>`;
     } else {
       const pills = this.plan.orders.map((o, i) => `<button class="pill ${o ? 'filled' : ''} ${this.nextSlot() === i && this.canPlan ? 'target' : ''}" data-pill="${i}" aria-label="Pulse ${roman(i + 1)}${o ? ': ' + esc(describeOrder(this.st, o)) : ' (empty)'}"><small>${roman(i + 1)}</small>${o ? ORDER_INFO[o.type].icon : ''}</button>`).join('');
@@ -386,14 +443,17 @@ export class GameScreen {
     }));
     d.querySelector('[data-d="seal"]')?.addEventListener('click', () => this.submit());
     d.querySelector('[data-d="unseal"]')?.addEventListener('click', () => this.src.unsubmit());
-    d.querySelector('[data-d="sheet"]')?.addEventListener('click', () => (this.sheetOpen ? this.closeSheet() : this.openSheet()));
+    d.querySelectorAll('[data-d="sheet"]').forEach(x => x.addEventListener('click', () => (this.sheetOpen ? this.closeSheet() : this.openSheet('orders'))));
+    this.tickClocks();
   }
 
   renderTop() {
     const st = this.st, meta = this.src.meta;
-    this.el.turn.textContent = `TURN ${st.turn} / ${st.rules.victory.turnLimit}`;
+    this.el.turn.textContent = this.live ? `● LIVE · CYCLE ${st.turn} / ${st.rules.victory.turnLimit}` : `TURN ${st.turn} / ${st.rules.victory.turnLimit}`;
+    this.el.turn.classList.toggle('livebadge', this.live);
     let phase = '';
     if (st.winner !== null) phase = `${this.pname(st.winner)} wins`;
+    else if (this.live) phase = '';
     else if (this.replay) phase = this.replay.preview ? 'PREVIEW: rivals assumed idle' : `Replaying turn ${this.replay.result.turn}`;
     else if (this.you === null) phase = 'Spectating';
     else if (this.submitted) {
@@ -407,7 +467,8 @@ export class GameScreen {
       const ms = meta.deadline - Date.now();
       phase += ms > 0 ? ` · ${Math.floor(ms / 3600000)}h${String(Math.floor(ms / 60000) % 60).padStart(2, '0')} left` : ' · deadline passed';
     }
-    this.el.phase.textContent = phase;
+    if (this.live && st.winner === null) this.el.phase.innerHTML = `Next tick in <b data-countdown="${nextTickAt(st)}">${fmtDur(nextTickAt(st) - Date.now())}</b>${this.you !== null ? ` · <span class="bankmini">${this.bank} order${this.bank === 1 ? '' : 's'}</span>` : ''}`;
+    else this.el.phase.textContent = phase;
     if (this.you !== null) {
       const p = st.players[this.you];
       const inc = income(st, this.you);
@@ -429,7 +490,7 @@ export class GameScreen {
         <span class="dot ${s?.online ? 'on' : ''}"></span>
         <span style="color:var(--text)${p.eliminated ? ';text-decoration:line-through' : ''}">${esc(p.name)}</span>
         <span class="vp">${shownVp}${leader === p.id && !this.replay ? ' ♛' : ''}</span>
-        ${s?.submitted ? '<span title="orders sealed">✓</span>' : '<span class="faint" title="still planning">…</span>'}
+        ${this.live ? '' : s?.submitted ? '<span title="orders sealed">✓</span>' : '<span class="faint" title="still planning">…</span>'}
       </div>`;
     }).join('');
   }
@@ -448,7 +509,7 @@ export class GameScreen {
   renderTab() {
     const b = this.el.tabbody;
     switch (this.tab) {
-      case 'orders': b.innerHTML = this.ordersHtml(); this.bindOrders(); break;
+      case 'orders': if (this.live) { b.innerHTML = this.liveHtml(); this.bindLive(); } else { b.innerHTML = this.ordersHtml(); this.bindOrders(); } break;
       case 'intel': b.innerHTML = this.intelHtml(); break;
       case 'chronicle': b.innerHTML = this.chronicleHtml(); break;
       case 'score': b.innerHTML = this.scoreHtml(); b.querySelectorAll<HTMLElement>('[data-pact]').forEach(e => e.addEventListener('click', () => this.addOrder({ type: 'pact', with: Number(e.dataset.pact) }))); break;
@@ -500,6 +561,48 @@ export class GameScreen {
       <div style="margin-top:10px;font-size:13px" class="dim">${seats}</div>
       <h3>How to give orders</h3>
       <div class="orderhelp">Click one of <b>your fleets</b> (chevrons) for Move / Seize / Fortify / Excavate and its doctrine. Click a <b>region</b> for Build / Develop, or Influence / Scan / Feint. Click a slot to place the next order into that pulse. <span class="kbd">Esc</span> cancels.</div>`;
+  }
+
+  /** LIVE mode Orders tab: the bank, what's queued for the next tick, fleets on the move. */
+  liveHtml(): string {
+    const st = this.st, L = st.live!;
+    if (this.you === null) return `<p class="dim">You are spectating this live game.</p>`;
+    const cap = st.rules.live.bankCap;
+    const pips = Array.from({ length: cap }, (_, i) => `<span class="pip ${i < this.bank ? 'on' : ''}"></span>`).join('');
+    const nextOrder = L.nextOrderAt[this.you] ?? 0;
+    const queue = this.queue.map((o, i) => `<div class="slot filled live-q"><div class="num">⏳</div><div class="desc">${ORDER_INFO[o.type].icon} ${esc(describeOrder(st, o))}<small>at the next tick · ${costText(orderCost(st, o, this.you!)) || 'no resource cost'}</small></div>
+      <div class="acts"><button data-cancel="${i}" title="Take it back (refunds the order)">✕</button></div></div>`).join('');
+    const moving = st.fleets.filter(f => f.owner === this.you && f.route).map(f => {
+      const eta = etaTicks(st, f.id);
+      const dest = f.route!.path.length ? f.route!.path[f.route!.path.length - 1] : f.region;
+      return `<div class="entry row click" data-fleet="${f.id}"><span class="grow">➤ <b>${esc(f.name)}</b> → ${esc(st.regions[dest]?.name ?? '?')}${f.route!.seize !== null ? ' <span class="gold">(to seize)</span>' : ''}<br><span class="faint">arrives in ~${eta !== null ? fmtDur(eta * tickMs(st) - (Date.now() - (nextTickAt(st) - tickMs(st)))) : 'now'}</span></span><button class="small" data-halt="${f.id}" title="Stop where it is (free)">Halt</button></div>`;
+    }).join('');
+    return `<div class="bank ${this.bank >= cap ? 'full' : ''}">
+        <div class="row"><b class="grow">Orders banked</b><span class="bankn">${this.bank}<small>/${cap}</small></span></div>
+        <div class="pips">${pips}</div>
+        <div class="faint" style="font-size:12px">${this.bank >= cap ? '<span class="gold">Bank full: spend an order or the next one is wasted.</span>' : `+1 order in <b data-countdown="${nextOrder}"></b>`} · one every ${fmtDur(orderMs(st))}</div>
+      </div>
+      <div class="tick row"><span class="grow">Next tick in <b data-countdown="${nextTickAt(st)}"></b></span><span class="faint">tick ${tickInCycle(st) + 1}/${st.rules.live.ticksPerCycle} of cycle ${st.turn}</span></div>
+      ${this.advisorHtml()}
+      ${queue ? `<h3>Happening at the next tick</h3><div class="slots">${queue}</div>` : ''}
+      ${moving ? `<h3>Fleets on the move</h3><div class="feed">${moving}</div>` : ''}
+      ${!queue && !moving ? `<div class="orderhelp">Tap one of <b>your fleets</b> or a <b>region</b> to spend an order. Orders happen at the next tick, and fleets then travel in real time. Moves can go any distance.</div>` : ''}`;
+  }
+  bindLive() {
+    const b = this.el.tabbody;
+    b.querySelectorAll<HTMLElement>('[data-cancel]').forEach(e => e.addEventListener('click', () => this.src.liveCancel?.(Number(e.dataset.cancel))));
+    b.querySelectorAll<HTMLElement>('[data-halt]').forEach(e => e.addEventListener('click', ev => { ev.stopPropagation(); this.src.liveHalt?.(Number(e.dataset.halt)); }));
+    b.querySelectorAll<HTMLElement>('[data-fleet]').forEach(e => e.addEventListener('click', () => this.select({ kind: 'fleet', id: Number(e.dataset.fleet) })));
+  }
+  /** An own fleet that could act right now and hasn't been given anything to do: it glows. */
+  isIdle(f: Fleet): boolean {
+    if (f.owner !== this.you || !this.canPlan || this.replay) return false;
+    if (this.live) return this.bank > 0 && !f.route && !this.queue.some(o => 'fleet' in o && o.type !== 'build' && o.fleet === f.id) && f.siege !== f.region;
+    return this.plan.orders.some(o => !o) && !this.plan.orders.some(o => o && 'fleet' in o && o.type !== 'build' && (o.fleet === f.id || (o.type === 'seize' && o.also?.includes(f.id)))) && f.siege !== f.region;
+  }
+  /** Refresh every [data-countdown] in the UI (cheap; called ~once a second). */
+  tickClocks() {
+    for (const el of this.root.querySelectorAll<HTMLElement>('[data-countdown]')) el.textContent = fmtDur(Number(el.dataset.countdown) - Date.now());
   }
 
   freeText(x: Submission['free'][number]): string {
@@ -565,8 +668,10 @@ export class GameScreen {
     const w = st.fleets.find(f => f.owner === -1);
     if (w) tips.push(`☠ The Warden is at ${esc(st.regions[w.region].name)} and hunts the VP leader.`);
     const idleYard = st.regions.find(r => r.owner === you && (r.buildings.shipyard ?? 0) > 0) && !this.plan.orders.some(o => o?.type === 'build');
-    if (idleYard && st.players[you].res.industry >= 20 && tips.length < 4) tips.push('⚙ Your shipyard is idle this turn.');
-    if (st.turn === 1) tips.unshift('👋 First turn: try Seize on a neighbouring colony with your Home Guard, Move a scout outward, and Build a ship. Then Seal.');
+    if (idleYard && st.players[you].res.industry >= 20 && tips.length < 4) tips.push(this.live ? '⚙ Your shipyard is idle.' : '⚙ Your shipyard is idle this turn.');
+    if (st.turn === 1) tips.unshift(this.live
+      ? '👋 You start with a few banked orders, and earn one more on a timer. Try Seize on a neighbouring colony with your Home Guard, or Build a ship. Orders act at the next tick; no Seal needed.'
+      : '👋 First turn: try Seize on a neighbouring colony with your Home Guard, Move a scout outward, and Build a ship. Then Seal.');
     return tips.length ? `<div class="feed" style="margin:6px 0 10px">${tips.slice(0, 5).map(t => `<div class="entry" style="border-left-color:var(--gold)">${t}</div>`).join('')}</div>` : '';
   }
 
@@ -730,11 +835,13 @@ export class GameScreen {
       const v = (e.target as HTMLInputElement).value.trim();
       if (!this.canPlan || this.sel?.kind !== 'fleet' || !v) return;
       const id = this.sel.id;
+      if (this.live) { this.src.liveFree?.({ type: 'rename', fleet: id, name: v.slice(0, 40) }); toast('Renamed at the next tick.'); return; }
       this.plan.free = this.plan.free.filter(x => !(x.type === 'rename' && x.fleet === id));
       if (v !== this.fleet(id)?.name) this.plan.free.push({ type: 'rename', fleet: id, name: v.slice(0, 40) });
       this.savePlan(); this.renderTab(); toast('Renamed (applies when the turn resolves)');
     });
     L.querySelector('[data-close]')?.addEventListener('click', () => { this.sel = null; this.mode = null; this.renderLeft(); });
+    L.querySelector('[data-halt]')?.addEventListener('click', () => { if (this.sel?.kind === 'fleet') this.src.liveHalt?.(this.sel.id); });
   }
 
   regionHtml(r: Region): string {
@@ -843,6 +950,7 @@ export class GameScreen {
     }
     return `<div class="sel"><div class="row"><h2 class="grow" style="color:${this.color(f.owner)}">${esc(f.name)}</h2><button class="small" data-close>✕</button></div>
       <div class="dim" style="font-size:13px">${esc(this.pname(f.owner))} · at ${esc(st.regions[f.region].name)}${pos !== f.region ? ` → <b>${esc(st.regions[pos].name)}</b> (planned)` : ''} · speed ${fleetSpeed(st, f)} · power ${fleetPower(st, f)}${f.fortified ? ' · fortified' : ''}${f.fatigued ? ' · <span class="bad">fatigued</span>' : ''}${f.siege === f.region ? ` · <span class="gold">besieging ${esc(st.regions[f.region].name)}</span>` : ''}${(st.engagements ?? []).some(e => e.region === f.region) ? ' · <span style="color:#ffb37a">⚔ in battle</span>' : ''}</div>
+      ${this.live && f.route ? `<div class="edict" style="margin-top:8px">➤ Travelling to <b>${esc(st.regions[f.route.path[f.route.path.length - 1] ?? f.region]?.name ?? '?')}</b>${f.route.seize !== null ? ' to seize it' : ''} · arrives in ~${fmtDur((etaTicks(st, f.id) ?? 0) * tickMs(st))}${mine ? ' <button class="small" data-halt>Halt (free)</button>' : ''}</div>` : ''}
       ${mine && this.canPlan ? `<input data-rename value="${esc(this.pendingName(f))}" maxlength="40" style="width:100%;margin-top:6px" title="Rename (free)">` : ''}
       <h3>Commander</h3>
       <div><b>${esc(c.name)}</b> <span class="faint">rank ${c.rank} · ${c.xp} xp · ${c.deeds.wins}W/${c.deeds.losses}L · ${c.deeds.kills} kills</span></div>
@@ -865,6 +973,7 @@ export class GameScreen {
     const v = (k: string) => L.querySelector<HTMLInputElement>(`[data-doc="${k}"]`)!;
     const d: Doctrine = { stance: v('stance').value as Doctrine['stance'], retreatAt: Number(v('retreatAt').value), target: v('target').value as Doctrine['target'], guard: v('guard').checked };
     const id = this.sel.id;
+    if (this.live) { this.src.liveFree?.({ type: 'doctrine', fleet: id, doctrine: d }); toast('Doctrine changes at the next tick.'); return; }
     this.plan.free = this.plan.free.filter(x => !(x.type === 'doctrine' && x.fleet === id));
     this.plan.free.push({ type: 'doctrine', fleet: id, doctrine: d });
     this.savePlan();
@@ -886,12 +995,14 @@ export class GameScreen {
         case 'merge': {
           const into = Number(this.el.left.querySelector<HTMLSelectElement>('[data-mergeinto]')?.value);
           if (!this.fleet(into)) return;
+          if (this.live) { this.src.liveFree?.({ type: 'merge', fleet: f.id, into }); toast('Merging at the next tick.'); break; }
           this.plan.free = this.plan.free.filter(x => !(x.type === 'merge' && x.fleet === f.id));
           this.plan.free.push({ type: 'merge', fleet: f.id, into }); this.savePlan(); toast('Merge queued (applies at the start of resolution, before pulse I). Order the merged fleet, not this one.'); break;
         }
         case 'split': {
           const ids = [...this.el.left.querySelectorAll<HTMLInputElement>('[data-split]:checked')].map(x => Number(x.dataset.split));
           if (!ids.length || ids.length === f.ships.length) { toast('Check some (not all) ships first.'); return; }
+          if (this.live) { this.src.liveFree?.({ type: 'split', fleet: f.id, ships: ids }); toast('Splitting at the next tick.'); break; }
           this.plan.free.push({ type: 'split', fleet: f.id, ships: ids }); this.savePlan(); toast('Split queued: the new squadron appears when the turn resolves and can be ordered next turn.'); break;
         }
       }
@@ -919,7 +1030,7 @@ export class GameScreen {
     const cur = this.replay ? this.replay.pulse : 0;
     this.el.pulsebar.innerHTML = Array.from({ length: P }, (_, i) => `<span class="${cur === i + 1 ? 'on' : cur > i + 1 ? 'done' : ''}" title="pulse ${roman(i + 1)}"></span>`).join('');
     const local0 = this.src instanceof LocalSource ? this.src : null;
-    this.el.bottombar.classList.toggle('quiet', !this.replay && !(local0 && local0.humans.length === 0 && this.st.winner === null));
+    this.el.bottombar.classList.toggle('quiet', !this.replay && !(local0 && local0.humans.length === 0 && this.st.winner === null && !this.live));
     if (this.replay) {
       const R = this.replay;
       this.el.rcontrols.innerHTML = `<button class="small" data-r="pause">${R.playing ? '❚❚' : '▶'}</button><button class="small" data-r="speed">${R.speed}×</button><button class="small" data-r="skip">Skip ⏭</button>`;
@@ -932,14 +1043,14 @@ export class GameScreen {
       }));
     } else {
       const local = this.src instanceof LocalSource ? this.src : null;
-      const watching = !!local && local.humans.length === 0 && this.st.winner === null;
+      const watching = !!local && local.humans.length === 0 && this.st.winner === null && !this.live;
       this.el.rcontrols.innerHTML = (watching ? `<button class="small primary" data-x="next" title="Resolve the next turn">Next turn ▶</button><button class="small ${this.autoPlay ? 'active' : ''}" data-x="auto" title="Keep playing turns automatically">Auto ⏵⏵</button>` : '')
         + (local ? `<button class="small" data-x="save" title="Download a save file">💾</button>` : '');
       this.el.rcontrols.querySelector('[data-x="save"]')?.addEventListener('click', () => this.exportSave());
       this.el.rcontrols.querySelector('[data-x="next"]')?.addEventListener('click', () => { if (!this.replay) local!.advance(); });
       this.el.rcontrols.querySelector('[data-x="auto"]')?.addEventListener('click', () => { this.autoPlay = !this.autoPlay; if (this.autoPlay && !this.replay) local!.advance(); this.renderBottom(); });
       if (watching && !this.el.ticker.innerHTML.trim()) this.el.ticker.innerHTML = '<span class="faint">Watching three AIs. Press Next turn, or Auto.</span>';
-      if (!this.el.ticker.innerHTML) this.el.ticker.innerHTML = `<span class="faint">Plan your ${this.st.rules.orders.perTurn} orders, then seal them. Everyone's orders resolve together.</span>`;
+      if (!this.el.ticker.innerHTML) this.el.ticker.innerHTML = (this.live ? `<span class="faint">Live game: spend banked orders any time. They act at the next tick, and the world keeps moving in between.</span>` : `<span class="faint">Plan your ${this.st.rules.orders.perTurn} orders, then seal them. Everyone's orders resolve together.</span>`);
     }
   }
 
@@ -1116,8 +1227,22 @@ export class GameScreen {
       }
     } else {
       const lay = this.fleetLayout();
-      fleets = st.fleets.map(f => ({ id: f.id, owner: f.owner, ships: f.ships.length, pos: lay.get(f.id) ?? st.regions[f.region].site, alpha: 1, name: f.name, fortified: f.fortified, selected: this.sel?.kind === 'fleet' && this.sel.id === f.id }));
+      // LIVE: fleets in transit glide toward their next region as the tick approaches
+      const frac = this.live ? Math.min(1, Math.max(0, 1 - (nextTickAt(st) - Date.now()) / tickMs(st))) : 0;
+      fleets = st.fleets.map(f => {
+        let pos = lay.get(f.id) ?? st.regions[f.region].site;
+        const rt = f.route;
+        if (this.live && rt && rt.path.length && st.regions[rt.path[0]]) {
+          const sp = Math.max(1, fleetSpeed(st, f)) + (rt.overdrive ? st.rules.overdrive.speedBonus : 0);
+          const prog = Math.min(0.92, Math.max(0, (rt.mp + sp * frac) / st.rules.live.stepCost));
+          const to = st.regions[rt.path[0]].site;
+          const e = prog * prog * (3 - 2 * prog);
+          pos = { x: pos.x + (to.x - pos.x) * e * 0.85, y: pos.y + (to.y - pos.y) * e * 0.85 };
+        }
+        return { id: f.id, owner: f.owner, ships: f.ships.length, pos, alpha: 1, name: f.name, fortified: f.fortified, selected: this.sel?.kind === 'fleet' && this.sel.id === f.id, idle: this.isIdle(f) };
+      });
     }
+    if (this.live && now - this.lastClock > 500) { this.lastClock = now; this.tickClocks(); }
     // highlights for modes (memoized: path searches over every region are too costly to redo each frame)
     let highlight = new Map<number, string>();
     let pathPreview: { pts: Pt[]; ok: boolean } | null = null;
@@ -1133,7 +1258,7 @@ export class GameScreen {
             if (this.mode.type === 'seize') {
               for (const n of [from, ...st.regions[from].neighbors]) if (st.regions[n].owner !== this.you) hl.set(n, '#ff5d7a');
             } else {
-              const sp = fleetSpeed(st, f) + (this.mode.overdrive ? st.rules.overdrive.speedBonus : 0);
+              const sp = this.live ? 99 : fleetSpeed(st, f) + (this.mode.overdrive ? st.rules.overdrive.speedBonus : 0);
               for (const [rid, d] of hops(st, from, sp)) if (d > 0) hl.set(rid, '#6dffb0');
             }
           }
@@ -1147,7 +1272,7 @@ export class GameScreen {
         const f = this.fleet(this.mode.fleet);
         const from = f ? this.projected(k).get(f.id) ?? f.region : null;
         if (f && from !== null && this.hoverRegion !== from) {
-          const sp = fleetSpeed(st, f) + (this.mode.overdrive ? st.rules.overdrive.speedBonus : 0);
+          const sp = this.live ? 99 : fleetSpeed(st, f) + (this.mode.overdrive ? st.rules.overdrive.speedBonus : 0);
           const p = this.safePath(from, this.hoverRegion);
           if (p && p.length) { const stop = this.blockedAt(p); pathPreview = { pts: [from, ...p].map(x => st.regions[x].site), ok: p.length <= sp && (stop === null || stop === p[p.length - 1]) }; }
         }
@@ -1155,7 +1280,22 @@ export class GameScreen {
     }
     // planned order arrows
     const plannedArrows: { from: Pt; to: Pt; label: string; color: string; dashed?: boolean; kind: Order['type'] }[] = [];
-    if (!this.replay && this.you !== null) {
+    if (this.live && !this.replay) {
+      // routes of fleets in transit (yours, and visible rivals': like reading their carriers' flight plans)
+      for (const f of st.fleets) {
+        const rt = f.route;
+        if (!rt || !rt.path.length) continue;
+        let from = f.region;
+        const eta = etaTicks(st, f.id);
+        rt.path.forEach((r, i) => {
+          if (!st.regions[r] || !st.regions[from]) return;
+          const lastLeg = i === rt.path.length - 1;
+          plannedArrows.push({ from: st.regions[from].site, to: st.regions[r].site, label: lastLeg && eta !== null ? fmtDur(eta * tickMs(st)).replace(/ .*/, '') : '', color: rt.seize !== null && lastLeg ? '#ff5d7a' : this.color(f.owner), dashed: true, kind: 'move' });
+          from = r;
+        });
+      }
+    }
+    if (!this.replay && this.you !== null && !this.live) {
       this.plan.orders.forEach((o, i) => {
         if (!o) return;
         const pos = this.projected(i);
@@ -1186,7 +1326,7 @@ export class GameScreen {
     if (this.mode && hint.dataset.key !== key) {
       hint.dataset.key = key;
       hint.classList.remove('hidden');
-      const txt = this.mode.type === 'move' ? `Tap a destination (pulse ${roman((this.nextSlot() ?? 0) + 1)}).`
+      const txt = this.mode.type === 'move' ? (this.live ? 'Tap a destination: any distance. The fleet travels in real time.' : `Tap a destination (pulse ${roman((this.nextSlot() ?? 0) + 1)}).`)
         : this.mode.type === 'seize' ? `Tap a region to seize (adjacent or current).`
         : `Tap a target region for ${this.mode.order}.`;
       hint.innerHTML = `<span>${txt}</span>${this.mode.type === 'move' ? `<button data-od class="${this.mode.overdrive ? 'active' : ''}" title="+1 range; fleet is fatigued next turn (Shift)">Overdrive ${this.mode.overdrive ? 'ON' : 'off'}</button>` : ''}<button data-cancel>Cancel</button>`;
@@ -1310,6 +1450,7 @@ export class GameScreen {
   }
 
   click(x: number, y: number, shift: boolean) {
+    if (this.replay && this.live && !this.replay.preview) this.endReplay();
     if (this.replay) return;
     const rid = this.map.regionAt(this.st, x, y);
     if (this.mode && rid !== null) {
@@ -1322,6 +1463,7 @@ export class GameScreen {
         const stop = this.blockedAt(path);
         if (stop !== null && stop !== path[path.length - 1]) toast(`Warning: this route is stopped at ${this.st.regions[stop].name} (hostile garrison or fleet).`);
         const sp = fleetSpeed(this.st, f);
+        if (this.live) { this.addOrder({ type: 'move', fleet: f.id, path, overdrive: m.overdrive || shift || undefined }); return; }
         const od = shift || m.overdrive || path.length > sp;
         this.addOrder({ type: 'move', fleet: f.id, path, overdrive: od && path.length > sp ? true : undefined });
       } else if (m.type === 'seize') this.addOrder({ type: 'seize', fleet: m.fleet, target: rid });
@@ -1388,7 +1530,8 @@ export class GameScreen {
         if (fl) {
           const from = this.projected(this.nextSlot() ?? 0).get(fl.id) ?? fl.region;
           const p = findPath(this.st, from, r.id);
-          if (p) html += `<br>${p.length} jump${p.length === 1 ? '' : 's'} (speed ${fleetSpeed(this.st, fl)})${p.length > fleetSpeed(this.st, fl) ? ' <span class="gold">OVERDRIVE</span>' : ''}`;
+          if (p && this.live) html += `<br>${p.length} jump${p.length === 1 ? '' : 's'} · arrives in ~${fmtDur(Math.ceil((p.length * this.st.rules.live.stepCost) / Math.max(1, fleetSpeed(this.st, fl))) * tickMs(this.st))}`;
+          else if (p) html += `<br>${p.length} jump${p.length === 1 ? '' : 's'} (speed ${fleetSpeed(this.st, fl)})${p.length > fleetSpeed(this.st, fl) ? ' <span class="gold">OVERDRIVE</span>' : ''}`;
         }
       }
     }

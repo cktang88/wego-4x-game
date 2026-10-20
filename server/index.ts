@@ -298,6 +298,16 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
             send(c, { type: 'history', turn: m.turn, result: r ? filterHistoryFor(game, r, c.seat) : null });
             break;
           }
+          case 'liveOrder': case 'liveCancel': case 'liveFree': case 'liveHalt': {
+            if (c.seat === null) return send(c, { type: 'error', error: 'spectators cannot give orders', code: 'forbidden' });
+            store.advanceLive(game, Date.now());   // catch up first so the order lands on the right tick
+            if (m.type === 'liveOrder') store.liveOrder(game, c.seat, m.order);
+            else if (m.type === 'liveCancel') store.liveCancel(game, c.seat, m.index);
+            else if (m.type === 'liveFree') store.liveFree(game, c.seat, m.action);
+            else store.liveHalt(game, c.seat, m.fleet);
+            pushView(game, c);
+            break;
+          }
           case 'ping': break;
           default: send(c, { type: 'error', error: 'unknown message type', code: 'bad_message' });
         }
@@ -314,7 +324,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     try {
       for (const id of store.tick()) { const g = store.games.get(id); if (g) pushView(g); }
     } catch (e) { console.error('[tick]', e); }
-  }, opts.tickMs ?? 15_000);
+  }, opts.tickMs ?? 2_000);   // cheap: only due deadlines / live ticks do work
   // terminate half-open sockets so `conns` doesn't leak and "online" stays honest
   const heartbeat = setInterval(() => {
     for (const c of conns) {

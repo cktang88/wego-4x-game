@@ -63,6 +63,13 @@ export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
     return cov.has(c.region) || (!!lastSeen && c.turn === s.last?.turn && lastSeen.has(c.region));
   });
   v.edictDeck = [];
+  if (v.live) {
+    // your own queue and bank only; rivals' banks and plans are secret
+    v.live.queue = { [p]: v.live.queue[p] ?? [] };
+    v.live.free = { [p]: v.live.free[p] ?? [] };
+    v.live.bank = v.live.bank.map((b, i) => (i === p ? b : -1));
+    v.live.nextOrderAt = v.live.nextOrderAt.map((t, i) => (i === p ? t : 0));
+  }
   v.rngState = 0;   // can't predict combat rolls
   return { state: v, you: p, visible: [...cov] };
 }

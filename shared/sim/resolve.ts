@@ -25,34 +25,47 @@ import { fleetSpeed, strengthBand, findPath } from './graph.ts';
 import { canAfford, orderCost, pay, validateOrder, ORDER_INFO } from './orders.ts';
 import { Rng } from './rng.ts';
 import { maxGarrison, newFleet, newShip } from './setup.ts';
-import type { BattleReport, Engagement, Doctrine, Fleet, FreeAction, GameEvent, GameState, Order, PlayerId, RegionId, Signal, Submission, TurnResult } from './types.ts';
+import type { TickOpts, BattleReport, Engagement, Doctrine, Fleet, FreeAction, GameEvent, GameState, Order, PlayerId, RegionId, Signal, Submission, TurnResult } from './types.ts';
 import { coverage, seesFleetsIn } from './visibility.ts';
 
 export function emptySubmission(s: GameState): Submission {
   return { orders: new Array(s.rules.orders.perTurn).fill(null), free: [] };
 }
 
-export function resolveTurn(prev: GameState, submissions: Record<number, Submission>): GameState {
+/**
+ * Resolve a WEGO turn (all pulses + end of turn), or, with `tick`, a single LIVE tick:
+ * one pulse in which every order in each player's list resolves, optionally followed by
+ * the end-of-turn phase (end of a cycle).
+ */
+export function resolveTurn(prev: GameState, submissions: Record<number, Submission>, tick?: TickOpts): GameState {
   const s: GameState = structuredClone({ ...prev, last: null });
+  const live = !!tick;
+  const newCycle = !tick || tick.newCycle;
+  const endCycle = !tick || tick.endCycle;
   const rng = new Rng(s.rngState);
   const R = s.rules;
   const events: GameEvent[] = [];
   const battles: BattleReport[] = [];
   const signals: Signal[] = [];
   const subs: Record<number, Submission> = {};
-  for (const p of s.players) subs[p.id] = sanitize(s, submissions[p.id]);
-  s.log.push({ turn: s.turn, submissions: structuredClone(subs) });
+  for (const p of s.players) subs[p.id] = sanitize(s, submissions[p.id], live);
+  s.log.push(live ? { turn: s.turn, submissions: structuredClone(subs), tick: { ...tick! } } : { turn: s.turn, submissions: structuredClone(subs) });
 
-  s.turnStats = { kills: [0, 0, 0], battlesWon: [0, 0, 0], crownBattlesWon: [0, 0, 0], captures: [0, 0, 0] };
-  const honors = [0, 0, 0];
-  const bountyVp = [0, 0, 0];
+  // per-turn counters (a LIVE cycle counts as one turn: they persist across its ticks)
+  if (newCycle) {
+    s.turnStats = { kills: [0, 0, 0], battlesWon: [0, 0, 0], crownBattlesWon: [0, 0, 0], captures: [0, 0, 0], honors: [0, 0, 0], bounty: [0, 0, 0], influenced: [] };
+    for (const f of s.fleets) { f.ordersThisTurn = 0; f.guardUsed = false; }
+    for (const p of s.players) p.pactOffers = [];
+    s.cycleStartOwners = s.regions.map(r => r.owner);
+    s.concealed = [];
+  }
+  const ts = s.turnStats;
+  const honors = (ts.honors ??= [0, 0, 0]);
+  const bountyVp = (ts.bounty ??= [0, 0, 0]);
   const capped = (p: PlayerId, n: number) => { const room = Math.max(0, R.bountyCap.maxPerTurn - bountyVp[p]); const g = Math.min(room, n); bountyVp[p] += g; return g; };
-  const influencedThisTurn = new Set<string>();
-  const overdrove = new Set<number>();
-  const concealed = new Set<PlayerId>();
+  const influencedThisTurn = { has: (k: string) => (ts.influenced ??= []).includes(k), add: (k: string) => { (ts.influenced ??= []).push(k); } };
+  const concealed = { has: (p: PlayerId) => (s.concealed ?? []).includes(p), add: (p: PlayerId) => { if (!(s.concealed ??= []).includes(p)) s.concealed.push(p); }, [Symbol.iterator]: () => (s.concealed ?? [])[Symbol.iterator]() };
   const covStart = s.players.map(p => coverage(s, p.id));
-  for (const f of s.fleets) { f.ordersThisTurn = 0; f.guardUsed = false; }
-  for (const p of s.players) p.pactOffers = [];
 
   // ---------------------------------------------------------- free actions
   const freeFails: GameEvent[] = [];
@@ -65,7 +78,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   const rOff = (s.turn * 7) % s.regions.length;
   const rotatedRegions = [...s.regions.slice(rOff), ...s.regions.slice(0, rOff)];
   const startFleets = structuredClone(s.fleets);
-  const startOwners = s.regions.map(r => r.owner);
+  const startOwners = s.regions.map(r => r.owner);                        // for this result's replay
+  const scoreOwners = live ? (s.cycleStartOwners ?? startOwners) : startOwners; // for "held the whole turn" scoring
   const leader = currentLeader(s);
 
   const emit = (e: GameEvent) => events.push(e);
@@ -154,7 +168,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   };
 
   // ======================================================================
-  for (let pulse = 1; pulse <= R.orders.pulses; pulse++) {
+  const pulseList = live ? [tick!.pulse] : Array.from({ length: R.orders.pulses }, (_, i) => i + 1);
+  for (const pulse of pulseList) {
     emit({ k: 'pulse', pulse });
     const pulseOwners = s.regions.map(r => r.owner);
     const orders: { p: PlayerId; o: Order }[] = [];
@@ -163,6 +178,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     const seatOrder = [...s.players.slice(rot), ...s.players.slice(0, rot)];
     for (const p of seatOrder) {
       if (p.eliminated) continue;
+      if (live) { for (const o of subs[p.id].orders) if (o) orders.push({ p: p.id, o }); continue; }
       const o = subs[p.id].orders[pulse - 1];
       if (o) orders.push({ p: p.id, o });
     }
@@ -264,16 +280,39 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     }
 
     // ---------------------------------------------------------- 3. movement
-    interface Mover { f: Fleet; path: RegionId[]; idx: number; seize: RegionId | null; p: PlayerId; o: Order }
+    interface Mover { f: Fleet; path: RegionId[]; idx: number; seize: RegionId | null; p: PlayerId; o: Order; dest?: RegionId }
     const movers: Mover[] = [];
     const cameFrom = new Map<number, RegionId>();
     for (const { p, o } of orders) {
       if (o.type !== 'move' && o.type !== 'seize') continue;
+      if (live) {
+        // LIVE: a Move/Seize sets the fleet travelling; it advances as it earns movement points each tick
+        const err = validateOrder(s, p, o.type === 'seize' ? { ...o, also: undefined } : o);
+        if (err) { fail(pulse, p, o, err); continue; }
+        const f = s.fleets.find(x => x.id === o.fleet)!;
+        const startMp = R.live.stepCost - Math.max(1, fleetSpeed(s, f));   // the first step happens right away
+        if (o.type === 'move') {
+          f.route = { path: o.path.slice(), seize: null, mp: startMp, overdrive: o.overdrive || undefined };
+          if (o.overdrive) f.od = true;
+        } else {
+          f.route = { path: f.region === o.target ? [] : [o.target], seize: o.target, mp: startMp };
+          for (const id of [...new Set(o.also ?? [])].slice(0, 3)) {
+            const g = s.fleets.find(x => x.id === id && x.owner === p && x.ships.length);
+            if (!g || g === f || (g.region !== o.target && !s.regions[g.region].neighbors.includes(o.target))) continue;
+            if (g.ordersThisTurn >= R.orders.maxPerFleet) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is exhausted (max ${R.orders.maxPerFleet} orders per turn)` }); continue; }
+            if (g.ordersThisTurn > 0) s.players[p].res.credits -= R.orders.repeatFleetCredits;
+            g.ordersThisTurn++;
+            g.route = { path: g.region === o.target ? [] : [o.target], seize: o.target, mp: R.live.stepCost - Math.max(1, fleetSpeed(s, g)) };
+          }
+        }
+        f.fortified = false;
+        continue;
+      }
       const err = validateOrder(s, p, o.type === 'seize' ? { ...o, also: undefined } : o);
       if (err) { fail(pulse, p, o, err); continue; }
       const f = s.fleets.find(x => x.id === o.fleet)!;
       if (o.type === 'move') {
-        if (o.overdrive) overdrove.add(f.id);
+        if (o.overdrive) f.od = true;
         movers.push({ f, path: o.path.slice(), idx: 0, seize: null, p, o });
       } else {
         movers.push({ f, path: f.region === o.target ? [] : [o.target], idx: 0, seize: o.target, p, o });
@@ -292,12 +331,26 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       }
       f.fortified = false;
     }
+    if (live) {
+      for (const f of s.fleets) {
+        const rt = f.route;
+        if (!rt || !f.ships.length || f.owner === -1) continue;
+        const synth: Order = rt.seize !== null ? { type: 'seize', fleet: f.id, target: rt.seize } : { type: 'move', fleet: f.id, path: rt.path.slice() };
+        if (!rt.path.length) { movers.push({ f, path: [], idx: 0, seize: rt.seize, p: f.owner, o: synth }); f.route = null; continue; }
+        rt.mp += Math.max(1, fleetSpeed(s, f)) + (rt.overdrive ? R.overdrive.speedBonus : 0);
+        if (rt.mp < R.live.stepCost) continue;
+        rt.mp -= R.live.stepCost;
+        movers.push({ f, path: [rt.path[0]], idx: 0, seize: rt.path.length === 1 ? rt.seize : null, p: f.owner, o: synth, dest: rt.path[rt.path.length - 1] });
+        f.fortified = false;
+      }
+    }
     const seizers = movers.filter(m => m.seize !== null);
     // movement signals (destination + arrival + strength band)
     for (const m of movers) {
       if (!m.path.length) continue;
-      const dest = m.path[m.path.length - 1];
-      const txt = `Fleet movement (${strengthBand(m.f.ships.length)}) ${s.regions[m.f.region].name} → ${s.regions[dest].name}, arriving pulse ${pulse}`;
+      const dest = m.dest ?? m.path[m.path.length - 1];
+      const txt = live ? `Fleet movement (${strengthBand(m.f.ships.length)}) ${s.regions[m.f.region].name} → ${s.regions[dest].name}, heading onward`
+        : `Fleet movement (${strengthBand(m.f.ships.length)}) ${s.regions[m.f.region].name} → ${s.regions[dest].name}, arriving pulse ${pulse}`;
       for (const o of s.players) {
         if (o.id === m.p) continue;
         const seesFrom = covStart[o.id].has(m.f.region), seesTo = covStart[o.id].has(dest) || coverage(s, o.id).has(dest);
@@ -377,6 +430,15 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       }
     }
 
+    // LIVE: fleets that made their step move along their route; blocked or destroyed fleets stop
+    if (live) for (const m of movers) {
+      if (!m.path.length) continue;
+      const f = m.f;
+      if (!s.fleets.includes(f) || !f.route) continue;
+      if (f.region === m.path[0]) { f.route.path.shift(); if (!f.route.path.length && f.route.seize === null) f.route = null; }
+      else f.route = null;
+    }
+
     // ---------------------------------------------------------- 4. sieges
     // A Seize order puts the fleet (and any joining fleets) under siege orders at the target.
     // The siege then continues on its own, pulse after pulse and turn after turn, until the
@@ -437,8 +499,20 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   // ======================================================================
   //  End of turn
   // ======================================================================
-  const endPulse = R.orders.pulses;
+  const endPulse = live ? tick!.pulse : R.orders.pulses;
 
+  function wardenDefeated(by: number | -1 | null) {
+    if (s.wardenDefeated) return;
+    s.wardenDefeated = true;
+    const throne = s.regions.find(r => r.kind === 'throne')!;
+    const victor = by !== null && by !== -1 ? by : null;
+    if (victor !== null) addVp(s, victor, R.warden.defeatVp, 'Destroyed the Warden');
+    s.chronicle.push({ turn: s.turn, region: throne.id, players: victor !== null ? [victor] : [], major: true,
+      text: `The Warden falls${victor !== null ? ` to ${s.players[victor].name}` : ''}. ${LORE[LORE.length - 1]}` });
+  }
+
+  // ======== end of turn (in LIVE mode: end of a cycle) ========
+  if (endCycle) {
   // ---- the Warden: once awake it marches on the VP leader (the Throne's failsafe)
   const throne = s.regions.find(r => r.kind === 'throne')!;
   const warden = s.fleets.find(f => f.owner === -1);
@@ -463,16 +537,6 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     warden.siege = s.regions[warden.region].owner !== null ? warden.region : null;
   }
   if (s.wardenAwake && !s.wardenDefeated && !s.fleets.some(f => f.owner === -1)) wardenDefeated(null);
-  function wardenDefeated(by: number | -1 | null) {
-    if (s.wardenDefeated) return;
-    s.wardenDefeated = true;
-    const throne = s.regions.find(r => r.kind === 'throne')!;
-    const victor = by !== null && by !== -1 ? by : null;
-    if (victor !== null) addVp(s, victor, R.warden.defeatVp, 'Destroyed the Warden');
-    s.chronicle.push({ turn: s.turn, region: throne.id, players: victor !== null ? [victor] : [], major: true,
-      text: `The Warden falls${victor !== null ? ` to ${s.players[victor].name}` : ''}. ${LORE[LORE.length - 1]}` });
-  }
-
   // ---- upkeep & income
   for (const p of s.players) {
     if (p.eliminated) continue;
@@ -486,7 +550,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   for (const f of s.fleets) {
     if (f.owner === -1) continue;
     const r = s.regions[f.region];
-    if (engagementAt(s, r.id) && wouldFight(s, r.id)) { f.fatigued = overdrove.has(f.id); continue; } // no repairs mid-battle
+    if (engagementAt(s, r.id) && wouldFight(s, r.id)) { f.fatigued = !!f.od; f.od = false; continue; } // no repairs mid-battle
     const owned = r.owner === f.owner;
     const yard = owned && (r.buildings.shipyard ?? 0) > 0;
     for (const sh of f.ships) {
@@ -499,7 +563,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       }
     }
     if (s.players[f.owner].res.credits < 0) for (const sh of f.ships) sh.hp = Math.max(1, sh.hp - R.economy.bankruptAttrition);
-    f.fatigued = overdrove.has(f.id);
+    f.fatigued = !!f.od;
+    f.od = false;
   }
   for (const r of s.regions) {
     const underAttack = (engagementAt(s, r.id) && wouldFight(s, r.id)) || s.fleets.some(f => f.siege === r.id && f.region === r.id && f.ships.length);
@@ -553,7 +618,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   }
 
   // ---- scoring (final state only)
-  const heldAllTurn = (r: { owner: PlayerId | null; id: number }) => !R.crowns.mustHoldAtTurnStart || startOwners[r.id] === r.owner;
+  const heldAllTurn = (r: { owner: PlayerId | null; id: number }) => !R.crowns.mustHoldAtTurnStart || scoreOwners[r.id] === r.owner;
   for (const p of s.players) {
     if (p.eliminated) continue;
     const owned = s.regions.filter(r => r.kind === 'crown' && r.owner === p.id);
@@ -576,7 +641,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   // ---- edicts
   for (const e of s.edicts.filter(x => x.scoresTurn === s.turn)) {
     const def = EDICTS[e.id];
-    const winners = def ? def.check(s, { startOwners }) : [];
+    const winners = def ? def.check(s, { startOwners: scoreOwners }) : [];
     for (const w of winners) addVp(s, w, e.vp, e.name);
     s.chronicle.push({ turn: s.turn, players: winners, major: winners.length > 0,
       text: `${e.name} is judged: ${winners.length ? winners.map(w => s.players[w].name).join(' and ') + ` gain ${e.vp} VP` : 'no one satisfied it'}.` });
@@ -592,6 +657,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   }
 
   maybeWakeWarden(s, rng, endPulse, emit);
+  }
+  if (endCycle) {
 
   // ---- relic ghost echoes (noise that gives feints cover)
   for (const r of s.regions) {
@@ -602,6 +669,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       signals.push({ turn: s.turn, pulse: rng.int(1, R.orders.pulses), observer: o.id, about: null, region: r.id, confidence: 'inferred',
         text: `Unidentified movement near ${r.name}` });
     }
+  }
+
   }
 
   // ---- conceal
@@ -624,10 +693,13 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   // ---- victory
   checkVictory(s);
 
-  s.scans = s.scans.filter(x => x.until > s.turn);
-  s.turn++;
+  if (endCycle) {
+    s.scans = s.scans.filter(x => x.until > s.turn);
+    s.turn++;
+  }
   s.rngState = rng.state;
-  const result: TurnResult = { turn: s.turn - 1, events, battles, signals: finalSignals, startFleets, startOwners };
+  const result: TurnResult = { turn: endCycle ? s.turn - 1 : s.turn, events, battles: battles.filter(b => b.rounds.length || !b.ongoing), signals: finalSignals, startFleets, startOwners };
+  if (live) result.tick = s.live?.tick;
   s.last = result;
   return s;
 }
@@ -642,7 +714,7 @@ const isRec = (x: unknown): x is Record<string, any> => typeof x === 'object' &&
 const idList = (x: unknown, max: number): number[] | null =>
   Array.isArray(x) && x.length <= max && x.every(isId) ? x.slice() : null;
 
-function cleanOrder(s: GameState, o: unknown): Order | null {
+export function cleanOrder(s: GameState, o: unknown): Order | null {
   if (!isRec(o)) return null;
   const rid = (x: unknown): x is number => isId(x) && x < s.regions.length;
   switch (o.type) {
@@ -675,7 +747,7 @@ function cleanOrder(s: GameState, o: unknown): Order | null {
   return null;
 }
 
-function cleanFree(fa: unknown): FreeAction | null {
+export function cleanFree(fa: unknown): FreeAction | null {
   if (!isRec(fa) || !isId(fa.fleet)) return null;
   switch (fa.type) {
     case 'doctrine': {
@@ -689,11 +761,13 @@ function cleanFree(fa: unknown): FreeAction | null {
   return null;
 }
 
-function sanitize(s: GameState, sub: Submission | undefined): Submission {
-  const out: Submission = { orders: new Array(s.rules.orders.perTurn).fill(null), free: [] };
+function sanitize(s: GameState, sub: Submission | undefined, tick = false): Submission {
+  // WEGO: exactly perTurn slots (slot k = pulse k). LIVE tick: a list of orders that all resolve this tick.
+  const out: Submission = { orders: new Array(tick ? 0 : s.rules.orders.perTurn).fill(null), free: [] };
   if (!isRec(sub)) return out;
   const orders = Array.isArray(sub.orders) ? sub.orders : [];
-  for (let i = 0; i < out.orders.length; i++) out.orders[i] = cleanOrder(s, orders[i]);
+  if (tick) { for (const o of orders.slice(0, 16)) { const c = cleanOrder(s, o); if (c) out.orders.push(c); } }
+  else for (let i = 0; i < out.orders.length; i++) out.orders[i] = cleanOrder(s, orders[i]);
   const free = Array.isArray(sub.free) ? sub.free.slice(0, 64) : [];
   for (const fa of free) { const c = cleanFree(fa); if (c) out.free.push(c); }
   return out;

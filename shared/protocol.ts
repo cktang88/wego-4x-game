@@ -23,6 +23,8 @@ export interface GameMeta {
   deadlineHours: number;
   winner: number | null;
   winReason: string;
+  mode?: 'wego' | 'live';
+  live?: { speed: number; tick: number; nextTickAt: number; tickMs: number; ticksPerCycle: number };
 }
 
 export interface ChatMsg { at: number; seat: number | null; to: number | null; text: string }
@@ -34,6 +36,8 @@ export interface CreateGameReq {
   seats?: { kind: 'human' | 'ai'; name?: string; aiLevel?: 'novice' | 'standard' | 'expert' }[];
   rules?: unknown;
   deadlineHours?: number;
+  mode?: 'wego' | 'live';
+  liveSpeed?: string;        // key of LIVE_SPEEDS
 }
 
 /** Server -> client */
@@ -50,4 +54,8 @@ export type ClientMsg =
   | { type: 'unsubmit' }
   | { type: 'chat'; text: string; to: number | null }
   | { type: 'history'; turn: number }
+  | { type: 'liveOrder'; order: unknown }
+  | { type: 'liveCancel'; index: number }
+  | { type: 'liveFree'; action: unknown }
+  | { type: 'liveHalt'; fleet: number }
   | { type: 'ping' };

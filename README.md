@@ -30,6 +30,17 @@ npm run build && npm start        # serves dist/ + API + WS on $PORT (default 87
 
 To play with friends over the internet, run `npm start` on any machine they can reach: a small VPS, Fly.io/Render/Railway, or a tunnel like `cloudflared tunnel --url http://localhost:8787`. Games are stored as JSON in `data/games/` (or `$DATA_DIR`), so restarts don't lose anything.
 
+## Live mode (Neptune's Pride style)
+
+When you create a game (vs AI or online), pick **Live** instead of WEGO:
+- The world ticks on a real clock (one pulse per tick: every 30 min at normal speed). Every 8 ticks a *cycle* (= a WEGO turn: income, scoring, edicts) ends.
+- You earn **one order every 4 hours**, bank up to 6, and spend them whenever you like. Spent orders act at the next tick and can be taken back until then.
+- Moves go any distance. Fleets travel in real time with visible routes and ETAs. Halt is free.
+- Speeds: *Normal* (days-long games), *Fast* (×60, an evening), *Blitz* (×360, testing). Tune it in `rules.live`.
+- Online, the server runs the clock, so nobody has to be connected. Locally, the browser catches up on missed ticks when you come back. AI seats spend one banked order per tick.
+
+The engine lives in `shared/sim/live.ts` and reuses the same pulse resolver as WEGO.
+
 ## On a phone
 
 Works in iPhone/Android browsers. On narrow screens the layout changes:
@@ -65,7 +76,7 @@ npm run sim -- --games 40 --rules '{"orders":{"perTurn":4}}'  # try a rule chang
 npm run play -- new --save g.json --ai expert,expert           # play in the terminal (you are seat 0)
 npm run play -- show --save g.json
 npm run play -- orders --save g.json '{"orders":[{"type":"seize","fleet":1,"target":5},null,null,null,null],"free":[]}'
-npm test                                                       # 58 tests: determinism, fairness, rules, exploits, fog leaks, server security
+npm test                                                       # 68 tests: determinism, fairness, rules, exploits, fog leaks, server security
 ```
 
 Browser checks (need `npm run dev` + `npm run server` running; Chromium via `playwright-core`):
@@ -75,6 +86,7 @@ node scripts/play-e2e.mjs <outdir>        # plays a few turns through the UI, sc
 node scripts/mp-e2e.mjs                   # 3 isolated browsers create/join/seal an online game
 node scripts/review-e2e.mjs               # long soak: Watch AIs on auto, replays, battles, listener leaks
 node scripts/mp-test.mjs                  # REST + WebSocket protocol smoke test against :8787
+node scripts/live-e2e.mjs <outdir> [base] [phone]  # LIVE blitz game: bank orders, travel, ticks
 node scripts/phone.mjs <outdir>           # iPhone 15 Pro emulation (393x852 @3x, touch) screenshots of the phone layout
 ```
 

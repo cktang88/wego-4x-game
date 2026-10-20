@@ -3,7 +3,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
-import { createGame, resolveTurn, planTurn, viewFor, emptySubmission, defaultRules, isObj, mergeRules } from '../shared/index.ts';
+import { createGame, resolveTurn, planTurn, viewFor, emptySubmission, defaultRules, isObj, mergeRules, makeLive, advanceTo, queueOrder, cancelQueued, queueFree, haltOrder, nextTickAt, tickMs, LIVE_SPEEDS, cleanOrder, cleanFree } from '../shared/index.ts';
 import type { GameState, Submission, TurnResult, PlayerView } from '../shared/index.ts';
 import type { ChatMsg, CreateGameReq, GameMeta, SeatInfo } from '../shared/protocol.ts';
 import { spectatorView } from './history.ts';
@@ -183,10 +183,64 @@ export class Store {
       seats: seatsReq.map((s, i) => ({ name: state.players[i].name, kind: s.kind, aiLevel: s.aiLevel, token: null })),
       state, pending: {}, deadlineHours: dh, deadline: null, chat: [], history: [],
     };
+    if (req.mode === 'live') {
+      const sp = typeof req.liveSpeed === 'string' && Object.hasOwn(LIVE_SPEEDS, req.liveSpeed) ? LIVE_SPEEDS[req.liveSpeed].mult : 1;
+      makeLive(g.state, Date.now(), sp);
+      g.deadlineHours = 0;
+    }
     this.armDeadline(g);
     this.save(g);
     this.games.set(id, g);
     return g;
+  }
+
+  // ------------------------------------------------------------------ LIVE mode
+  private liveSeat(g: StoredGame, seat: number) {
+    if (!g.state.live) throw new UserError('not a live game', 409);
+    if (g.state.winner !== null) throw new UserError('game is over', 409);
+    if (!Number.isInteger(seat) || g.seats[seat]?.kind !== 'human') throw new UserError('bad seat', 403);
+  }
+  liveOrder(g: StoredGame, seat: number, raw: unknown) {
+    this.liveSeat(g, seat);
+    const o = cleanOrder(g.state, raw);
+    if (!o) throw new UserError('malformed order', 400);
+    const err = queueOrder(g.state, seat, o, Date.now());
+    if (err) throw new UserError(err, 409);
+    this.save(g);
+  }
+  liveCancel(g: StoredGame, seat: number, index: unknown) {
+    this.liveSeat(g, seat);
+    if (!Number.isInteger(index) || !cancelQueued(g.state, seat, index as number)) throw new UserError('nothing to cancel there', 409);
+    this.save(g);
+  }
+  liveFree(g: StoredGame, seat: number, raw: unknown) {
+    this.liveSeat(g, seat);
+    const fa = cleanFree(raw);
+    if (!fa) throw new UserError('malformed action', 400);
+    queueFree(g.state, seat, fa);
+    this.save(g);
+  }
+  liveHalt(g: StoredGame, seat: number, fleet: unknown) {
+    this.liveSeat(g, seat);
+    const err = haltOrder(g.state, seat, Number(fleet));
+    if (err) throw new UserError(err, 409);
+    this.save(g);
+  }
+  /** Run any ticks that are due. Returns true if the world changed. Never throws. */
+  advanceLive(g: StoredGame, now: number): boolean {
+    if (!g.state.live || g.state.winner !== null) return false;
+    try {
+      const r = advanceTo(g.state, now, pid => g.seats[pid]?.kind === 'ai', 200);
+      if (!r.results.length) return false;
+      g.state = r.state;
+      for (const res of r.results) g.history.push(res);
+      if (g.history.length > MAX_HISTORY * 8) g.history.splice(0, g.history.length - MAX_HISTORY * 8);
+      this.save(g);
+      return true;
+    } catch (e) {
+      this.onResolveError(g, e);
+      return false;
+    }
   }
 
   join(g: StoredGame, seat: number, name?: unknown): string {
@@ -223,8 +277,11 @@ export class Store {
       submitted: s.kind === 'ai' || !!g.pending[i], online: s.kind === 'ai' || online.has(i),
       missedTurns: g.state.players[i].missedTurns,
     }));
+    const L = g.state.live;
     return { id: g.id, name: g.name, createdAt: g.createdAt, turn: g.state.turn, seats, deadline: g.deadline,
-      deadlineHours: g.deadlineHours, winner: g.state.winner, winReason: g.state.winReason };
+      deadlineHours: g.deadlineHours, winner: g.state.winner, winReason: g.state.winReason,
+      mode: L ? 'live' : 'wego',
+      live: L ? { speed: L.speed, tick: L.tick, nextTickAt: nextTickAt(g.state), tickMs: tickMs(g.state), ticksPerCycle: g.state.rules.live.ticksPerCycle } : undefined };
   }
 
   view(g: StoredGame, seat: number | null): PlayerView {
@@ -239,6 +296,7 @@ export class Store {
   /** Returns true if the turn resolved. Throws UserError on bad input / finished game. */
   submit(g: StoredGame, seat: number, raw: unknown, turn?: unknown): boolean {
     if (g.state.winner !== null) throw new UserError('game is over', 409);
+    if (g.state.live) throw new UserError('this is a live game: spend orders directly', 409);
     if (!Number.isInteger(seat) || !g.seats[seat] || g.seats[seat].kind !== 'human') throw new UserError('bad seat', 403);
     if (g.state.players[seat].eliminated) throw new UserError('you have been eliminated', 409);
     if (turn !== undefined && turn !== null && turn !== g.state.turn) throw new UserError(`stale submission for turn ${turn}; it is now turn ${g.state.turn}`, 409);
@@ -308,6 +366,7 @@ export class Store {
   tick(now = Date.now()): string[] {
     const changed: string[] = [];
     for (const g of this.games.values()) {
+      if (g.state.live) { if (this.advanceLive(g, now)) changed.push(g.id); continue; }
       if (g.deadline && now >= g.deadline && g.state.winner === null) {
         try {
           const before = g.state.turn;

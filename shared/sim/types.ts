@@ -78,6 +78,8 @@ export interface Fleet {
   doctrine: Doctrine;
   fortified: boolean;
   siege?: RegionId | null;  // besieging this region (set by Seize; persists until it leaves)
+  route?: Route | null;     // LIVE mode: where this fleet is travelling
+  od?: boolean;             // overdrove this turn/cycle (fatigued next)
   fatigued: boolean;        // overdrove last turn
   ordersThisTurn: number;
   guardUsed: boolean;
@@ -103,6 +105,20 @@ export interface Engagement {
   lastStand: number[];
   firstBlood: boolean;
   garrisonStart: number;
+}
+
+/** LIVE mode: a fleet in transit. It gains `speed` movement points per tick and steps one region per `stepCost`. */
+export interface Route { path: RegionId[]; seize: RegionId | null; mp: number; overdrive?: boolean }
+
+/** LIVE mode bookkeeping (absent in WEGO games). Times are epoch ms. */
+export interface LiveState {
+  speed: number;                    // time multiplier (1 = normal)
+  startedAt: number;
+  tick: number;                     // ticks resolved so far
+  bank: number[];                   // orders available per player
+  nextOrderAt: number[];            // when each player earns their next order
+  queue: Record<number, Order[]>;   // orders spent, executing at the next tick
+  free: Record<number, FreeAction[]>;
 }
 
 export interface Pact { a: PlayerId; b: PlayerId; until: number }
@@ -237,6 +253,10 @@ export interface GameState {
   chronicle: ChronicleEntry[];
   scans: { owner: PlayerId; region: RegionId; until: number }[];
   engagements: Engagement[];   // battles in progress
+  mode?: 'wego' | 'live';
+  live?: LiveState;
+  cycleStartOwners?: (PlayerId | null)[];  // LIVE: owners when the current cycle began (for "held all turn" scoring)
+  concealed?: PlayerId[];                  // players concealing this turn/cycle
   throne: { owner: PlayerId | null; streak: number };
   crownHold: { owner: PlayerId | null; turns: number };
   edicts: Edict[];           // active/upcoming public objectives
@@ -245,15 +265,23 @@ export interface GameState {
   capitalsTaken?: PlayerId[];   // victims whose original capital has already paid capture VP
   wardenDefeated: boolean;
   /** Per-turn stats used by edicts and battle honors. */
-  turnStats: { kills: number[]; battlesWon: number[]; crownBattlesWon: number[]; captures: number[] };
+  turnStats: { kills: number[]; battlesWon: number[]; crownBattlesWon: number[]; captures: number[]; honors?: number[]; bounty?: number[]; influenced?: string[] };
   /** Results of the most recent resolution, for replays. */
   last: TurnResult | null;
   /** Everything the game has ever seen, so a replay of any turn is possible. */
-  log: { turn: number; submissions: Record<number, Submission> }[];
+  log: { turn: number; submissions: Record<number, Submission>; tick?: TickOpts }[];
+}
+
+/** LIVE mode: resolve a single tick instead of a whole turn. */
+export interface TickOpts {
+  pulse: number;          // label for this tick within the cycle (1-based)
+  newCycle: boolean;      // reset per-turn counters first
+  endCycle: boolean;      // run the end-of-turn phase afterwards
 }
 
 export interface TurnResult {
   turn: number;               // the turn that was resolved
+  tick?: number;              // LIVE: which tick this result covers
   events: GameEvent[];
   battles: BattleReport[];
   signals: Signal[];

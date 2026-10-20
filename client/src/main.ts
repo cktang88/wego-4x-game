@@ -5,6 +5,7 @@ import { LocalSource, RemoteSource, api, tokens, type LocalSave } from './net.ts
 import { esc, toast, overlay } from './ui/dom.ts';
 import { openTweaks, loadOverrides } from './ui/tweaks.ts';
 import type { GameMeta } from '../../shared/protocol.ts';
+import { LIVE_SPEEDS } from '../../shared/sim/live.ts';
 
 const app = document.getElementById('app')!;
 let screen: GameScreen | null = null;
@@ -147,6 +148,7 @@ function lobby() {
           <span>Your name</span><input data-l="name" value="${esc(name)}" placeholder="Azure Compact">
           <span>Rival 1</span><select data-l="ai1"><option value="novice">AI novice</option><option value="standard" selected>AI standard</option><option value="expert">AI expert</option><option value="human">Human (hotseat)</option></select>
           <span>Rival 2</span><select data-l="ai2"><option value="novice">AI novice</option><option value="standard">AI standard</option><option value="expert" selected>AI expert</option><option value="human">Human (hotseat)</option></select>
+          <span>Mode</span><select data-l="mode"><option value="wego" selected>WEGO: 5 orders a turn, turns resolve together</option><option value="live-normal">Live: real time, an order every 4 h (days)</option><option value="live-fast">Live fast: an order every 4 min (an evening)</option><option value="live-blitz">Live blitz: tick every 5 s (testing)</option></select>
           <span>Seed</span><input data-l="seed" placeholder="random" inputmode="numeric">
         </div>
         <div class="row" style="margin-top:12px"><button class="primary" data-l="start">Start</button>${hasSave ? '<button data-l="continue">Continue saved game</button>' : ''}<button data-l="load">Load file…</button><button data-l="watch" title="Three AIs play; you watch with the map revealed">Watch AIs</button></div>
@@ -157,6 +159,7 @@ function lobby() {
           <span>Game name</span><input data-o="name" placeholder="Friday war">
           <span>Seat 2</span><select data-o="s1"><option value="human" selected>Human</option><option value="novice">AI novice</option><option value="standard">AI standard</option><option value="expert">AI expert</option></select>
           <span>Seat 3</span><select data-o="s2"><option value="human" selected>Human</option><option value="novice">AI novice</option><option value="standard">AI standard</option><option value="expert">AI expert</option></select>
+          <span>Mode</span><select data-o="mode"><option value="wego" selected>WEGO: 5 orders a turn, turns resolve together</option><option value="live-normal">Live: real time, an order every 4 h (days)</option><option value="live-fast">Live fast: an order every 4 min (an evening)</option><option value="live-blitz">Live blitz: tick every 5 s (testing)</option></select>
           <span>Deadline</span><select data-o="deadline"><option value="0">none (wait for everyone)</option><option value="1">1 hour</option><option value="8">8 hours</option><option value="24">24 hours</option><option value="48">48 hours</option></select>
         </div>
         <div class="row" style="margin-top:12px"><button class="primary" data-o="create">Create & take seat 1</button></div>
@@ -182,7 +185,12 @@ function lobby() {
     const lv = (k: string) => q(`[data-l="${k}"]`).value;
     const seat = (v: string) => v === 'human' ? { kind: 'human' as const, aiLevel: 'standard' as const } : { kind: 'ai' as const, aiLevel: v as 'novice' };
     const seed = q('[data-l="seed"]').value.trim();
-    const src = LocalSource.create('Local game', [{ kind: 'human', aiLevel: 'standard' }, seat(lv('ai1')), seat(lv('ai2'))], [nm || undefined], seed ? Number(seed) : undefined, loadOverrides());
+    const mode = lv('mode');
+    const live = mode.startsWith('live') ? { speed: LIVE_SPEEDS[mode.slice(5)].mult } : undefined;
+    // live mode runs on a real clock: hotseat makes no sense there, so rivals are always AIs
+    const rival = (v: string) => live && v === 'human' ? seat('standard') : seat(v);
+    if (live && (lv('ai1') === 'human' || lv('ai2') === 'human')) toast('Live mode is one human per browser: hotseat rivals became AIs. Use Online multiplayer to play live with friends.');
+    const src = LocalSource.create('Local game', [{ kind: 'human', aiLevel: 'standard' }, rival(lv('ai1')), rival(lv('ai2'))], [nm || undefined], seed ? Number(seed) : undefined, loadOverrides(), undefined, live);
     src.refresh();
     location.hash = '#/local';
   });
@@ -222,6 +230,7 @@ function lobby() {
         name: q('[data-o="name"]').value.trim() || undefined,
         seats: [{ kind: 'human', name: nm }, seat(q('[data-o="s1"]').value), seat(q('[data-o="s2"]').value)],
         rules: loadOverrides(), deadlineHours: Number(q('[data-o="deadline"]').value),
+        ...(q('[data-o="mode"]').value.startsWith('live') ? { mode: 'live' as const, liveSpeed: q('[data-o="mode"]').value.slice(5) } : {}),
       });
       const j = await api.join(r.id, 0, nm);
       tokens.set(r.id, j);

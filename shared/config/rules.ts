@@ -313,6 +313,15 @@ export const PLAYTEST_DEFAULTS = {
     gap: 10,                    // players at least this many VP behind the leader…
     incomeBonus: 0.15,          // …get this much extra income (never extra orders; not while holding the Throne)
   },
+  live: {
+    // LIVE mode (Neptune's Pride-style): the world advances in real time, one tick (= one pulse) at a time
+    tickMinutes: 30,           // real minutes per tick at normal speed
+    ticksPerCycle: 8,          // a cycle (= a WEGO turn: income, upkeep, scoring, edicts) every 8 ticks = 4 hours
+    orderEveryHours: 4,        // you earn one order this often...
+    bankCap: 6,                // ...and can save up to this many
+    startOrders: 3,
+    stepCost: 3,               // movement points per region; a fleet gains its speed in points each tick
+  },
   intel: {
     ghostEchoChance: 0.35,      // chance per unclaimed relic per turn of a fake "unidentified movement"
   },

@@ -5,7 +5,7 @@ import { NEUTRAL_COLOR } from '../../../shared/config/content.ts';
 import { Rng, hashString } from '../../../shared/sim/rng.ts';
 import { pointInPoly } from '../../../shared/sim/mapgen.ts';
 
-export interface FleetDraw { id: number; owner: number; ships: number; pos: Pt; alpha: number; name: string; fortified?: boolean; selected?: boolean; ghost?: boolean; cls?: string[] }
+export interface FleetDraw { id: number; owner: number; ships: number; pos: Pt; alpha: number; name: string; fortified?: boolean; selected?: boolean; ghost?: boolean; cls?: string[]; idle?: boolean }
 export interface Fx { kind: 'battle' | 'capture' | 'excavate' | 'clash' | 'build' | 'text'; pos: Pt; color: string; t0: number; dur: number; text?: string }
 
 export interface DrawInput {
@@ -427,6 +427,12 @@ export class MapRenderer {
     ctx.globalAlpha = f.alpha * (f.ghost ? 0.35 : 1);
     ctx.translate(p.x, p.y);
     const R = 11 * s;
+    if (f.idle && !f.selected) {
+      // affordance: an own fleet that can act right now breathes a soft beacon
+      const k = (now % 1800) / 1800;
+      ctx.strokeStyle = hexA('#7dffb8', 0.75 * (1 - k)); ctx.lineWidth = 2 * s;
+      ctx.beginPath(); ctx.arc(0, 0, R * (1.3 + k * 1.3), 0, TAU); ctx.stroke();
+    }
     if (f.selected) {
       ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 2 * s;
       ctx.beginPath(); ctx.arc(0, 0, R * 1.7 + Math.sin(now / 200) * s, 0, TAU); ctx.stroke();

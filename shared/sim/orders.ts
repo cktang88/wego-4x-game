@@ -102,7 +102,7 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
     case 'move': {
       if (!Array.isArray(o.path) || !o.path.length) return 'empty path';
       const sp = fleetSpeed(s, fleet!) + (o.overdrive ? s.rules.overdrive.speedBonus : 0);
-      if (o.path.length > sp) return `too far (speed ${sp})`;
+      if (!s.live && o.path.length > sp) return `too far (speed ${sp})`;   // LIVE: any distance; travel takes time
       let cur = fleet!.region;
       for (const r of o.path) {
         if (!s.regions[cur].neighbors.includes(r)) return 'path is not connected';

@@ -6,5 +6,6 @@ export * from './sim/graph.ts';
 export * from './sim/visibility.ts';
 export * from './sim/ai.ts';
 export * from './sim/view.ts';
+export * from './sim/live.ts';
 export * from './config/rules.ts';
 export * from './config/content.ts';

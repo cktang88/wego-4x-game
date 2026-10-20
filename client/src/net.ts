@@ -1,7 +1,7 @@
 // Game sources: a LOCAL game (whole sim runs in the browser — solo vs AI or
 // hotseat) and a REMOTE game (authoritative server over WebSocket).
-import { createGame, resolveTurn, planTurn, viewFor, filterResultFor } from '../../shared/index.ts';
-import type { GameState, PlayerView, Submission, TurnResult } from '../../shared/index.ts';
+import { createGame, resolveTurn, planTurn, viewFor, filterResultFor, makeLive, advanceTo, queueOrder, cancelQueued, queueFree, haltOrder, nextTickAt, tickMs } from '../../shared/index.ts';
+import type { GameState, PlayerView, Submission, TurnResult, Order, FreeAction } from '../../shared/index.ts';
 import type { ChatMsg, ClientMsg, GameMeta, ServerMsg } from '../../shared/protocol.ts';
 
 export type ChangeKind = 'view' | 'meta' | 'chat' | 'error';
@@ -19,6 +19,11 @@ export interface GameSource {
   sendChat(text: string, to: number | null): void;
   history(turn: number): Promise<TurnResult | null>;
   close(): void;
+  // LIVE mode: orders are spent one at a time and execute at the next tick
+  liveOrder?(o: Order): void;
+  liveCancel?(index: number): void;
+  liveFree?(fa: FreeAction): void;
+  liveHalt?(fleet: number): void;
 }
 
 // ============================================================ local
@@ -44,10 +49,19 @@ export class LocalSource implements GameSource {
   /** Hotseat: called when control should pass to another human (show a curtain). */
   onHandoff: (seat: number) => void = () => {};
 
-  constructor(public save: LocalSave, public storageKey = 'tc.local.autosave') { this.refresh(); }
+  private liveTimer: number | undefined;
 
-  static create(name: string, seats: LocalSave['seats'], names: (string | undefined)[], seed: number | undefined, rules: unknown, storageKey = 'tc.local.autosave'): LocalSource {
+  constructor(public save: LocalSave, public storageKey = 'tc.local.autosave') {
+    this.refresh();
+    if (save.state.live) {
+      this.tickLive();   // catch up on the time spent away
+      this.liveTimer = window.setInterval(() => this.tickLive(), 1000);
+    }
+  }
+
+  static create(name: string, seats: LocalSave['seats'], names: (string | undefined)[], seed: number | undefined, rules: unknown, storageKey = 'tc.local.autosave', live?: { speed: number }): LocalSource {
     const state = createGame({ seed, rules, players: seats.map((s, i) => ({ kind: s.kind, aiLevel: s.aiLevel, name: names[i] })) });
+    if (live) makeLive(state, Date.now(), live.speed);
     const first = Math.max(0, seats.findIndex(s => s.kind === 'human'));
     return new LocalSource({ v: 1, name, state, seats, pending: {}, current: first, history: [], reveal: seats.every(s => s.kind === 'ai') }, storageKey);
   }
@@ -63,6 +77,8 @@ export class LocalSource implements GameSource {
     this.meta = {
       id: 'local', name: this.save.name, createdAt: 0, turn: st.turn, deadline: null, deadlineHours: 0,
       winner: st.winner, winReason: st.winReason,
+      mode: st.live ? 'live' : 'wego',
+      live: st.live ? { speed: st.live.speed, tick: st.live.tick, nextTickAt: nextTickAt(st), tickMs: tickMs(st), ticksPerCycle: st.rules.live.ticksPerCycle } : undefined,
       seats: this.save.seats.map((s, i) => ({ seat: i, name: st.players[i].name, kind: s.kind, aiLevel: s.aiLevel, claimed: s.kind === 'human',
         submitted: s.kind === 'ai' || !!this.save.pending[i], online: true, missedTurns: 0 })),
     };
@@ -110,7 +126,31 @@ export class LocalSource implements GameSource {
     return this.save.reveal || this.save.state.winner !== null ? r : filterResultFor(this.save.state, r, this.save.current);
   }
   setReveal(on: boolean) { this.save.reveal = on; this.refresh(); this.onChange('view'); }
-  close() {}
+  close() { clearInterval(this.liveTimer); }
+
+  // ---------------------------------------------------------------- LIVE
+  private tickLive() {
+    const st = this.save.state;
+    if (!st.live || st.winner !== null) return;
+    const r = advanceTo(st, Date.now(), pid => this.save.seats[pid]?.kind === 'ai', 500);
+    if (!r.results.length) return;
+    this.save.state = r.state;
+    this.save.history.push(...r.results);
+    if (this.save.history.length > 200) this.save.history.splice(0, this.save.history.length - 200);
+    this.refresh();
+    this.onChange('view');
+  }
+  private liveAct(fn: () => string | null | boolean) {
+    const res = fn();
+    if (typeof res === 'string') { this.lastError = res; this.onChange('error'); return; }
+    if (res === false) { this.lastError = 'not possible'; this.onChange('error'); return; }
+    this.refresh();
+    this.onChange('view');
+  }
+  liveOrder(o: Order) { this.liveAct(() => queueOrder(this.save.state, this.save.current, o, Date.now())); }
+  liveCancel(i: number) { this.liveAct(() => cancelQueued(this.save.state, this.save.current, i)); }
+  liveFree(fa: FreeAction) { this.liveAct(() => { queueFree(this.save.state, this.save.current, fa); return null; }); }
+  liveHalt(fleet: number) { this.liveAct(() => haltOrder(this.save.state, this.save.current, fleet)); }
 }
 
 // ============================================================ remote
@@ -198,6 +238,10 @@ export class RemoteSource implements GameSource {
   submit(sub: Submission) { this.sendOrWarn({ type: 'submit', submission: sub, turn: this.meta?.turn }); }
   unsubmit() { this.sendOrWarn({ type: 'unsubmit' }); }
   sendChat(text: string, to: number | null) { this.sendOrWarn({ type: 'chat', text, to }); }
+  liveOrder(order: Order) { this.sendOrWarn({ type: 'liveOrder', order }); }
+  liveCancel(index: number) { this.sendOrWarn({ type: 'liveCancel', index }); }
+  liveFree(action: FreeAction) { this.sendOrWarn({ type: 'liveFree', action }); }
+  liveHalt(fleet: number) { this.sendOrWarn({ type: 'liveHalt', fleet }); }
   history(turn: number): Promise<TurnResult | null> {
     return new Promise(res => {
       let done = false;
