@@ -99,13 +99,13 @@ export const DEFAULT_RULES = {
   garrison: {
     neutralMin: 8,
     neutralMax: 18,
-    crownNeutral: 40,
-    throneNeutral: 48,
-    ownedBase: 8,           // max garrison of an owned region before fortresses
-    perDev: 2,
+    crownNeutral: 48,
+    throneNeutral: 60,
+    ownedBase: 12,          // max garrison of an owned region before fortresses
+    perDev: 3,
     perFortress: 10,
-    kindBonus: { home: 10, crown: 12, throne: 18 } as Record<string, number>,
-    regenPerTurn: 4,
+    kindBonus: { home: 10, crown: 18, throne: 22 } as Record<string, number>,
+    regenPerTurn: 5,
     attackBase: 3,          // garrison damage per hit
     attackPerFortress: 1,
     shotsBase: 1,
@@ -113,17 +113,21 @@ export const DEFAULT_RULES = {
     armor: 2,               // damage absorbed per hit (siege damage ignores armor)
     armorPerFortress: 1,           // +1 shot per this much remaining garrison: big garrisons hit back hard
     shotsPerFortress: 1,
-    afterCapture: 4,        // garrison left behind by a successful seize
+    afterCapture: 6,        // garrison left behind by a successful seize
   },
 
   // ---------------------------------------------------------------- ships
   ships: {
-    scout:    { name: 'Scout',    role: 'Fast eyes. Fragile.', hp: 5,  attack: 1, shots: 1, shields: 0, speed: 3, siege: 0, sensor: 1, evasion: 0.15, cost: { industry: 12 },               needsShipyard: 1, upkeep: 1, glyph: 'dart' },
-    corvette: { name: 'Corvette', role: 'Cheap, quick raider.', hp: 8,  attack: 2, shots: 2, shields: 0, speed: 3, siege: 0, sensor: 0, evasion: 0.10, cost: { industry: 18 },               needsShipyard: 1, upkeep: 1, glyph: 'arrow' },
-    frigate:  { name: 'Frigate',  role: 'Line workhorse.',     hp: 14, attack: 3, shots: 2, shields: 1, speed: 2, siege: 1, sensor: 0, evasion: 0.05, cost: { industry: 30, credits: 5 },   needsShipyard: 1, upkeep: 2, glyph: 'wedge' },
-    bombard:  { name: 'Bombard',  role: 'Cracks planets.',     hp: 14, attack: 2, shots: 1, shields: 1, speed: 1, siege: 7, sensor: 0, evasion: 0.00, cost: { industry: 40, credits: 5 },   needsShipyard: 2, upkeep: 2, glyph: 'block' },
-    cruiser:  { name: 'Cruiser',  role: 'Shielded brawler.',   hp: 24, attack: 5, shots: 2, shields: 2, speed: 2, siege: 2, sensor: 0, evasion: 0.00, cost: { industry: 55, credits: 15 },  needsShipyard: 2, upkeep: 3, glyph: 'long' },
-    dread:    { name: 'Dreadnought', role: 'Slow apocalypse.', hp: 44, attack: 7, shots: 3, shields: 3, speed: 1, siege: 4, sensor: 0, evasion: 0.00, cost: { industry: 100, credits: 30 }, needsShipyard: 3, upkeep: 5, glyph: 'dread' },
+    // Niches: scouts see; corvettes are cheap fast raiders (weak in the line, useless vs walls);
+    // frigates are the line; bombards crack garrisons; cruisers win line fights per Order;
+    // dreadnoughts are late, slow power. Orders (5/turn) are the real bottleneck, so big hulls
+    // are "order-efficient" while small hulls are "resource-efficient".
+    scout:    { name: 'Scout',    role: 'Fast eyes. Fragile.', hp: 5,  attack: 1, shots: 1, shields: 0, speed: 3, siege: 0, sensor: 1, evasion: 0.15, cost: { industry: 10 },               needsShipyard: 1, upkeep: 1, glyph: 'dart' },
+    corvette: { name: 'Corvette', role: 'Cheap, quick raider.', hp: 8,  attack: 3, shots: 1, shields: 0, speed: 3, siege: 0, sensor: 0, evasion: 0.15, cost: { industry: 12, credits: 4 },  needsShipyard: 1, upkeep: 1, glyph: 'arrow' },
+    frigate:  { name: 'Frigate',  role: 'Line workhorse.',     hp: 14, attack: 3, shots: 2, shields: 1, speed: 2, siege: 1, sensor: 0, evasion: 0.05, cost: { industry: 26, credits: 10 },  needsShipyard: 1, upkeep: 2, glyph: 'wedge' },
+    bombard:  { name: 'Bombard',  role: 'Cracks planets.',     hp: 18, attack: 1, shots: 2, shields: 2, speed: 1, siege: 6, sensor: 0, evasion: 0.00, cost: { industry: 34, credits: 16 },  needsShipyard: 2, upkeep: 2, glyph: 'block' },
+    cruiser:  { name: 'Cruiser',  role: 'Shielded brawler.',   hp: 28, attack: 4, shots: 3, shields: 2, speed: 2, siege: 2, sensor: 0, evasion: 0.00, cost: { industry: 44, credits: 24 },  needsShipyard: 2, upkeep: 3, glyph: 'long' },
+    dread:    { name: 'Dreadnought', role: 'Slow apocalypse.', hp: 56, attack: 8, shots: 3, shields: 3, speed: 1, siege: 4, sensor: 0, evasion: 0.00, cost: { industry: 80, credits: 45 }, needsShipyard: 3, upkeep: 5, glyph: 'dread' },
   } as Record<string, ShipClassDef>,
   maxShipsPerFleet: 8,
   maxFleets: 6,
@@ -157,11 +161,11 @@ export const DEFAULT_RULES = {
 
   // ---------------------------------------------------------------- influence / diplomacy
   influence: {
-    orderCost: 4,              // influence spent by an Influence order
-    pushAmount: 35,            // loyalty gained per Influence order
+    orderCost: 5,              // influence spent by an Influence order
+    pushAmount: 30,            // loyalty gained per Influence order
     adjacentBonus: 10,         // extra if you own an adjacent region
-    flipThreshold: 100,        // neutral region joins you at this loyalty
-    decayPerTurn: 5,           // loyalty drifts back toward 0
+    flipThreshold: 110,        // neutral region joins you at this loyalty
+    decayPerTurn: 6,           // loyalty drifts back toward 0
     rivalSubvertCost: 8,       // influence cost to Influence a RIVAL-owned region
     rivalFlipThreshold: 150,   // rival regions are harder to flip (not capitals)
     pactCost: 2,               // influence to propose a non-aggression pact
@@ -184,12 +188,12 @@ export const DEFAULT_RULES = {
   // ---------------------------------------------------------------- victory
   victory: {
     mode: 'vp' as 'vp' | 'conquest',
-    vpTarget: 40,
+    vpTarget: 50,
     turnLimit: 30,
     vpPerCrownPerTurn: 1,
     crownMajorityVp: 2,        // extra VP per turn while holding 2+ Crowns
     vpPerThronePerTurn: 3,
-    vpPerRelic: 3,
+    vpPerRelic: 2,
     vpPerBattleWon: 1,         // only for battles involving >= 2 ships destroyed
     vpCapitalCapture: 6,
     holdAllCrownsWins: true,   // own all 3 crowns at end of turn = instant win
@@ -235,17 +239,17 @@ export const EXTRA_DEFAULTS = {
   bounty: {
     vpTakeFromLeader: 2,       // capture a region from the VP leader
     leaderMinLead: 3,          // must lead by at least this much to count as "the leader"
-    battleHonorMinKills: 3,    // win a battle destroying >= N ships: +1 VP
+    battleHonorMinKills: 2,    // win a battle destroying >= N ships: +1 VP
     battleHonorVp: 1,
     battleHonorVsLeaderVp: 2,
     maxHonorPerTurn: 2,
   },
   edicts: {
     firstReveal: 2,            // reveal an edict at end of this turn...
-    every: 3,                  // ...and every N turns after; it scores at the end of the following turn
+    every: 2,                  // ...and every N turns after; it scores at the end of the following turn
   },
   warden: {
-    wakeAtLore: 4,             // the Warden wakes in the Throne when this many relics are excavated
+    wakeAtLore: 5,             // the Warden wakes in the Throne when this many relics are excavated
     ships: ['dread', 'cruiser', 'cruiser', 'frigate', 'frigate', 'frigate'],
     defeatVp: 5,
   },

@@ -34,6 +34,11 @@ export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
   return { state: v, you: p, visible: [...cov] };
 }
 
+/** Filter any turn result for a player (null = everything). */
+export function filterResultFor(s: GameState, r: TurnResult, p: PlayerId | null): TurnResult {
+  return p === null ? r : filterResult(s, r, p, coverage(s, p));
+}
+
 function filterResult(s: GameState, r: TurnResult, p: PlayerId, cov: Set<number>): TurnResult {
   // A player sees events in regions they covered at the start or end of the turn.
   const prevCov = new Set<number>(cov);
