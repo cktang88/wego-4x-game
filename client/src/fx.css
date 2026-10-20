@@ -1,0 +1,129 @@
+/* ============================================================================
+   fx.css: motion for the UI chrome (toasts, dialogs, panels, banners, numbers,
+   victory). The map and battle viewer animate on their canvases.
+   Everything here is cosmetic; prefers-reduced-motion switches it off (bottom).
+   ============================================================================ */
+:root {
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+/* ------------------------------------------------------------ buttons: tactile press */
+button:active:not(:disabled) { transform: translateY(1px) scale(0.97); filter: brightness(1.18); }
+button.primary:not(:disabled) { background-size: 100% 100%; }
+button.primary:hover:not(:disabled) { box-shadow: 0 0 14px rgba(160, 120, 255, 0.45); }
+
+/* ------------------------------------------------------------ toasts: drop in, fade up and away */
+.toast { animation: toast-in 0.32s var(--ease-spring) both; }
+.toast.toast-out { animation: toast-out 0.26s ease-in forwards; }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, -14px) scale(0.96); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes toast-out { to { opacity: 0; transform: translate(-50%, -10px) scale(0.98); } }
+
+/* ------------------------------------------------------------ dialogs: backdrop fades, card scales up; ghosts fade out */
+.overlay { animation: ov-in 0.2s ease-out both; }
+.overlay > .dialog { animation: dlg-in 0.3s var(--ease-spring) both; }
+.overlay.curtain, .overlay.curtain > .dialog { animation: none; }
+@keyframes ov-in { from { opacity: 0; backdrop-filter: blur(0); } }
+@keyframes dlg-in { from { opacity: 0; transform: translateY(10px) scale(0.95); } }
+.overlay-ghost {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 49; padding: 16px;
+  background: rgba(4, 2, 10, 0.78); pointer-events: none; animation: ov-out 0.2s ease-in forwards;
+}
+.overlay-ghost > .dialog { animation: dlg-out 0.2s ease-in forwards; }
+@keyframes ov-out { to { opacity: 0; } }
+@keyframes dlg-out { to { opacity: 0; transform: translateY(6px) scale(0.97); } }
+
+/* ------------------------------------------------------------ panels: the selection panel slides in when shown; phone sheets rise */
+.game:not(.phone) .panel.left:not(.hidden) { animation: panel-in 0.24s var(--ease-out) both; }
+@keyframes panel-in { from { opacity: 0; transform: translateX(-14px); } }
+.phone .panel.left:not(.hidden), .phone.sheet-open:not(.sel-open) .panel.right { animation: sheet-up 0.28s var(--ease-out) both; }
+@keyframes sheet-up { from { transform: translateY(40%); opacity: 0.2; } }
+.panel.right { transition: box-shadow 0.25s; }
+.tabbody.fx-tabswap { animation: tab-swap 0.22s ease-out; }
+@keyframes tab-swap { from { opacity: 0; transform: translateY(5px); } }
+.tabs button { transition: color 0.15s, box-shadow 0.2s, background 0.15s; }
+.tabs button.on { box-shadow: inset 0 -2px 0 var(--accent), 0 6px 14px -10px var(--accent); }
+.tabs button .badge { animation: badge-in 0.35s var(--ease-spring); }
+@keyframes badge-in { from { transform: scale(0.2); } }
+
+/* ------------------------------------------------------------ list items that just appeared (data-pop) */
+.fx-pop { animation: fx-pop 0.42s var(--ease-spring); }
+@keyframes fx-pop {
+  0% { transform: scale(0.86); box-shadow: 0 0 0 0 rgba(183, 139, 255, 0.7); filter: brightness(1.6); }
+  60% { box-shadow: 0 0 0 6px rgba(183, 139, 255, 0); }
+  100% { transform: none; filter: none; }
+}
+
+/* ------------------------------------------------------------ numbers that changed (data-num) */
+.num-up, .num-down { border-radius: 4px; }
+.num-up { animation: num-up 1.1s ease-out; }
+.num-down { animation: num-down 1.1s ease-out; }
+@keyframes num-up { 0% { color: #fff; text-shadow: 0 0 10px var(--good); background: rgba(109, 255, 176, 0.22); } 100% { background: transparent; } }
+@keyframes num-down { 0% { color: #fff; text-shadow: 0 0 10px var(--bad); background: rgba(255, 93, 122, 0.24); } 100% { background: transparent; } }
+
+/* ------------------------------------------------------------ the pulse bar fills as the replay advances */
+.pulsebar span { transition: background 0.3s, box-shadow 0.3s, transform 0.3s; }
+.pulsebar span.on { transform: scaleY(1.5); }
+
+/* ------------------------------------------------------------ PULSE / PREVIEW / BETRAYAL banner: letters snap together, light lines sweep out */
+.banner.show { animation: banner-in 0.62s var(--ease-out) both; }
+.banner.hide { animation: banner-out 0.3s ease-in both; }
+@keyframes banner-in {
+  0% { opacity: 0; letter-spacing: 0.9em; filter: blur(6px); }
+  45% { opacity: 1; filter: blur(0); }
+  100% { opacity: 1; letter-spacing: 0.4em; }
+}
+@keyframes banner-out { from { opacity: 1; } to { opacity: 0; transform: translate(-50%, -8px); } }
+.banner::before, .banner::after {
+  content: ''; position: absolute; left: 50%; height: 1px; width: 0; transform: translateX(-50%); opacity: 0;
+  background: linear-gradient(90deg, transparent, #fff, var(--accent), transparent);
+}
+.banner::before { top: -6px; } .banner::after { bottom: -4px; }
+.banner.show::before, .banner.show::after { animation: banner-line 0.7s var(--ease-out) both; }
+@keyframes banner-line { 0% { width: 0; opacity: 0; } 30% { opacity: 1; } 100% { width: 130%; opacity: 0.55; } }
+
+/* ------------------------------------------------------------ victory */
+.overlay.victory { overflow: hidden; background: radial-gradient(ellipse at 50% 45%, color-mix(in srgb, var(--win, #b78bff) 22%, rgba(4, 2, 10, 0.8)), rgba(4, 2, 10, 0.9) 70%); }
+.vic-rays, .vic-sparks { position: absolute; inset: 0; pointer-events: none; }
+.vic-rays {
+  inset: -50%;
+  background: repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--win, #ffd86b) 26%, transparent) 0deg 6deg, transparent 6deg 24deg);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 0, transparent 45%); mask-image: radial-gradient(circle at 50% 50%, #000 0, transparent 45%);
+  animation: vic-spin 40s linear infinite, vic-rays-in 1.2s ease-out both;
+}
+@keyframes vic-spin { to { transform: rotate(360deg); } }
+@keyframes vic-rays-in { from { opacity: 0; } }
+.vic-sparks i {
+  position: absolute; bottom: -10px; left: var(--x); width: 4px; height: 4px; border-radius: 50%;
+  background: var(--win, #ffd86b); box-shadow: 0 0 8px var(--win, #ffd86b), 0 0 2px #fff;
+  transform: scale(var(--s)); animation: vic-ember 3.2s linear var(--d) infinite; opacity: 0;
+}
+@keyframes vic-ember { 0% { opacity: 0; transform: translateY(0) scale(var(--s)); } 15% { opacity: 1; } 100% { opacity: 0; transform: translate(14px, -92vh) scale(var(--s)); } }
+.vic-card { position: relative; animation: vic-card 0.7s var(--ease-spring) both !important; border-color: color-mix(in srgb, var(--win, #b78bff) 70%, transparent); box-shadow: 0 0 60px color-mix(in srgb, var(--win, #b78bff) 35%, transparent), 0 20px 80px rgba(0, 0, 0, 0.7); }
+@keyframes vic-card { from { opacity: 0; transform: scale(0.82) translateY(16px); } }
+.vic-crown { font-size: 44px; line-height: 1; color: var(--gold); text-shadow: 0 0 18px rgba(255, 216, 107, 0.8); animation: vic-crown 0.9s var(--ease-spring) 0.25s both, vic-glow 2.4s ease-in-out 1.2s infinite; }
+@keyframes vic-crown { from { opacity: 0; transform: translateY(-40px) rotate(-14deg) scale(1.6); } }
+@keyframes vic-glow { 50% { text-shadow: 0 0 34px rgba(255, 216, 107, 1), 0 0 6px #fff; } }
+.vic-name { animation: vic-name 0.8s var(--ease-out) 0.35s both; text-shadow: 0 0 22px currentColor; }
+@keyframes vic-name { from { opacity: 0; letter-spacing: 0.5em; filter: blur(4px); } }
+.vic-rank { animation: vic-rank 0.45s var(--ease-out) both; animation-delay: calc(0.7s + var(--i) * 0.12s); }
+@keyframes vic-rank { from { opacity: 0; transform: translateY(8px); } }
+
+/* ------------------------------------------------------------ lobby: cards rise in */
+.lobby .title h1 { animation: title-in 0.9s var(--ease-out) both; }
+@keyframes title-in { from { opacity: 0; letter-spacing: 0.6em; filter: blur(6px); } }
+.lobby .cards > .card { animation: card-in 0.5s var(--ease-out) both; }
+.lobby .cards > .card:nth-child(2) { animation-delay: 0.07s; }
+.lobby .cards > .card:nth-child(3) { animation-delay: 0.14s; }
+@keyframes card-in { from { opacity: 0; transform: translateY(14px); } }
+
+/* ------------------------------------------------------------ less motion, please */
+@media (prefers-reduced-motion: reduce) {
+  .toast, .overlay, .overlay > .dialog, .panel.left, .panel.right, .tabbody.fx-tabswap, .fx-pop, .banner.show, .banner.hide,
+  .banner::before, .banner::after, .vic-rays, .vic-sparks i, .vic-card, .vic-crown, .vic-name, .vic-rank,
+  .lobby .title h1, .lobby .cards > .card, .tabs button .badge { animation: none !important; }
+  .num-up, .num-down { animation-duration: 0.01s; }
+  .banner.show { opacity: 1; }
+  .vic-sparks { display: none; }
+  button:active:not(:disabled) { transform: none; }
+}

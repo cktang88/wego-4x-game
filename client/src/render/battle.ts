@@ -101,10 +101,21 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: 
 
 // ------------------------------------------------------------------ styles
 const CSS = `
-.bv-overlay{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;
+.bv-overlay,.bv-closing{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;
   background:radial-gradient(ellipse at center,rgba(40,14,80,.55),rgba(3,1,10,.88));backdrop-filter:blur(3px);
   font-family:${FONT};color:#e8e0ff;animation:bv-fade .25s ease-out}
 @keyframes bv-fade{from{opacity:0}to{opacity:1}}
+.bv-closing{pointer-events:none;animation:bv-out .18s ease-in forwards}
+.bv-closing .bv-panel{animation:bv-shrink .18s ease-in forwards}
+@keyframes bv-out{to{opacity:0}}
+@keyframes bv-shrink{to{transform:scale(.97)}}
+.bv-overlay .bv-panel{animation:bv-pop .34s cubic-bezier(.2,1.25,.4,1) both}
+@keyframes bv-pop{from{opacity:0;transform:scale(.94) translateY(10px)}}
+.bv-btn{transition:border-color .12s,box-shadow .15s,color .12s,background .12s,transform .06s}
+.bv-btn:active{transform:scale(.95)}
+.bv-card .bv-big{animation:bv-big .7s cubic-bezier(.2,.8,.2,1) both}
+@keyframes bv-big{from{opacity:0;letter-spacing:.5em;filter:blur(4px)}}
+@media (prefers-reduced-motion:reduce){.bv-overlay,.bv-overlay .bv-panel,.bv-card .bv-big,.bv-side,.bv-closing,.bv-closing .bv-panel{animation:none!important}}
 .bv-panel{position:relative;display:flex;flex-direction:column;width:min(1180px,calc(100vw - 32px));height:min(780px,calc(100dvh - 32px));
   background:#06030f;border:1px solid rgba(170,130,255,.28);border-radius:6px;overflow:hidden;
   box-shadow:0 0 0 1px rgba(0,0,0,.6),0 0 48px rgba(120,60,255,.28),inset 0 0 60px rgba(90,40,200,.12)}
@@ -239,6 +250,7 @@ const ENGINE_X: Record<string, number> = { dart: -0.45, arrow: -0.4, wedge: -0.9
 // ------------------------------------------------------------------ viewer
 export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): void {
   injectStyle();
+  const reduced = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const R = ctx.rules;
 
   // ---------------------------------------------------------------- units
@@ -669,6 +681,13 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         warp = Math.max(warp, r * 0.8);
       }
       if (tt > u.deathT) a *= 1 - clamp((tt - u.deathT) / 0.22);
+      // hits jolt the hull back, away from the enemy line
+      if (!reduced) for (const h of u.hits) {
+        const e = tt - h.t;
+        if (e < 0 || e > 0.3) continue;
+        const k = Math.min(7, 1.5 + h.dmg * 0.5) * (1 - e / 0.3) ** 2;
+        x -= u.fx * k; y -= u.fy * k;
+      }
     }
     return { x, y, a, warp };
   }
@@ -740,7 +759,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     // hp bar + name
     if (ps.a > 0.2 && hpNow > 0) {
       const bw = Math.max(16, s * 2), by = ps.y + Math.max(s * 0.85, 7) + 4;
-      drawHpBar(ps.x - bw / 2, by, bw, 2.5, hpNow / u.maxHp, ps.a, color);
+      drawHpBar(ps.x - bw / 2, by, bw, 2.5, hpNow / u.maxHp, ps.a, color, lagHp(u, tt) / u.maxHp);
       const large = u.glyph === 'dread' || u.glyph === 'long' || shipUnits.length <= 8;
       if (large) {
         g.globalAlpha = ps.a * 0.75;
@@ -755,11 +774,13 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     }
   }
 
-  function drawHpBar(x: number, y: number, w: number, h: number, frac: number, a: number, color: string) {
+  function drawHpBar(x: number, y: number, w: number, h: number, frac: number, a: number, color: string, lag?: number) {
     g.globalAlpha = a;
     g.fillStyle = 'rgba(255,255,255,.12)';
     g.fillRect(x, y, w, h);
     const f = clamp(frac);
+    // recent damage lingers as a white chunk that drains away
+    if (lag !== undefined && lag > f) { g.fillStyle = 'rgba(255,240,220,.85)'; g.fillRect(x + w * f, y, w * (clamp(lag) - f), h); }
     g.fillStyle = f > 0.6 ? color : f > 0.3 ? '#ffb347' : '#ff4b5c';
     g.fillRect(x, y, w * f, h);
     g.globalAlpha = 1;
@@ -804,12 +825,21 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     g.restore();
     // hp + label
     const bw = r * 2.4, by = y + r * 1.55 + 6;
-    if (!dead) drawHpBar(x - bw / 2, by, bw, 3, hpNow / u.maxHp, 1, color);
+    if (!dead) drawHpBar(x - bw / 2, by, bw, 3, hpNow / u.maxHp, 1, color, lagHp(u, tt) / u.maxHp);
     g.font = `600 10px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'top';
     g.fillStyle = dead ? 'rgba(255,120,120,.8)' : rgba(color, 0.9);
     setLs(g, '0.22em');
     g.fillText(dead ? 'GARRISON FALLEN' : `GARRISON ${Math.max(0, hpNow)}`, x, by + 6);
     setLs(g, '0px');
+  }
+
+  /** HP shown by the draining "recent damage" chunk: holds briefly after a hit, then eases down to the real value. */
+  function lagHp(u: Unit, tt: number): number {
+    const now = hpAt(u, tt), then = hpAt(u, tt - 0.55);
+    if (then <= now) return now;
+    const last = u.hits.reduce((m, h) => (h.t <= tt && h.t > m ? h.t : m), -Infinity);
+    const k = clamp((tt - last - 0.25) / 0.3);
+    return then + (now - then) * k;
   }
 
   function setLs(c: CanvasRenderingContext2D, v: string) {
@@ -868,8 +898,17 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
           g.fillStyle = ig; g.beginPath(); g.arc(ix, iy, rr, 0, Math.PI * 2); g.fill();
           if (shielded) {
             const ang = Math.atan2(A[1] - B[1], A[0] - B[0]);
-            g.strokeStyle = `rgba(140,220,255,${0.8 * (1 - ip)})`; g.lineWidth = 1.5;
-            g.beginPath(); g.arc(B[0], B[1], sh.to.s * 1.25, ang - 0.7, ang + 0.7); g.stroke();
+            // the whole bubble shimmers into view, brightest where the bolt struck
+            const tp2 = pose(sh.to, tt);
+            const br = sh.to.s * 1.25 * (1 + 0.08 * ip);
+            g.fillStyle = `rgba(110,200,255,${0.09 * (1 - ip)})`;
+            g.beginPath(); g.arc(tp2.x, tp2.y, br, 0, Math.PI * 2); g.fill();
+            g.strokeStyle = `rgba(150,225,255,${0.3 * (1 - ip)})`; g.lineWidth = 1;
+            g.setLineDash([3, 4]); g.lineDashOffset = -tt * 40;
+            g.beginPath(); g.arc(tp2.x, tp2.y, br, 0, Math.PI * 2); g.stroke();
+            g.setLineDash([]);
+            g.strokeStyle = `rgba(170,235,255,${0.9 * (1 - ip)})`; g.lineWidth = 2;
+            g.beginPath(); g.arc(tp2.x, tp2.y, br, ang - 0.7, ang + 0.7); g.stroke();
           }
           const rnd = mulberry(sh.idx * 13 + 1);
           g.strokeStyle = `rgba(255,220,170,${1 - ip})`; g.lineWidth = 1;
@@ -1117,6 +1156,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   }
 
   function shake(tt: number): P {
+    if (reduced) return [0, 0];
     let amp = 0;
     for (const u of units.values()) {
       if (u.deathT === Infinity) continue;
@@ -1255,7 +1295,10 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     cancelAnimationFrame(raf);
     ro.disconnect();
     window.removeEventListener('keydown', onKey, true);
-    overlay.remove();
+    // fade out (renamed so nothing treats it as an open viewer any more), unless it was already taken out of the page
+    if (reduced || !overlay.isConnected) { overlay.remove(); return; }
+    overlay.className = 'bv-closing';
+    setTimeout(() => overlay.remove(), 190);
   }
 
   layout();

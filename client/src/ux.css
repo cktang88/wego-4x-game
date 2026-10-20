@@ -1,0 +1,155 @@
+/* UX layer: affordances (hover / focus / pressed / ready), info popovers, collapsible
+   sections, disabled-reason text and the first-run coach. Loaded after style.css. */
+
+/* style.css has a stray "}" that swallows this rule; restore it */
+.dialog { position: relative; }
+
+/* ------------------------------------------------------------ interactive states */
+button { transition: background 0.12s, border-color 0.12s, box-shadow 0.15s, transform 0.06s, color 0.12s; }
+button:hover:not(:disabled) { box-shadow: 0 0 0 1px rgba(183, 139, 255, 0.35), 0 0 14px rgba(150, 110, 255, 0.28); }
+button:active:not(:disabled) { transform: translateY(1px) scale(0.98); box-shadow: none; }
+button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible, .slot:focus-visible, .entry.click:focus-visible {
+  outline: 2px solid var(--gold); outline-offset: 2px;
+}
+button:disabled { filter: grayscale(0.7); }
+button.primary { box-shadow: 0 2px 14px rgba(139, 92, 255, 0.35); }
+button.primary:disabled { box-shadow: none; }
+select:hover, input:hover:not([readonly]) { border-color: var(--line-strong); }
+.tabs button:hover:not(.on) { color: var(--text); background: rgba(150, 110, 255, 0.12); box-shadow: none; }
+.tabs button.on { background: rgba(150, 110, 255, 0.1); }
+.toolbtns button.active { color: var(--gold); }
+.entry.click { transition: background 0.12s, border-color 0.12s; }
+.entry.click:hover { border-left-color: var(--accent); }
+.pchip, .res .r { cursor: help; }
+.res .r { padding: 1px 4px; border-radius: 5px; transition: background 0.12s; }
+.res .r:hover, .pchip:hover { background: rgba(150, 110, 255, 0.16); }
+.stage canvas { cursor: pointer; }
+.targeting .stage canvas { cursor: crosshair; }
+
+/* "ready" glow: Seal when the plan is full, the bank when orders are waiting */
+@keyframes readyglow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 216, 107, 0), 0 2px 14px rgba(139, 92, 255, 0.35); }
+  50% { box-shadow: 0 0 0 3px rgba(255, 216, 107, 0.4), 0 0 24px rgba(255, 216, 107, 0.45); }
+}
+button.ready:not(:disabled) { animation: readyglow 1.7s ease-in-out infinite; border-color: var(--gold); }
+@keyframes softglow { 50% { box-shadow: 0 0 0 1px rgba(255, 216, 107, 0.5) inset, 0 0 18px rgba(255, 216, 107, 0.25); } }
+.bank.has { border-color: rgba(255, 216, 107, 0.55); animation: softglow 2.4s ease-in-out infinite; }
+.dock .livebank { border-radius: 9px; padding: 4px 6px; cursor: pointer; }
+.dock .livebank.has { animation: softglow 2.4s ease-in-out infinite; }
+
+/* ------------------------------------------------------------ order slots */
+.slot { transition: border-color 0.15s, background 0.15s, box-shadow 0.15s; }
+.slot:hover { border-color: var(--accent); background: rgba(120, 80, 255, 0.1); }
+.slot.empty { border-style: dashed; background: transparent; }
+.slot.empty .desc { color: var(--faint); font-size: 13px; }
+.slot.empty.target .desc { color: var(--gold); }
+@keyframes slotpulse { 50% { box-shadow: 0 0 0 1px var(--gold) inset, 0 0 16px rgba(255, 216, 107, 0.28); } }
+.slot.empty.target, .dock .pill.target:not(.filled) { animation: slotpulse 1.8s ease-in-out infinite; border-style: solid; }
+.slot .acts button { opacity: 0.55; }
+.slot:hover .acts button, .phone .slot .acts button { opacity: 1; }
+.ohead { display: flex; align-items: baseline; gap: 8px; }
+.ohead h2 { margin: 0; }
+.ohead .n { margin-left: auto; font-family: var(--display); font-size: 12px; color: var(--dim); }
+.ohead .n b { color: var(--gold); }
+.sealrow { display: flex; gap: 6px; align-items: stretch; margin-top: 8px; }
+.sealrow .primary { flex: 1; padding: 8px 12px; font-size: 15px; }
+.seats { margin-top: 8px; font-size: 13px; color: var(--dim); }
+
+/* ------------------------------------------------------------ info popovers */
+[data-tip] { cursor: help; }
+.nt { border-bottom: 1px dotted var(--faint); }
+.ip {
+  display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 50%;
+  border: 1px solid var(--line-strong); font-size: 10px; font-style: normal; font-weight: 700; color: var(--dim); vertical-align: 1px; margin-left: 3px;
+}
+.ip:hover { color: var(--text); border-color: var(--accent); background: rgba(150, 110, 255, 0.2); }
+.uxtip {
+  position: fixed; z-index: 58; pointer-events: none; max-width: 290px; padding: 7px 10px; border-radius: 8px; font-size: 13px; line-height: 1.35;
+  background: rgba(10, 6, 22, 0.97); border: 1px solid var(--line-strong); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6); white-space: pre-line;
+}
+
+/* ------------------------------------------------------------ selection panels */
+.sel .head { display: flex; align-items: flex-start; gap: 8px; }
+.sel .head h2 { flex: 1; margin: 0; }
+.sel .sub { font-size: 13px; color: var(--dim); margin-top: 2px; }
+.stat { display: flex; flex-wrap: wrap; gap: 3px 12px; font-size: 13px; color: var(--dim); margin: 6px 0 2px; }
+.stat b { color: var(--text); font-weight: 600; }
+.status { font-size: 13px; margin: 6px 0; padding: 5px 8px; border-radius: 6px; background: rgba(255, 216, 107, 0.07); border-left: 2px solid var(--gold); }
+.status.war { background: rgba(255, 120, 60, 0.09); border-left-color: #ffb37a; }
+.acts1 { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+.acts1 button { flex: 1 1 0; min-width: 84px; padding: 7px 8px; font-size: 14px; }
+.acts1 button.go { border-color: var(--accent); background: linear-gradient(180deg, rgba(139, 92, 255, 0.45), rgba(90, 47, 214, 0.35)); }
+.why { display: block; font-size: 12px; color: var(--gold); opacity: 0.9; margin: 2px 0 4px; }
+.note { display: block; font-size: 12px; color: var(--faint); margin: 2px 0 4px; }
+.buildlist .short { color: var(--bad); }
+.buildlist .lbl { cursor: help; }
+.kh { margin-left: 5px; opacity: 0.8; }
+.phone .kh { display: none; }
+@media (pointer: coarse) { .kh { display: none; } }
+
+/* collapsible secondary sections */
+details.sec { border-top: 1px solid var(--line); margin-top: 8px; }
+details.sec > summary {
+  list-style: none; cursor: pointer; padding: 8px 2px 6px; display: flex; gap: 8px; align-items: baseline; min-width: 0;
+  font-family: var(--display); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); border-radius: 4px;
+}
+details.sec > summary::-webkit-details-marker { display: none; }
+details.sec > summary::before { content: '▸'; color: var(--accent); transition: transform 0.15s; display: inline-block; }
+details.sec[open] > summary::before { transform: rotate(90deg); }
+details.sec > summary:hover { color: var(--text); background: rgba(150, 110, 255, 0.08); }
+details.sec > summary .sum {
+  margin-left: auto; font-family: var(--font); font-size: 12px; letter-spacing: 0; text-transform: none; color: var(--faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+details.sec > .sb { padding: 0 0 6px; }
+.phone details.sec > summary { padding: 11px 2px 9px; font-size: 12px; }
+.tips .entry { border-left-color: var(--gold); }
+.tips { margin: 6px 0 10px; }
+
+/* ------------------------------------------------------------ targeting hint */
+@keyframes hintpulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 216, 107, 0.45); } 60% { box-shadow: 0 0 0 8px rgba(255, 216, 107, 0); } }
+.modehint { border-width: 2px; font-size: 15px; padding: 8px 10px 8px 16px; bottom: 22px; font-weight: 600; animation: hintpulse 1.8s ease-out infinite; z-index: 6; }
+.modehint button[data-cancel] { border-color: rgba(255, 255, 255, 0.35); }
+.targeting:not(.phone) .panel.left { opacity: 0.6; transition: opacity 0.2s; }
+.targeting:not(.phone) .panel.left:hover { opacity: 1; }
+
+/* ------------------------------------------------------------ first-run coach */
+.coach {
+  position: fixed; z-index: 46; width: 300px; padding: 11px 14px 10px; border-radius: 12px; font-size: 14px; line-height: 1.38;
+  background: linear-gradient(180deg, #221548, #150c2e); border: 1px solid rgba(255, 216, 107, 0.7);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.65), 0 0 26px rgba(255, 216, 107, 0.16);
+  transition: left 0.25s ease, top 0.25s ease, opacity 0.2s; animation: coachin 0.3s ease-out;
+}
+@keyframes coachin { from { opacity: 0; transform: translateY(6px); } }
+.coach .ct { display: flex; gap: 8px; align-items: baseline; font-family: var(--display); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold); }
+.coach .ct span { margin-left: auto; color: var(--faint); letter-spacing: 0.08em; }
+.coach h4 { margin: 4px 0 2px; font-size: 15px; font-weight: 700; color: var(--text); }
+.coach p { margin: 0 0 9px; color: var(--dim); }
+.coach p b { color: var(--text); }
+.coach .cb { display: flex; gap: 10px; align-items: center; }
+.coach .cb .primary { margin-left: auto; }
+.coach .skip { background: none; border: none; box-shadow: none !important; padding: 2px 0; font-size: 12px; color: var(--faint); text-decoration: underline; letter-spacing: 0; }
+.coach .skip:hover { color: var(--text); background: none; }
+.coach-ring {
+  position: fixed; z-index: 45; pointer-events: none; border: 2px solid var(--gold); border-radius: 10px;
+  box-shadow: 0 0 0 4px rgba(255, 216, 107, 0.14), 0 0 26px rgba(255, 216, 107, 0.45);
+  animation: ringpulse 1.4s ease-in-out infinite; transition: left 0.2s, top 0.2s, width 0.2s, height 0.2s;
+}
+.coach-ring.dot { border-radius: 50%; }
+@keyframes ringpulse { 50% { transform: scale(1.1); opacity: 0.6; } }
+.phone .coach, .coach.ph { width: min(360px, calc(100vw - 24px)); font-size: 14px; }
+.coach .cb button { min-height: 30px; }
+@media (prefers-reduced-motion: reduce) {
+  .coach-ring, button.ready, .bank.has, .dock .livebank.has, .slot.empty.target, .dock .pill.target, .modehint { animation: none !important; }
+}
+.sub .click { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.sub .click:hover { color: var(--text); }
+.acts1 .odds { margin-left: 2px; }
+.sealrow > button { flex: 1; white-space: nowrap; }
+.sealrow .kh { font-size: 10px; font-weight: 400; }
+.subacts { display: flex; gap: 6px; margin-top: 6px; }
+.subacts button { flex: 1; font-size: 13px; padding: 4px 8px; white-space: nowrap; }
+.subacts button[data-conceal] { flex: 0 0 auto; }
+button.primary .kbd { color: rgba(255, 255, 255, 0.75); border-color: rgba(255, 255, 255, 0.35); }
+.slot.empty:not(.target) { min-height: 32px; padding-top: 3px; padding-bottom: 3px; }
+.phone .slot.empty:not(.target) { min-height: 36px; }

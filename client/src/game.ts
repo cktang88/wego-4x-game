@@ -11,10 +11,11 @@ import { maxGarrison } from '../../shared/sim/setup.ts';
 import { defaultRules, mergeRules } from '../../shared/config/rules.ts';
 import type { GameSource } from './net.ts';
 import { LocalSource } from './net.ts';
-import { MapRenderer, regionLayout, type FleetDraw, type Fx } from './render/map.ts';
+import { MapRenderer, regionLayout, reducedMotion, type FleetDraw, type Fx } from './render/map.ts';
 import { openBattleViewer } from './render/battle.ts';
 import { h, esc, toast, overlay, roman } from './ui/dom.ts';
 import { helpHtml } from './ui/help.ts';
+import { Coach, tutorialDone } from './ui/tutorial.ts';
 import { nextTickAt, tickMs, orderMs, etaTicks, tickInCycle } from '../../shared/sim/live.ts';
 import type { FreeAction } from '../../shared/sim/types.ts';
 
@@ -63,6 +64,13 @@ export class GameScreen {
   showSignals = true;
   replay: Replay | null = null;
   fx: Fx[] = [];
+  /** where each fleet token was drawn last frame (continuity between beats, ticks and replays) */
+  lastFleetPos = new Map<number, Pt>();
+  /** decaying visual offsets that smooth out jumps in fleet positions (state updates, layout reshuffles) */
+  fleetOff = new Map<number, { x: number; y: number }>();
+  lastFrameAt = 0;
+  /** the running replay continues from the on-screen positions (a live tick) instead of cutting to the turn start */
+  replayCont = false;
   lastSeenTurn = 0;
   unreadChat = 0;
   raf = 0;
@@ -81,6 +89,11 @@ export class GameScreen {
   replaySpeed = 1;
   victoryShown = false;
   curtain: HTMLElement | null = null;
+  /** first-run coach marks (null for spectators until a seat exists) */
+  coach: Coach | null = null;
+  /** which collapsible panel sections are open (kept for the session, per section name) */
+  openSecs = new Set<string>();
+  tipEl: HTMLElement | null = null;
   private ro: ResizeObserver | null = null;
   private timers = new Set<number>();
   private memo: { visSrc?: number[]; vis?: Set<number>; laySrc?: Fleet[]; layPx?: number; lay?: Map<number, Pt>; hlKey?: string; hl?: Map<number, string> } = {};
@@ -136,6 +149,9 @@ export class GameScreen {
     this.lastSeenTurn = this.readSeenTurn();
     this.prunePlans();
     this.onSourceChange('view');
+    this.bindTips();
+    this.coach = new Coach(this);
+    this.coach.update();
     const loop = () => { if (this.destroyed) return; this.frame(); this.raf = requestAnimationFrame(loop); };
     this.raf = requestAnimationFrame(loop);
   }
@@ -156,7 +172,46 @@ export class GameScreen {
     if (this.src instanceof LocalSource) this.src.onHandoff = () => {};
     this.src.close();
     this.curtain?.remove();
+    this.coach?.destroy();
+    this.tipEl?.remove();
     this.root.remove();
+  }
+  /** Info popovers for any [data-tip] element: hover with a mouse, tap on touch screens. */
+  bindTips() {
+    const t = this.tipEl = h('div', { class: 'uxtip hidden', role: 'tooltip' });
+    document.body.appendChild(t);
+    let shownFor: HTMLElement | null = null;
+    const show = (el: HTMLElement) => {
+      shownFor = el;
+      t.textContent = el.dataset.tip ?? '';
+      t.classList.remove('hidden');
+      const r = el.getBoundingClientRect(), w = t.offsetWidth, hh = t.offsetHeight;
+      let y = r.bottom + 6;
+      if (y + hh > window.innerHeight - 8) y = r.top - hh - 6;
+      t.style.left = `${Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2)))}px`;
+      t.style.top = `${Math.round(Math.max(8, y))}px`;
+    };
+    const hide = () => { shownFor = null; t.classList.add('hidden'); };
+    this.root.addEventListener('pointerover', e => {
+      if (e.pointerType !== 'mouse') return;
+      const el = (e.target as HTMLElement).closest<HTMLElement>('[data-tip]');
+      if (el) { if (el !== shownFor) show(el); } else if (shownFor) hide();
+    });
+    this.root.addEventListener('pointerleave', hide);
+    // remember which collapsible sections are open across re-renders ('toggle' doesn't bubble: capture it)
+    this.root.addEventListener('toggle', e => {
+      const d = e.target as HTMLDetailsElement;
+      const id = d.dataset?.sec;
+      if (!id) return;
+      if (d.open) this.openSecs.add(id); else this.openSecs.delete(id);
+    }, true);
+    // touch: tapping a number / ⓘ shows its breakdown (buttons keep their normal action)
+    this.root.addEventListener('click', e => {
+      const el = (e.target as HTMLElement).closest<HTMLElement>('[data-tip]');
+      const touch = this.phone || window.matchMedia('(pointer: coarse)').matches;
+      if (el && touch && !el.closest('button, select, input')) { if (shownFor === el) hide(); else show(el); }
+      else if (touch) hide();
+    });
   }
   /** setTimeout that is cancelled when the screen is destroyed. */
   later(fn: () => void, ms: number) {
@@ -287,6 +342,31 @@ export class GameScreen {
     return i >= 0 ? i : null;
   }
 
+  /** Why the player can't plan at all right now (null if they can). */
+  planBlock(): string | null {
+    if (this.you === null) return 'You are spectating.';
+    if (this.st.winner !== null) return 'The game is over.';
+    if (this.st.players[this.you]?.eliminated) return 'You have been eliminated.';
+    if (!this.live && this.submitted) return 'Your orders are sealed. Unseal them to make changes.';
+    return null;
+  }
+  /** Why this fleet can't take a new order right now (null if it can). */
+  fleetBlock(f: Fleet): string | null {
+    const b = this.planBlock();
+    if (b) return b;
+    if (f.owner !== this.you) return 'Not your fleet.';
+    const o: Order = { type: 'fortify', fleet: f.id };
+    if (this.live) {
+      if (this.bank < 1) return `No orders banked. The next one arrives in ${fmtDur((this.st.live!.nextOrderAt[this.you!] ?? 0) - Date.now())}.`;
+      const s2: GameState = { ...this.st, fleets: this.st.fleets.map(x => ({ ...x })) };
+      for (const q of [...this.queue, o]) if ('fleet' in q && q.type !== 'build') { const x = s2.fleets.find(y => y.id === q.fleet); if (x) x.ordersThisTurn++; }
+      return capFirst(validateOrder(s2, this.you!, o));
+    }
+    const k = this.nextSlot();
+    if (k === null) return `All ${this.plan.orders.length} orders are used. Remove one in the Orders list first.`;
+    return capFirst(this.validateAt(o, k));
+  }
+
   addOrder(o: Order) {
     if (!this.canPlan) return;
     if (this.live) {
@@ -356,7 +436,7 @@ export class GameScreen {
         const first = this.lastSeenTick === -1;
         this.lastSeenTick = last.tick ?? 0;
         const interesting = last.events.some(e => e.k === 'move' || e.k === 'battle' || e.k === 'capture' || e.k === 'destroyed' || e.k === 'build' || e.k === 'clash');
-        if (!first && interesting && !this.replay && !document.hidden) { this.startReplay(last); const r = this.replay as { speed: number } | null; if (r) r.speed = Math.max(this.replaySpeed, 3); }
+        if (!first && interesting && !this.replay && !document.hidden) { this.startReplay(last); const r = this.replay as { speed: number } | null; if (r) r.speed = Math.max(this.replaySpeed, 3); this.pulseFx(true); }
         else if (!this.replay) this.pulseFx();
       }
     } else if (last && last.turn > this.lastSeenTurn && this.st.turn > 1) {
@@ -371,10 +451,23 @@ export class GameScreen {
   }
   lastSeenKey = '';
   lastSeenTick = -1;
-  /** A soft ripple from every fleet & battle when a quiet tick passes, so the world feels alive. */
-  pulseFx() {
+  /** LIVE tick: a soft ripple sweeps across the map from your capital (or the centre), and battles pulse, so the world feels alive. */
+  pulseFx(rippleOnly = false) {
     const now = performance.now();
-    for (const e of this.st.engagements ?? []) this.fx.push({ kind: 'battle', pos: this.st.regions[e.region].site, color: '#ffb36b', t0: now, dur: 900 });
+    if (!rippleOnly) for (const e of this.st.engagements ?? []) this.fx.push({ kind: 'battle', pos: this.st.regions[e.region].site, color: '#ffb36b', t0: now, dur: 900 });
+    if (reducedMotion() || document.hidden) return;
+    const st = this.st;
+    const cap = this.you !== null ? st.regions[st.players[this.you]?.capital]?.site : undefined;
+    let o = cap;
+    if (!o) { let x = 0, y = 0; for (const r of st.regions) { x += r.site.x; y += r.site.y; } o = { x: x / Math.max(1, st.regions.length), y: y / Math.max(1, st.regions.length) }; }
+    let far = 1;
+    for (const r of st.regions) far = Math.max(far, Math.hypot(r.site.x - o.x, r.site.y - o.y));
+    const vis = this.visibleSet();
+    for (const r of st.regions) {
+      if (r.kind === 'void' || (this.you !== null && !vis.has(r.id))) continue;
+      const d = Math.hypot(r.site.x - o.x, r.site.y - o.y) / far;
+      this.fx.push({ kind: 'ripple', pos: r.site, color: r.owner !== null ? this.color(r.owner) : '#b9a6ff', t0: now + d * 900, dur: 900, size: r.owner === this.you && this.you !== null ? 34 : 24 });
+    }
   }
 
   maybeShowVictory() {
@@ -404,7 +497,7 @@ export class GameScreen {
   }
 
   // ================================================================== rendering
-  renderAll() { this.renderTop(); this.renderTabs(); this.renderTab(); this.renderLeft(); this.renderBottom(); this.renderDock(); }
+  renderAll() { this.renderTop(); this.renderTabs(); this.renderTab(); this.renderLeft(); this.renderBottom(); this.renderDock(); this.coach?.update(); }
 
   /** Phone layout: a full-screen map, one bottom sheet at a time, and a dock with the pulse slots + Seal. */
   get phone(): boolean { return window.matchMedia('(max-width: 700px)').matches; }
@@ -425,15 +518,16 @@ export class GameScreen {
     if (!this.phone) { d.innerHTML = ''; return; }
     if (this.live && this.you !== null && this.st.winner === null) {
       const cap = this.st.rules.live.bankCap;
-      d.innerHTML = `<div class="pills livebank" data-d="sheet">${Array.from({ length: cap }, (_, i) => `<span class="pip ${i < this.bank ? 'on' : ''}"></span>`).join('')}<small>${this.bank >= cap ? 'bank full' : `+1 in <b data-countdown="${this.st.live!.nextOrderAt[this.you] ?? 0}"></b>`}</small></div>
+      d.innerHTML = `<div class="pills livebank ${this.bank > 0 ? 'has' : ''}" data-d="sheet" role="button" aria-label="${this.bank} orders banked. Open the Orders panel">${Array.from({ length: cap }, (_, i) => `<span class="pip ${i < this.bank ? 'on' : ''}"></span>`).join('')}<small>${this.bank >= cap ? 'bank full' : `+1 in <b data-countdown="${this.st.live!.nextOrderAt[this.you] ?? 0}">${fmtDur((this.st.live!.nextOrderAt[this.you] ?? 0) - Date.now())}</b>`}</small></div>
         <button class="dockbtn" data-d="sheet" aria-label="Open panel">${this.sheetOpen ? '▾' : '▴'}</button>`;
     } else if (this.replay || this.you === null || this.st.winner !== null) {
       d.innerHTML = `<button class="dockbtn grow" data-d="sheet">${this.sheetOpen ? 'Hide panel ▾' : 'Intel · Chronicle · Score ▴'}</button>`;
     } else {
-      const pills = this.plan.orders.map((o, i) => `<button class="pill ${o ? 'filled' : ''} ${this.nextSlot() === i && this.canPlan ? 'target' : ''}" data-pill="${i}" aria-label="Pulse ${roman(i + 1)}${o ? ': ' + esc(describeOrder(this.st, o)) : ' (empty)'}"><small>${roman(i + 1)}</small>${o ? ORDER_INFO[o.type].icon : ''}</button>`).join('');
+      const pills = this.plan.orders.map((o, i) => `<button class="pill ${o ? 'filled' : ''} ${this.nextSlot() === i && this.canPlan ? 'target' : ''}" data-pill="${i}" aria-label="Pulse ${roman(i + 1)}${o ? ': ' + esc(describeOrder(this.st, o)) : ' (empty): tap a fleet or region to fill it'}"><small>${roman(i + 1)}</small>${o ? ORDER_INFO[o.type].icon : ''}</button>`).join('');
+      const used = this.plan.orders.filter(Boolean).length;
       const seal = this.submitted
-        ? `<button class="dockbtn" data-d="unseal">✎ Sealed</button>`
-        : `<button class="dockbtn primary" data-d="seal" ${this.canPlan ? '' : 'disabled'}>Seal</button>`;
+        ? `<button class="dockbtn" data-d="unseal" title="Your orders are sealed. Tap to change them.">✎ Sealed</button>`
+        : `<button class="dockbtn primary ${this.canPlan && used === this.plan.orders.length ? 'ready' : ''}" data-d="seal" ${this.canPlan ? '' : `disabled title="${esc(this.planBlock() ?? '')}"`}>Seal${used < this.plan.orders.length ? ` <small>${used}/${this.plan.orders.length}</small>` : ''}</button>`;
       d.innerHTML = `<div class="pills">${pills}</div>${seal}<button class="dockbtn" data-d="sheet" aria-label="Open panel">${this.sheetOpen ? '▾' : '▴'}</button>`;
     }
     d.querySelectorAll<HTMLElement>('[data-pill]').forEach(b => b.addEventListener('click', () => {
@@ -449,7 +543,7 @@ export class GameScreen {
 
   renderTop() {
     const st = this.st, meta = this.src.meta;
-    this.el.turn.textContent = this.live ? `● LIVE · CYCLE ${st.turn} / ${st.rules.victory.turnLimit}` : `TURN ${st.turn} / ${st.rules.victory.turnLimit}`;
+    this.el.turn.textContent = this.live ? (this.phone ? `● CYCLE ${st.turn}/${st.rules.victory.turnLimit}` : `● LIVE · CYCLE ${st.turn} / ${st.rules.victory.turnLimit}`) : `TURN ${st.turn} / ${st.rules.victory.turnLimit}`;
     this.el.turn.classList.toggle('livebadge', this.live);
     let phase = '';
     if (st.winner !== null) phase = `${this.pname(st.winner)} wins`;
@@ -474,11 +568,17 @@ export class GameScreen {
       const inc = income(st, this.you);
       const upkeep = st.fleets.filter(f => f.owner === this.you).reduce((a, f) => a + f.ships.reduce((b, s) => b + (st.rules.ships[s.cls]?.upkeep ?? 0), 0), 0);
       const sp = this.plannedSpend();
-      const cell = (icon: string, v: number, spend: number, inc: number, title: string) =>
-        `<div class="r" title="${title}"><span>${icon} <span class="${v - spend < 0 ? 'bad' : ''}">${v - spend}</span>${spend ? `<small style="display:inline"> /${v}</small>` : ''}</span><small>${inc >= 0 ? '+' : ''}${inc}/turn</small></div>`;
-      this.el.res.innerHTML = cell('⚙', p.res.industry, sp.industry, inc.industry, 'Industry: builds ships and projects') +
-        cell('¢', p.res.credits, sp.credits, inc.credits - upkeep, `Credits: ship upkeep (${upkeep}/turn), projects, extra fleet orders`) +
-        cell('✦', p.res.influence, sp.influence, inc.influence, 'Influence: subversion, scans, feints, pacts');
+      const per = this.live ? 'cycle' : 'turn';
+      const owned = st.regions.filter(r => r.owner === this.you);
+      const mines = owned.reduce((a, r) => a + (r.buildings.mine ?? 0) * st.rules.economy.mineBonus, 0);
+      const hubs = owned.reduce((a, r) => a + (r.buildings.tradehub ?? 0) * st.rules.economy.tradeHubBonus, 0);
+      const cell = (icon: string, v: number, spend: number, inc: number, why: string) => {
+        const t = `${why}\nNow: ${v}${spend ? `, planned spend −${spend} → ${v - spend} left` : ''}${v - spend < 0 ? ' (SHORT: some orders will fail)' : ''}\nNet ${plus(inc)} per ${per}`;
+        return `<div class="r"${tip(t)}><span>${icon} <span class="${v - spend < 0 ? 'bad' : ''}">${v - spend}</span>${spend ? `<small style="display:inline"> /${v}</small>` : ''}</span><small>${plus(inc)}/${per}</small></div>`;
+      };
+      this.el.res.innerHTML = cell('⚙', p.res.industry, sp.industry, inc.industry, `Industry ⚙: builds ships and projects.\nIncome: +${inc.industry - mines} from ${owned.length} region${owned.length === 1 ? '' : 's'} (more with Develop)${mines ? `, +${mines} from mines` : ''}.`) +
+        cell('¢', p.res.credits, sp.credits, inc.credits - upkeep, `Credits ¢: upkeep, projects, and a fleet's 2nd order (+${st.rules.orders.repeatFleetCredits}¢). Spare credits cover an industry shortfall at ${st.rules.economy.creditsPerIndustry}¢ per ⚙.\nIncome: +${inc.credits - hubs} from regions${hubs ? `, +${hubs} from trade hubs` : ''}, −${upkeep} ship upkeep.`) +
+        cell('✦', p.res.influence, sp.influence, inc.influence, `Influence ✦: Influence, Scan, Feint, Conceal and Pact orders.\nIncome: +${inc.influence} from your regions (capital gives most).`);
     } else this.el.res.innerHTML = '';
     const leader = currentLeader(st);
     this.el.players.innerHTML = st.players.map(p => {
@@ -486,11 +586,13 @@ export class GameScreen {
       // while replaying the last turn, show VP as it was before that turn
       const rt = this.replay && !this.replay.preview && this.replay.result.turn === st.turn - 1 ? this.replay.result.turn : null;
       const shownVp = rt !== null ? p.vp - p.vpLog.filter(v => v.turn === rt).reduce((a, v) => a + v.amount, 0) : p.vp;
-      return `<div class="pchip ${p.id === this.you ? 'you' : ''}" style="border-color:${esc(p.color)};color:${esc(p.color)}" title="${esc(p.name)}${s?.kind === 'ai' ? ` (AI ${esc(s.aiLevel)})` : ''}${p.eliminated ? ' (eliminated)' : ''}">
+      const lastVp = p.vpLog.filter(v => v.turn === st.turn - 1);
+      const t = `${p.name}${s?.kind === 'ai' ? ` (AI ${s.aiLevel})` : ''}${p.id === this.you ? ' (you)' : ''}${p.eliminated ? ' (eliminated)' : ''}\n${p.vp} of ${st.rules.victory.vpTarget} VP to win${leader === p.id ? '\n♛ VP leader: taking their regions pays a bounty' : ''}${lastVp.length ? `\nLast ${this.live ? 'cycle' : 'turn'}: ${lastVp.map(v => `${plus(v.amount)} ${v.why}`).join(', ')}` : ''}${this.live ? '' : s?.submitted ? '\n✓ orders sealed' : '\n… still planning'}\nFull breakdown: Score tab`;
+      return `<div class="pchip ${p.id === this.you ? 'you' : ''}" style="border-color:${esc(p.color)};color:${esc(p.color)}"${tip(t)}>
         <span class="dot ${s?.online ? 'on' : ''}"></span>
         <span style="color:var(--text)${p.eliminated ? ';text-decoration:line-through' : ''}">${esc(p.name)}</span>
         <span class="vp">${shownVp}${leader === p.id && !this.replay ? ' ♛' : ''}</span>
-        ${this.live ? '' : s?.submitted ? '<span title="orders sealed">✓</span>' : '<span class="faint" title="still planning">…</span>'}
+        ${this.live ? '' : s?.submitted ? '<span>✓</span>' : '<span class="faint">…</span>'}
       </div>`;
     }).join('');
   }
@@ -519,48 +621,52 @@ export class GameScreen {
     b.querySelectorAll<HTMLElement>('[data-region]').forEach(e => e.addEventListener('click', () => { this.select({ kind: 'region', id: Number(e.dataset.region) }); this.focus(this.st.regions[Number(e.dataset.region)].site); }));
   }
 
+  /** A collapsible secondary section; its open state is remembered for the session. */
+  sec(id: string, title: string, body: string, sum = ''): string {
+    return `<details class="sec" data-sec="${id}"${this.openSecs.has(id) ? ' open' : ''}><summary>${title}${sum ? `<span class="sum">${sum}</span>` : ''}</summary><div class="sb">${body}</div></details>`;
+  }
+
   ordersHtml(): string {
     const st = this.st;
     if (this.you === null) return `<p class="dim">You are spectating this game.</p>`;
     const sp = this.plannedSpend();
+    const verb = this.phone ? 'Tap' : 'Click';
+    const n = this.plan.orders.length, used = this.plan.orders.filter(Boolean).length;
     const slots = this.plan.orders.map((o, i) => {
       const err = o && this.canPlan ? this.validateAt(o, i) : null;
       const c: Partial<Record<'industry' | 'credits' | 'influence', number>> = o ? { ...orderCost(st, o, this.you!) } : {};
-      if (o && 'fleet' in o && o.type !== 'build' && this.plan.orders.slice(0, i).some(x => x && 'fleet' in x && x.type !== 'build' && x.fleet === o.fleet)) c.credits = (c.credits ?? 0) + st.rules.orders.repeatFleetCredits;
-      if (o && o.type === 'seize') for (const id of o.also ?? []) if (this.plan.orders.slice(0, i).some(x => x && 'fleet' in x && x.type !== 'build' && x.fleet === id)) c.credits = (c.credits ?? 0) + st.rules.orders.repeatFleetCredits;
-      return `<div class="slot ${o ? 'filled' : ''} ${this.nextSlot() === i && this.canPlan ? 'target' : ''} ${err ? 'invalid' : ''}" data-slot="${i}">
+      let repeat = false;
+      if (o && 'fleet' in o && o.type !== 'build' && this.plan.orders.slice(0, i).some(x => x && 'fleet' in x && x.type !== 'build' && x.fleet === o.fleet)) { c.credits = (c.credits ?? 0) + st.rules.orders.repeatFleetCredits; repeat = true; }
+      if (o && o.type === 'seize') for (const id of o.also ?? []) if (this.plan.orders.slice(0, i).some(x => x && 'fleet' in x && x.type !== 'build' && x.fleet === id)) { c.credits = (c.credits ?? 0) + st.rules.orders.repeatFleetCredits; repeat = true; }
+      const target = this.nextSlot() === i && this.canPlan;
+      const costTip = `${ORDER_INFO[o?.type ?? 'move'].help}${repeat ? `\nIncludes +${st.rules.orders.repeatFleetCredits}¢: this fleet already has an earlier order this turn.` : ''}`;
+      return `<div class="slot ${o ? 'filled' : 'empty'} ${target ? 'target' : ''} ${err ? 'invalid' : ''}" data-slot="${i}" title="${o ? '' : target ? 'The next order goes into this pulse' : 'Click to put the next order into this pulse'}">
         <div class="num">${roman(i + 1)}</div>
-        <div class="desc">${o ? `${ORDER_INFO[o.type].icon} ${esc(describeOrder(st, o))}<small>${costText(c) || 'free'}${err ? ` · <span class="bad">${esc(err)}</span>` : ''}</small>${o.type === 'seize' && this.canPlan ? this.oddsHtml(o, i) + this.joinChips(o, i) : ''}` : `<span class="faint">— pulse ${roman(i + 1)}: empty —</span>`}</div>
-        <div class="acts">${o && this.canPlan ? `<button data-up="${i}" title="earlier">▲</button><button data-down="${i}" title="later">▼</button><button data-del="${i}" title="remove">✕</button>` : ''}</div>
+        <div class="desc">${o ? `${ORDER_INFO[o.type].icon} ${esc(describeOrder(st, o))}<small><span${tip(costTip)}>${costText(c) || 'free'}</span>${err ? ` · <span class="bad">${esc(err)}</span>` : ''}</small>${o.type === 'seize' && this.canPlan ? this.oddsHtml(o, i) + this.joinChips(o, i) : ''}` : target ? `${verb} a fleet or region to give an order` : 'empty'}</div>
+        <div class="acts">${o && this.canPlan ? `<button data-up="${i}" title="Move to an earlier pulse" ${i === 0 ? 'disabled' : ''}>▲</button><button data-down="${i}" title="Move to a later pulse" ${i === n - 1 ? 'disabled' : ''}>▼</button><button data-del="${i}" title="Remove this order">✕</button>` : ''}</div>
       </div>`;
     }).join('');
-    const free = this.plan.free.length ? `<h3>Free changes</h3><div class="feed">${this.plan.free.map((x, i) => `<div class="entry row" style="font-size:12px"><span class="grow">${esc(this.freeText(x))}</span>${this.canPlan ? `<button class="small" data-delfree="${i}" title="remove">✕</button>` : ''}</div>`).join('')}</div>` : '';
+    const free = this.plan.free.length ? this.sec('free', 'Free changes', `<div class="feed">${this.plan.free.map((x, i) => `<div class="entry row" style="font-size:12px"><span class="grow">${esc(this.freeText(x))}</span>${this.canPlan ? `<button class="small" data-delfree="${i}" title="Remove">✕</button>` : ''}</div>`).join('')}</div>`, `${this.plan.free.length} · no order cost`) : '';
     const seats = this.src.meta.seats.map(s => `<span style="color:${this.color(s.seat)}">${esc(s.name)} ${s.submitted ? '✓' : '…'}</span>`).join(' · ');
-    if (this.phone) return `<div class="slots">${slots}</div>${free}
-      <div class="costs">Spend: <span>${sp.industry}⚙</span><span>${sp.credits}¢</span><span>${sp.influence}✦</span></div>
-      <div class="row" style="margin-top:6px">
-        ${this.submitted ? `<button data-unsubmit class="grow">✎ Unseal</button>` : `<button class="primary grow" data-submit ${this.canPlan ? '' : 'disabled'}>Seal orders</button>`}
-        <button data-preview ${this.canPlan ? '' : 'disabled'}>👁 Preview</button>
-        <button data-conceal ${this.canPlan ? '' : 'disabled'} aria-label="Conceal">☾</button>
-        <button data-clear ${this.canPlan ? '' : 'disabled'}>Clear</button>
-      </div>
-      <div style="margin-top:8px;font-size:13px" class="dim">${seats}</div>
-      ${this.canPlan ? this.advisorHtml() : ''}
-      <div class="orderhelp">${st.rules.orders.perTurn} orders per turn for your whole empire. Slot ${roman(1)} resolves in pulse ${roman(1)} for everyone at once. Tap a fleet or region on the map to give an order.</div>`;
-    return `<h2>Orders: Turn ${st.turn}</h2>${this.canPlan ? this.advisorHtml() : ''}
-      <div class="orderhelp">You get <b>${st.rules.orders.perTurn} orders</b> for your whole empire. The order in slot <b>${roman(1)}</b> resolves in pulse ${roman(1)} for everyone at once, and so on. Fleets and cities you don't order still defend themselves. Max <b>${st.rules.orders.maxPerFleet}</b> orders per fleet; a fleet's second order costs ${st.rules.orders.repeatFleetCredits}¢.</div>
-      <div class="slots">${slots}</div>${free}
-      <div class="costs">Planned spend: <span>${sp.industry}⚙</span><span>${sp.credits}¢</span><span>${sp.influence}✦</span></div>
-      <div class="row" style="margin-top:8px">
-        ${this.submitted ? `<button data-unsubmit class="grow">✎ Unseal orders</button>` :
-          `<button class="primary grow" data-submit ${this.canPlan ? '' : 'disabled'}>Seal orders ⏎</button>`}
-        <button data-conceal ${this.canPlan ? '' : 'disabled'} title="${esc(ORDER_INFO.conceal.help)} (${costText(orderCost(st, { type: 'conceal' }, this.you!))})">☾</button>
-        <button data-preview ${this.canPlan ? '' : 'disabled'} title="Simulate your plan as if rivals hold still (they won't!)">👁 Preview</button>
-        <button data-clear ${this.canPlan ? '' : 'disabled'} title="Clear all orders">Clear</button>
-      </div>
-      <div style="margin-top:10px;font-size:13px" class="dim">${seats}</div>
-      <h3>How to give orders</h3>
-      <div class="orderhelp">Click one of <b>your fleets</b> (chevrons) for Move / Seize / Fortify / Excavate and its doctrine. Click a <b>region</b> for Build / Develop, or Influence / Scan / Feint. Click a slot to place the next order into that pulse. <span class="kbd">Esc</span> cancels.</div>`;
+    const res = st.players[this.you].res;
+    const shortOf = (k: 'industry' | 'credits' | 'influence') => sp[k] > res[k] ? 'bad' : '';
+    const costs = used ? `<div class="costs"${tip(`Planned spend vs. what you have now:\n⚙ ${sp.industry} of ${res.industry} · ¢ ${sp.credits} of ${res.credits} · ✦ ${sp.influence} of ${res.influence}\nA fleet's 2nd order adds ${st.rules.orders.repeatFleetCredits}¢. An order you can't pay for when its pulse comes fails.`)}>Spend <span class="${shortOf('industry')}">${sp.industry}⚙</span><span class="${shortOf('credits')}">${sp.credits}¢</span><span class="${shortOf('influence')}">${sp.influence}✦</span><i class="ip">i</i></div>` : '';
+    const block = this.planBlock();
+    const seal = this.submitted
+      ? `<button data-unsubmit class="grow" title="Take your orders back to change them">✎ Unseal orders</button>`
+      : `<button class="primary ${this.canPlan && used === n ? 'ready' : ''}" data-submit ${this.canPlan ? '' : `disabled title="${esc(block ?? '')}"`}>Seal orders${used < n ? ` · ${used}/${n}` : ''}<span class="kbd kh">Ctrl+⏎</span></button>`;
+    const row = `<div class="sealrow">${seal}</div><div class="subacts">
+        <button data-preview ${this.canPlan && used ? '' : 'disabled'} title="${this.canPlan && !used ? 'Add an order first, then Preview it' : "Preview: simulate your plan as if rivals hold still (they won't!)"}" aria-label="Preview">👁${this.phone ? '' : ' Preview'}</button>
+        <button data-conceal ${this.canPlan ? '' : 'disabled'} title="${esc(ORDER_INFO.conceal.help)} (${costText(orderCost(st, { type: 'conceal' }, this.you!))})" aria-label="Conceal">☾</button>
+        <button data-clear ${this.canPlan && (used || this.plan.free.length) ? '' : 'disabled'} title="Clear all orders">Clear</button></div>
+      ${this.submitted ? `<span class="note">Sealed. You can unseal until everyone else has sealed.</span>` : block ? `<span class="why">${esc(block)}</span>` : ''}`;
+    const how = this.sec('howorders', 'How orders work', `<div class="orderhelp">You get <b>${st.rules.orders.perTurn} orders</b> per turn for your whole empire. The order in slot <b>${roman(1)}</b> resolves in pulse ${roman(1)} for everyone at once, and so on. Fleets and regions you don't order still defend themselves.</div>
+      <div class="orderhelp">Max <b>${st.rules.orders.maxPerFleet}</b> orders per fleet; a fleet's second order costs ${st.rules.orders.repeatFleetCredits}¢.</div>
+      <div class="orderhelp">${verb} one of <b>your fleets</b> for Move / Seize / Fortify / Excavate and its doctrine. ${verb} a <b>region</b> for Build / Develop, or Influence / Scan / Feint. ${verb} a slot to put the next order into that pulse${this.phone ? '' : ' (or press <span class="kbd">1</span>–<span class="kbd">5</span>). <span class="kbd">Esc</span> cancels'}.</div>`);
+    const tips = this.canPlan ? this.advisorHtml() : '';
+    const head = `<div class="ohead"><h2>Turn ${st.turn}</h2><span class="n"><b>${used}</b>/${n} orders</span></div>`;
+    if (this.phone) return `${head}<div class="slots" style="margin-top:8px">${slots}</div>${costs}${row}${tips}${free}<div class="seats">${seats}</div>${how}`;
+    return `${head}${tips}<div class="slots" style="margin-top:8px">${slots}</div>${costs}${row}${free}<div class="seats">${seats}</div>${how}`;
   }
 
   /** LIVE mode Orders tab: the bank, what's queued for the next tick, fleets on the move. */
@@ -568,6 +674,7 @@ export class GameScreen {
     const st = this.st, L = st.live!;
     if (this.you === null) return `<p class="dim">You are spectating this live game.</p>`;
     const cap = st.rules.live.bankCap;
+    const verb = this.phone ? 'Tap' : 'Click';
     const pips = Array.from({ length: cap }, (_, i) => `<span class="pip ${i < this.bank ? 'on' : ''}"></span>`).join('');
     const nextOrder = L.nextOrderAt[this.you] ?? 0;
     const queue = this.queue.map((o, i) => `<div class="slot filled live-q"><div class="num">⏳</div><div class="desc">${ORDER_INFO[o.type].icon} ${esc(describeOrder(st, o))}<small>at the next tick · ${costText(orderCost(st, o, this.you!)) || 'no resource cost'}</small></div>
@@ -575,18 +682,20 @@ export class GameScreen {
     const moving = st.fleets.filter(f => f.owner === this.you && f.route).map(f => {
       const eta = etaTicks(st, f.id);
       const dest = f.route!.path.length ? f.route!.path[f.route!.path.length - 1] : f.region;
-      return `<div class="entry row click" data-fleet="${f.id}"><span class="grow">➤ <b>${esc(f.name)}</b> → ${esc(st.regions[dest]?.name ?? '?')}${f.route!.seize !== null ? ' <span class="gold">(to seize)</span>' : ''}<br><span class="faint">arrives in ~${eta !== null ? fmtDur(eta * tickMs(st) - (Date.now() - (nextTickAt(st) - tickMs(st)))) : 'now'}</span></span><button class="small" data-halt="${f.id}" title="Stop where it is (free)">Halt</button></div>`;
+      return `<div class="entry row click" data-fleet="${f.id}"><span class="grow">➤ <b>${esc(f.name)}</b> → ${esc(st.regions[dest]?.name ?? '?')}${f.route!.seize !== null ? ' <span class="gold">(to seize)</span>' : ''}<br><span class="faint"${tip(`${eta ?? 0} tick${eta === 1 ? '' : 's'} to go at speed ${fleetSpeed(st, f)} (one tick every ${fmtDur(tickMs(st))}). Halting is free.`)}>arrives in ~${eta !== null ? fmtDur(eta * tickMs(st) - (Date.now() - (nextTickAt(st) - tickMs(st)))) : 'now'}</span></span><button class="small" data-halt="${f.id}" title="Stop where it is (free)">Halt</button></div>`;
     }).join('');
-    return `<div class="bank ${this.bank >= cap ? 'full' : ''}">
-        <div class="row"><b class="grow">Orders banked</b><span class="bankn">${this.bank}<small>/${cap}</small></span></div>
+    const block = this.planBlock();
+    return `<div class="bank ${this.bank >= cap ? 'full' : ''} ${this.bank > 0 && this.canPlan ? 'has' : ''}">
+        <div class="row"><b class="grow">Orders banked${ip(`You earn one order every ${fmtDur(orderMs(st))}, up to ${cap}. Spending one queues it for the next tick; ✕ takes it back (refunded). A full bank wastes new orders.`)}</b><span class="bankn">${this.bank}<small>/${cap}</small></span></div>
         <div class="pips">${pips}</div>
-        <div class="faint" style="font-size:12px">${this.bank >= cap ? '<span class="gold">Bank full: spend an order or the next one is wasted.</span>' : `+1 order in <b data-countdown="${nextOrder}"></b>`} · one every ${fmtDur(orderMs(st))}</div>
+        <div class="faint" style="font-size:12px">${this.bank >= cap ? '<span class="gold">Bank full: spend an order or the next one is wasted.</span>' : `+1 order in <b data-countdown="${nextOrder}">${fmtDur((nextOrder) - Date.now())}</b>`}</div>
+        ${block ? `<span class="why">${esc(block)}</span>` : this.bank > 0 ? `<span class="note" style="color:var(--gold)">${verb} a glowing fleet or a region to spend one.</span>` : ''}
       </div>
-      <div class="tick row"><span class="grow">Next tick in <b data-countdown="${nextTickAt(st)}"></b></span><span class="faint">tick ${tickInCycle(st) + 1}/${st.rules.live.ticksPerCycle} of cycle ${st.turn}</span></div>
+      <div class="tick row"><span class="grow">Next tick in <b data-countdown="${nextTickAt(st)}">${fmtDur((nextTickAt(st)) - Date.now())}</b>${ip(`Each tick is one pulse: fleets advance, battles fight, builds finish. Every ${st.rules.live.ticksPerCycle} ticks a cycle ends: income, upkeep, scoring and edicts (like a WEGO turn).`)}</span><span class="faint">tick ${tickInCycle(st) + 1}/${st.rules.live.ticksPerCycle} · cycle ${st.turn}</span></div>
       ${this.advisorHtml()}
       ${queue ? `<h3>Happening at the next tick</h3><div class="slots">${queue}</div>` : ''}
       ${moving ? `<h3>Fleets on the move</h3><div class="feed">${moving}</div>` : ''}
-      ${!queue && !moving ? `<div class="orderhelp">Tap one of <b>your fleets</b> or a <b>region</b> to spend an order. Orders happen at the next tick, and fleets then travel in real time. Moves can go any distance.</div>` : ''}`;
+      ${this.sec('howlive', 'How live mode works', `<div class="orderhelp">${verb} one of <b>your fleets</b> or a <b>region</b> to spend an order. Orders happen at the next tick, then fleets travel in real time. Moves can go any distance; Halt is free. Doctrine, splits, merges and renames cost nothing.</div>`)}`;
   }
   bindLive() {
     const b = this.el.tabbody;
@@ -644,35 +753,39 @@ export class GameScreen {
     return `<small>Join assault: ${ok.map(f => `<button class="small ${o.also?.includes(f.id) ? 'active' : ''}" data-join="${slot}:${f.id}" title="${f.ships.length} ships, power ${fleetPower(this.st, f)}. Uses one of this fleet's ${this.st.rules.orders.maxPerFleet} actions${near(f) ? '' : '. NOT adjacent at this pulse: it will not join'}">${(o.also?.includes(f.id) ? '✓ ' : '+ ') + esc(f.name)}${near(f) ? '' : ' ⚠'}</button>`).join(' ')}${gone.map(id => `<button class="small active" data-join="${slot}:${id}" title="This fleet no longer exists">✓ fleet #${id} ⚠</button>`).join(' ')}</small>`;
   }
 
-  /** Short "this turn" hints: opportunities and threats a new player might miss. */
+  /** Short "this turn" hints, most urgent first: the top 3 show, the rest fold away. */
   advisorHtml(): string {
     const st = this.st, you = this.you!;
-    const tips: string[] = [];
+    const tips: { p: number; t: string; r?: number }[] = [];
     for (const e of st.engagements ?? []) {
       const r = st.regions[e.region];
       const mine = st.fleets.some(f => f.owner === you && f.region === r.id) || r.owner === you;
-      if (mine) tips.push(`⚔ The ${esc(e.name)} is still raging (round ${e.rounds}). Ships you move there this turn join the fight.`);
+      if (mine) tips.push({ p: 1, r: r.id, t: `⚔ <b>${esc(e.name)}</b> rages on (round ${e.rounds}). Ships you send there join the fight.` });
     }
-    const mine = st.fleets.filter(f => f.owner === you);
-    for (const f of mine) {
-      const r = st.regions[f.region];
-      if (r.relic === 'unclaimed' && r.owner === you) tips.push(`✧ <b>${esc(f.name)}</b> can <b>Excavate</b> the relic at ${esc(r.name)} (+${st.rules.victory.vpPerRelic} VP and a bonus).`);
-    }
-    const relicNear = st.regions.filter(r => r.relic === 'unclaimed' && r.owner === null && r.neighbors.some(n => st.regions[n].owner === you));
-    if (relicNear.length && !tips.length) tips.push(`✧ Unclaimed relic next door: ${relicNear.slice(0, 2).map(r => esc(r.name)).join(', ')}. Seize it, then Excavate with a fleet there.`);
     for (const r of st.regions.filter(x => x.owner === you && (x.kind === 'home' || x.kind === 'crown' || x.kind === 'throne'))) {
       const threat = st.fleets.filter(f => f.owner !== you && f.ships.length && (f.region === r.id || r.neighbors.includes(f.region)) && !st.pacts.some(p => p.until >= st.turn && [p.a, p.b].includes(f.owner) && [p.a, p.b].includes(you)));
-      if (threat.length) tips.push(`⚠ ${threat.reduce((a, f) => a + f.ships.length, 0)} hostile ship(s) near <b>${esc(r.name)}</b>. Fortify, guard, or reinforce?`);
+      if (threat.length) tips.push({ p: 0, r: r.id, t: `⚠ ${threat.reduce((a, f) => a + f.ships.length, 0)} hostile ship(s) near <b>${esc(r.name)}</b>. Fortify, guard, or reinforce?` });
     }
-    for (const e of st.edicts) tips.push(`📜 Edict <b>${esc(e.name)}</b>: ${esc(e.desc)} (${e.vp} VP at the end of turn ${e.scoresTurn})`);
+    for (const f of st.fleets.filter(x => x.owner === you)) {
+      const r = st.regions[f.region];
+      if (r.relic === 'unclaimed' && r.owner === you) tips.push({ p: 2, r: r.id, t: `✧ <b>${esc(f.name)}</b> can <b>Excavate</b> the relic at ${esc(r.name)} (+${st.rules.victory.vpPerRelic} VP and a bonus).` });
+    }
+    const relicNear = st.regions.filter(r => r.relic === 'unclaimed' && r.owner === null && r.neighbors.some(n => st.regions[n].owner === you));
+    if (relicNear.length) tips.push({ p: 4, r: relicNear[0].id, t: `✧ Unclaimed relic next door at <b>${esc(relicNear[0].name)}</b>. Seize it, then Excavate.` });
     const w = st.fleets.find(f => f.owner === -1);
-    if (w) tips.push(`☠ The Warden is at ${esc(st.regions[w.region].name)} and hunts the VP leader.`);
-    const idleYard = st.regions.find(r => r.owner === you && (r.buildings.shipyard ?? 0) > 0) && !this.plan.orders.some(o => o?.type === 'build');
-    if (idleYard && st.players[you].res.industry >= 20 && tips.length < 4) tips.push(this.live ? '⚙ Your shipyard is idle.' : '⚙ Your shipyard is idle this turn.');
-    if (st.turn === 1) tips.unshift(this.live
-      ? '👋 You start with a few banked orders, and earn one more on a timer. Try Seize on a neighbouring colony with your Home Guard, or Build a ship. Orders act at the next tick; no Seal needed.'
-      : '👋 First turn: try Seize on a neighbouring colony with your Home Guard, Move a scout outward, and Build a ship. Then Seal.');
-    return tips.length ? `<div class="feed" style="margin:6px 0 10px">${tips.slice(0, 5).map(t => `<div class="entry" style="border-left-color:var(--gold)">${t}</div>`).join('')}</div>` : '';
+    if (w) tips.push({ p: 3, r: w.region, t: `☠ The Warden is at <b>${esc(st.regions[w.region].name)}</b> and hunts the VP leader.` });
+    const pending = this.live ? this.queue : this.plan.orders;
+    const yard = st.regions.find(r => r.owner === you && (r.buildings.shipyard ?? 0) > 0);
+    if (yard && !pending.some(o => o?.type === 'build') && st.players[you].res.industry >= 20) tips.push({ p: 5, r: yard.id, t: `⚙ Your shipyard at <b>${esc(yard.name)}</b> is idle${this.live ? '' : ' this turn'}.` });
+    for (const e of st.edicts) tips.push({ p: 6, t: `📜 Edict <b>${esc(e.name)}</b>: ${esc(e.desc)} (${e.vp} VP, judged end of ${this.live ? 'cycle' : 'turn'} ${e.scoresTurn})` });
+    if (st.turn === 1 && (this.coach ? !this.coach.active : tutorialDone(this.live))) tips.push({ p: 7, t: this.live
+      ? '👋 Spend banked orders any time: Seize a neighbouring colony, or Build a ship. They act at the next tick.'
+      : '👋 First turn: Seize a neighbouring colony, Move a scout outward, Build a ship. Then Seal.' });
+    if (!tips.length) return '';
+    tips.sort((a, b) => a.p - b.p);
+    const row = (x: { t: string; r?: number }) => `<div class="entry${x.r !== undefined ? ' click' : ''}"${x.r !== undefined ? ` data-region="${x.r}" title="Show on the map"` : ''}>${x.t}</div>`;
+    const rest = tips.slice(3);
+    return `<div class="feed tips">${tips.slice(0, 3).map(row).join('')}</div>${rest.length ? this.sec('moretips', `${rest.length} more tip${rest.length > 1 ? 's' : ''}`, `<div class="feed tips">${rest.map(row).join('')}</div>`) : ''}`;
   }
 
   bindOrders() {
@@ -753,7 +866,7 @@ export class GameScreen {
     const scans = this.st.scans.filter(s => s.owner === this.you);
     const fails = (last?.events ?? []).filter(e => e.k === 'fail' && e.owner === this.you) as Extract<GameEvent, { k: 'fail' }>[];
     return `<h2>Intel: Turn ${last?.turn ?? '-'}</h2>
-      <div class="orderhelp">Every order leaves traces. Within your sensor range you see where rival fleets moved, when they arrived and roughly how big they were (small/medium/large). <i>Inferred</i> signals may be feints. Toggle <span class="kbd">I</span> to draw them on the map.</div>
+      ${this.sec('aboutintel', 'About signals', `<div class="orderhelp">Every order leaves traces. Within your sensor range you see where rival fleets moved, when they arrived and roughly how big they were (small/medium/large). <i>Inferred</i> signals may be feints. Toggle${this.phone ? ' them in ☰ Menu' : ' <span class="kbd">I</span>'} to draw them on the map.</div>`)}
       ${scans.length ? `<div class="dim" style="font-size:13px">Active scans: ${scans.map(s => esc(this.st.regions[s.region].name)).join(', ')}</div>` : ''}
       <div class="feed">${sig.length ? sig.map(s => `<div class="entry signal ${esc(s.confidence)} click" data-region="${Number(s.region)}" style="border-left-color:${esc(this.color(s.about))}">
         <div class="t">PULSE ${roman(s.pulse)} · ${s.about === null ? 'UNKNOWN ORIGIN' : esc(this.pname(s.about).toUpperCase())} · ${esc(String(s.confidence).toUpperCase())}</div>${esc(s.text)}</div>`).join('') : '<div class="faint">No signals detected last turn.</div>'}</div>
@@ -785,13 +898,13 @@ export class GameScreen {
     }).join('');
     const pacts = st.pacts.map(p => `<div class="entry">${esc(this.pname(p.a))} ⚭ ${esc(this.pname(p.b))} until turn ${p.until}</div>`).join('');
     return `<h2>Victory</h2>
-      <div class="orderhelp">First to <b>${V.vpTarget} VP</b> wins, or most VP after turn ${V.turnLimit}${V.holdAllCrownsWins ? `, or hold <b>all three Crowns</b> at the end of ${st.rules.crowns.holdTurnsToWin} consecutive turns` : ''}. Crowns and the Throne only pay if you held them when the turn began. VP comes from Crowns (${V.vpPerCrownPerTurn}/turn each, +${V.crownMajorityVp} for holding 2+), the Throne (1, 2, 3… VP for each consecutive turn held, max ${st.rules.throne.streakMaxVp}), relics (${V.vpPerRelic}), capturing capitals (${V.vpCapitalCapture}), battle honors, bounties for hitting the leader (+${st.rules.bounty.vpTakeFromLeader}), and Edicts.</div>
+      ${this.sec('howvp', 'How to win & score VP', `<div class="orderhelp">First to <b>${V.vpTarget} VP</b> wins, or most VP after turn ${V.turnLimit}${V.holdAllCrownsWins ? `, or hold <b>all three Crowns</b> at the end of ${st.rules.crowns.holdTurnsToWin} consecutive turns` : ''}. Crowns and the Throne only pay if you held them when the turn began. VP comes from Crowns (${V.vpPerCrownPerTurn}/turn each, +${V.crownMajorityVp} for holding 2+), the Throne (1, 2, 3… VP for each consecutive turn held, max ${st.rules.throne.streakMaxVp}), relics (${V.vpPerRelic}), capturing capitals (${V.vpCapitalCapture}), battle honors, bounties for hitting the leader (+${st.rules.bounty.vpTakeFromLeader}), and Edicts.</div>`)}
       ${rows}
       ${st.crownHold?.owner != null ? `<div class="edict"><b>${esc(this.pname(st.crownHold.owner))} holds all three Crowns</b> (${st.crownHold.turns}/${st.rules.crowns.holdTurnsToWin} turns). Break the hold or lose!</div>` : ''}
       <h3>The Hollow Throne</h3><div class="dim" style="font-size:13px">${st.throne.owner !== null ? `Held by <b style="color:${this.color(st.throne.owner)}">${esc(this.pname(st.throne.owner))}</b>, streak ${st.throne.streak}` : 'Unclaimed'}${st.wardenAwake ? (st.wardenDefeated ? ' · the Warden is destroyed' : ' · <b class="bad">THE WARDEN IS AWAKE</b>') : ` · Warden sleeps (${st.loreFound}/${st.rules.warden.wakeAtLore} fragments found)`}</div>
       <h3>Edicts</h3>${st.edicts.length ? st.edicts.map(e => `<div class="edict"><b>${esc(e.name)}</b> · ${e.vp} VP<br>${esc(e.desc)}<br><span class="faint">Judged at the end of turn ${e.scoresTurn}</span></div>`).join('') : `<div class="faint" style="font-size:13px">No edict active. The first is proclaimed after turn ${st.rules.edicts.firstReveal}.</div>`}
-      <h3>Diplomacy</h3>
-      <div class="orderhelp">A <b>pact</b> forms when both sides spend a Pact order on the same turn (${st.rules.influence.pactCost}✦ each). It lasts ${st.rules.influence.pactTurns} turns: no fighting, no subversion. Seizing a partner's region breaks it and costs ${st.rules.influence.pactBreakVp} VP. Agree on it in Chat first.</div>
+      <h3>Diplomacy${ip(`A pact forms when both sides spend a Pact order on the same turn (${st.rules.influence.pactCost}✦ each). It lasts ${st.rules.influence.pactTurns} turns: no fighting, no subversion. Seizing a partner's region breaks it and costs ${st.rules.influence.pactBreakVp} VP.`)}</h3>
+      <div class="orderhelp">Both sides must offer on the same turn. Agree on it in Chat first.</div>
       ${this.canPlan ? `<div class="actions">${st.players.filter(p => p.id !== this.you && !p.eliminated).map(p => `<button data-pact="${p.id}" style="border-color:${p.color}">⚭ Offer pact to ${esc(p.name)}</button>`).join('')}</div>` : ''}
       ${pacts ? `<div class="feed">${pacts}</div>` : ''}`;
   }
@@ -830,6 +943,7 @@ export class GameScreen {
     }
     L.querySelectorAll<HTMLElement>('[data-a]').forEach(e => e.addEventListener('click', () => this.action(e.dataset.a!, e.dataset)));
     L.querySelectorAll<HTMLElement>('[data-fleet]').forEach(e => e.addEventListener('click', () => this.select({ kind: 'fleet', id: Number(e.dataset.fleet) })));
+    L.querySelectorAll<HTMLElement>('[data-goto]').forEach(e => e.addEventListener('click', () => this.select({ kind: 'region', id: Number(e.dataset.goto) })));
     L.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-doc]').forEach(e => e.addEventListener('change', () => this.doctrineChanged()));
     L.querySelector<HTMLInputElement>('[data-rename]')?.addEventListener('change', e => {
       const v = (e.target as HTMLInputElement).value.trim();
@@ -844,57 +958,97 @@ export class GameScreen {
     L.querySelector('[data-halt]')?.addEventListener('click', () => { if (this.sel?.kind === 'fleet') this.src.liveHalt?.(this.sel.id); });
   }
 
+  /** Why no new order can be given right now: the plan is locked, the slots are full or the bank is empty. */
+  orderBlock(): string | null {
+    const b = this.planBlock();
+    if (b) return b;
+    if (this.live) return this.bank < 1 ? `No orders banked. The next one arrives in ${fmtDur((this.st.live!.nextOrderAt[this.you!] ?? 0) - Date.now())}.` : null;
+    return this.nextSlot() === null ? `All ${this.plan.orders.length} orders are used. Remove one in the Orders list first.` : null;
+  }
+
   regionHtml(r: Region): string {
-    const st = this.st, you = this.you;
-    const kindName = { home: 'Capital world', colony: 'Colony', crown: 'CROWN', throne: 'THE THRONE', relic: 'Relic site', void: 'Deep void' }[r.kind];
-    const y = st.rules.economy.yields[r.kind];
+    const st = this.st, you = this.you, R = st.rules;
+    const kindName = { home: 'Capital world', colony: 'Colony', crown: 'Crown', throne: 'The Throne', relic: 'Relic site', void: 'Deep void' }[r.kind];
+    const per = this.live ? 'cycle' : 'turn';
+    const y = R.economy.yields[r.kind];
     const fleets = st.fleets.filter(f => f.region === r.id);
     const owned = r.owner === you && you !== null;
+    const block = this.canPlan ? this.orderBlock() : null;
+    const dis = (why: string | null) => why ? `disabled title="${esc(why)}"` : '';
+    // ---- status numbers, each with its breakdown one hover/tap away
+    const mult = Math.max(1, r.dev), mine = (r.buildings.mine ?? 0) * R.economy.mineBonus, hub = (r.buildings.tradehub ?? 0) * R.economy.tradeHubBonus;
+    const yi = y ? y.industry * mult + mine : 0, yc = y ? y.credits * mult + hub : 0, yf = y ? (r.kind === 'void' ? 0 : y.influence) + (r.kind === 'home' ? Math.floor(r.dev / 2) : 0) : 0;
+    const yieldTip = y ? `Produces per ${per} for its owner:\n⚙ ${y.industry} × development ${mult}${mine ? ` + ${mine} from mines` : ''} = ${yi}\n¢ ${y.credits} × development ${mult}${hub ? ` + ${hub} from trade hubs` : ''} = ${yc}\n✦ ${yf}${r.kind === 'home' ? ' (capitals: +1 per 2 development)' : ''}` : 'Produces nothing.';
+    const armor = R.garrison.armor + (r.buildings.fortress ?? 0) * R.garrison.armorPerFortress;
+    const gmax = r.owner !== null && r.garrison >= 0 ? maxGarrison(st, r.id) : null;
+    const garTip = r.garrison < 0 ? 'Unknown: outside your sensors. Scan it, or bring a fleet closer.'
+      : `Defenders: ${r.garrison}${gmax !== null ? ` (max ${gmax})` : ''}. They fire on hostile fleets here; a Seize must defeat them.\nArmor ${armor}: absorbs ${armor} damage per hit (siege damage ignores it; bring bombards).${r.owner !== null ? `\nRegrows each ${per} toward the max (${R.garrison.ownedBase} + ${R.garrison.perDev}/development + ${R.garrison.perFortress}/fortress${R.garrison.kindBonus[r.kind] ? ` + ${R.garrison.kindBonus[r.kind]} ${r.kind}` : ''}).` : ''}`;
+    const stat = `<div class="stat"><span class="nt"${tip(garTip)}>Garrison <b>${r.garrison < 0 ? '?' : r.garrison}</b>${r.buildings.fortress ? ` · fort ${r.buildings.fortress}` : ''}</span>${y && r.kind !== 'void' ? `<span class="nt"${tip(yieldTip)}>Yield <b>${yi}⚙ ${yc}¢ ${yf}✦</b></span>` : ''}${r.kind !== 'void' ? `<span>Dev <b>${r.dev}</b></span>` : ''}</div>`;
+    const statuses: string[] = [];
+    if (r.project) statuses.push(`<div class="status">▲ ${esc(R.projects[r.project.key]?.name ?? r.project.key)} under way: ${r.project.progress}/${R.projects[r.project.key]?.turns} ${per}s</div>`);
+    if (r.relic === 'unclaimed') statuses.push(`<div class="status" style="border-left-color:#7ff7ff">✧ Unexcavated relic: ${owned ? 'a fleet of yours here can Excavate it' : 'own the region, then Excavate with a fleet'} (+${R.victory.vpPerRelic} VP).</div>`);
+    const agents = you !== null && owned ? st.players.filter(p => p.id !== you && (r.loyalty[p.id] ?? 0) > 0) : [];
+    if (agents.length) statuses.push(`<div class="status war">Rival agents: ${agents.map(p => `<span style="color:${p.color}">${esc(p.name)} ${r.loyalty[p.id]}/${flipThreshold(st, r.id)}</span>`).join(' · ')}${ip('At the threshold the region defects to them. Purge with an Influence order on your own region.')}</div>`);
+    // ---- the 1-3 things you can do here
     let actions = '';
-    if (this.canPlan) {
+    if (this.canPlan && you !== null) {
       if (owned) {
         const yard = r.buildings.shipyard ?? 0;
-        const builds = Object.entries(st.rules.ships).map(([k, d]) => {
-          const ok = yard >= d.needsShipyard;
-          return `<span title="${esc(d.role)} HP ${d.hp}, ATK ${d.attack}×${d.shots}, shields ${d.shields}, speed ${d.speed}${d.siege ? `, siege +${d.siege}` : ''}">${esc(d.name)} <span class="faint">${costText(orderCost(st, { type: 'build', region: r.id, cls: k, fleet: null }, you!))}</span></span>
-            <button data-a="build" data-cls="${k}" ${ok ? '' : 'disabled title="needs shipyard ' + d.needsShipyard + '"'}>Build</button>`;
+        const left = this.live ? st.players[you].res : (() => { const sp = this.plannedSpend(), p = st.players[you].res; return { industry: p.industry - sp.industry, credits: p.credits - sp.credits, influence: p.influence - sp.influence }; })();
+        const builds = Object.entries(R.ships).map(([k, d]) => {
+          const why = block ?? (yard < d.needsShipyard ? `Needs shipyard level ${d.needsShipyard} (this one: ${yard}).` : null);
+          const cost = orderCost(st, { type: 'build', region: r.id, cls: k, fleet: null }, you);
+          const short = !canAfford(left, cost, R);
+          return `<span class="lbl"${tip(`${d.name}: ${d.role}\nHP ${d.hp} · attack ${d.attack}×${d.shots} · shields ${d.shields} · speed ${d.speed}${d.siege ? ` · siege +${d.siege}` : ''} · upkeep ${d.upkeep}¢/${per}${short ? '\nYou can\'t afford it with your other orders: it will fail unless you free up resources.' : ''}`)}>${esc(d.name)} <span class="${short ? 'short' : 'faint'}">${yard < d.needsShipyard ? `yard ${d.needsShipyard}` : costText(cost)}</span></span>
+            <button data-a="build" data-cls="${k}" ${dis(why)}>Build</button>`;
         }).join('');
-        const projects = Object.entries(st.rules.projects).map(([k, p]) => {
+        const projects = Object.entries(R.projects).map(([k, p]) => {
           const lvl = k === 'develop' ? r.dev : (r.buildings[k] ?? 0);
-          const err = validateOrder(st, you!, { type: 'develop', region: r.id, project: k });
-          return `<span title="${esc(p.desc)}">${esc(p.name)} ${lvl ? `<span class="faint">(lvl ${lvl})</span>` : ''} <span class="faint">${costText(p.cost)} · ${p.turns}t</span></span>
-            <button data-a="develop" data-proj="${k}" ${err ? `disabled title="${esc(err)}"` : ''}>Start</button>`;
+          const err = block ?? capFirst(validateOrder(st, you, { type: 'develop', region: r.id, project: k }));
+          return `<span class="lbl"${tip(`${p.desc}\nTakes ${p.turns} ${per}${p.turns > 1 ? 's' : ''}. Max level ${p.max}.`)}>${esc(p.name)} ${lvl ? `<span class="faint">(lvl ${lvl})</span>` : ''} <span class="faint">${costText(p.cost)}</span></span>
+            <button data-a="develop" data-proj="${k}" ${dis(err)}>Start</button>`;
         }).join('');
-        const agents = st.players.filter(p => p.id !== you && (r.loyalty[p.id] ?? 0) > 0);
-        const purge = agents.length ? `<h3 class="bad">Rival agents</h3><div style="font-size:13px">${agents.map(p => `<span style="color:${p.color}">${esc(p.name)} ${r.loyalty[p.id]}/${flipThreshold(st, r.id)}</span>`).join(' · ')}</div>
-          <div class="actions"><button data-a="influence" title="Purge rival agents (−${st.rules.influenceLimits.purgeAmount} loyalty each)">✦ Purge agents (${costText(orderCost(st, { type: 'influence', target: r.id }, you!))})</button></div>` : '';
-        actions = `${purge}${yard ? `<h3>Build ship</h3><div class="buildlist">${builds}</div>` : '<h3>Build ship</h3><div class="faint" style="font-size:13px">Needs a shipyard: start one under Develop.</div>'}<h3>Develop</h3><div class="buildlist">${projects}</div>`;
+        const purge = agents.length ? `<div class="acts1"><button data-a="influence" ${dis(block)} title="Purge rival agents (−${R.influenceLimits.purgeAmount} loyalty each)">✦ Purge agents · ${costText(orderCost(st, { type: 'influence', target: r.id }, you))}</button></div>` : '';
+        const yardErr = !yard && R.projects.shipyard ? block ?? capFirst(validateOrder(st, you, { type: 'develop', region: r.id, project: 'shipyard' })) : null;
+        actions = `${purge}${yard ? `<h3>Build a ship</h3><div class="buildlist">${builds}</div>`
+          : `<div class="note">No shipyard here, so no ships.</div>${R.projects.shipyard ? `<div class="acts1"><button data-a="develop" data-proj="shipyard" ${dis(yardErr)}>▲ Start a Shipyard · ${costText(R.projects.shipyard.cost)}</button></div>` : ''}`}
+          ${block ? `<span class="why">${esc(block)}</span>` : ''}
+          ${this.sec('develop', 'Develop', `<div class="buildlist">${projects}</div>`, r.project ? 'busy' : 'projects & upgrades')}`;
       } else {
-        const inf = validateOrder(st, you!, { type: 'influence', target: r.id });
-        actions = `<div class="actions">
-          <button data-a="influence" ${inf ? `disabled title="${esc(inf)}"` : ''} title="${esc(ORDER_INFO.influence.help)}">✦ Influence (${costText(orderCost(st, { type: 'influence', target: r.id }, you!))})</button>
-          <button data-a="scan" title="${esc(ORDER_INFO.scan.help)}">◎ Scan</button>
-          <button data-a="feint" title="${esc(ORDER_INFO.feint.help)}">☍ Feint</button></div>`;
+        const pos = this.projected(this.nextSlot() ?? 0);
+        const near = st.fleets.filter(f => f.owner === you && f.ships.length && (pos.get(f.id) === r.id || r.neighbors.includes(pos.get(f.id) ?? -1))).slice(0, 2);
+        const seize = r.kind !== 'void' || r.owner !== null ? near.map(f => {
+          const od = this.odds([f.id], r.id, this.nextSlot() ?? 0);
+          const why = block ?? this.fleetBlock(f);
+          return `<button class="go" data-a="seizewith" data-with="${f.id}" ${dis(why)} title="${esc(od ? `Odds ≈ ${Math.round(od.p * 100)}% vs. what you can see: ${od.note}` : ORDER_INFO.seize.help)}">⚔ Seize with ${esc(f.name)}${od ? ` · <span class="odds ${od.p >= 0.65 ? 'hi' : od.p >= 0.4 ? 'mid' : 'lo'}">${Math.round(od.p * 100)}%</span>` : ''}</button>`;
+        }).join('') : '';
+        const inf = block ?? capFirst(validateOrder(st, you, { type: 'influence', target: r.id }));
+        const cost = (o: Order) => costText(orderCost(st, o, you));
+        actions = `${seize ? `<div class="acts1">${seize}</div>` : `<div class="note">To take it by force, bring a fleet next to it, then Seize.</div>`}
+          <div class="actions">
+            <button data-a="influence" ${dis(inf)} title="${esc(ORDER_INFO.influence.help)}">✦ Influence <small class="faint">${cost({ type: 'influence', target: r.id })}</small></button>
+            <button data-a="scan" ${dis(block)} title="${esc(ORDER_INFO.scan.help)}">◎ Scan <small class="faint">${cost({ type: 'scan', target: r.id })}</small></button>
+            <button data-a="feint" ${dis(block)} title="${esc(ORDER_INFO.feint.help)}">☍ Feint <small class="faint">${cost({ type: 'feint', target: r.id })}</small></button></div>
+          ${block ? `<span class="why">${esc(block)}</span>` : inf && r.kind !== 'void' ? `<span class="note">Influence: ${esc(inf)}</span>` : ''}`;
       }
     }
-    const loyal = r.owner !== you && you !== null && r.kind !== 'void' ? `<span>Loyalty</span><span>${st.players.map(p => `<span style="color:${p.color}">${r.loyalty[p.id] ?? 0}</span>`).join(' / ')} <span class="faint">(defects at ${flipThreshold(st, r.id)})</span></span>` : '';
-    return `<div class="sel"><div class="row"><h2 class="grow" style="color:${this.color(r.owner)}">${esc(r.name)}</h2><button class="small" data-close>✕</button></div>
-      <div class="dim" style="font-size:13px">${kindName}${r.feature !== 'none' ? ` · ${r.feature === 'nebula' ? 'Nebula (hides fleets, −hit)' : 'Asteroids (defender evasion)'}` : ''}</div>
-      <div class="kv">
+    // ---- secondary details, folded away
+    const loyal = r.owner !== you && you !== null && r.kind !== 'void' ? `<span>Loyalty</span><span${tip(`Influence pushes loyalty toward a player. At ${flipThreshold(st, r.id)} the region defects to them.`)}>${st.players.map(p => `<span style="color:${p.color}">${r.loyalty[p.id] ?? 0}</span>`).join(' / ')} <span class="faint">(defects at ${flipThreshold(st, r.id)})</span></span>` : '';
+    const blds = Object.entries(r.buildings).filter(([, v]) => v);
+    const details = `<div class="kv">
         <span>Owner</span><span style="color:${this.color(r.owner)}">${esc(this.pname(r.owner))}${r.owner !== null && st.players[r.owner]?.capital === r.id ? ' (capital)' : ''}</span>
-        <span>Garrison</span><span>${r.garrison < 0 ? 'unknown' : r.garrison}${r.buildings.fortress ? ` · fortress ${r.buildings.fortress}` : ''}</span>
-        ${r.kind !== 'void' ? `<span>Development</span><span>${r.dev}</span>` : ''}
-        <span>Yield/turn</span><span>${y ? `${y.industry * Math.max(1, r.dev) + (r.buildings.mine ?? 0) * st.rules.economy.mineBonus}⚙ ${y.credits * Math.max(1, r.dev) + (r.buildings.tradehub ?? 0) * st.rules.economy.tradeHubBonus}¢ ${y.influence}✦` : '-'}</span>
-        ${Object.keys(r.buildings).length ? `<span>Buildings</span><span>${Object.entries(r.buildings).filter(([, v]) => v).map(([k, v]) => `${esc(st.rules.projects[k]?.name ?? k)} ${v}`).join(', ')}</span>` : ''}
-        ${r.project ? `<span>Project</span><span>${esc(st.rules.projects[r.project.key]?.name ?? r.project.key)} (${r.project.progress}/${st.rules.projects[r.project.key]?.turns})</span>` : ''}
-        ${r.relic ? `<span>Relic</span><span>${r.relic === 'unclaimed' ? '<b style="color:#7ff7ff">Unexcavated</b>' : esc(RELICS.find(x => x.id === r.relic)?.name ?? 'emptied')}</span>` : ''}
+        ${r.feature !== 'none' ? `<span>Terrain</span><span>${r.feature === 'nebula' ? 'Nebula: hides fleets, harder to hit' : 'Asteroids: defenders evade more'}</span>` : ''}
+        ${blds.length ? `<span>Buildings</span><span>${blds.map(([k, v]) => `${esc(R.projects[k]?.name ?? k)} ${v}`).join(', ')}</span>` : ''}
+        ${r.relic && r.relic !== 'unclaimed' ? `<span>Relic</span><span>${esc(RELICS.find(x => x.id === r.relic)?.name ?? 'emptied')}</span>` : ''}
         ${loyal}
         ${r.battles ? `<span>History</span><span>${r.battles} battle${r.battles > 1 ? 's' : ''}, ${r.wreckage} wrecks</span>` : ''}
-      </div>
-      ${this.battleHtml(r)}
-      ${r.memorials.length ? `<div class="history">${r.memorials.map(m => `✝ ${esc(m)}`).join('<br>')}</div>` : ''}
-      ${fleets.length ? `<h3>Fleets here</h3>${fleets.map(f => `<div class="entry click" data-fleet="${f.id}" style="border-left-color:${this.color(f.owner)}">${esc(f.name)} <span class="faint">${f.ships.length} ship${f.ships.length === 1 ? '' : 's'} · ${esc(f.commander.name)}</span></div>`).join('')}` : ''}
-      ${actions}</div>`;
+      </div>${r.memorials.length ? `<div class="history">${r.memorials.map(m => `✝ ${esc(m)}`).join('<br>')}</div>` : ''}`;
+    const fl = fleets.length ? `<h3>Fleets here</h3>${fleets.map(f => `<div class="entry click" data-fleet="${f.id}" style="border-left-color:${this.color(f.owner)}" title="Select this fleet">${esc(f.name)} <span class="faint">${f.ships.length} ship${f.ships.length === 1 ? '' : 's'}${f.owner === you ? '' : ` · ${esc(this.pname(f.owner))}`}</span></div>`).join('')}` : '';
+    return `<div class="sel"><div class="head"><h2 style="color:${this.color(r.owner)}">${esc(r.name)}</h2><button class="small" data-close title="Close (Esc)" aria-label="Close">✕</button></div>
+      <div class="sub">${kindName} · <span style="color:${this.color(r.owner)}">${esc(this.pname(r.owner))}</span>${r.owner === you && you !== null ? ' (yours)' : ''}</div>
+      ${stat}${this.battleHtml(r)}${statuses.join('')}
+      ${actions}${fl}
+      ${this.sec('rdetails', 'Details', details, [r.feature !== 'none' ? r.feature : '', blds.length ? `${blds.length} building${blds.length > 1 ? 's' : ''}` : '', r.memorials.length ? '✝' : ''].filter(Boolean).join(' · '))}</div>`;
   }
 
   /** Ongoing battle / siege status for a region panel. */
@@ -907,58 +1061,81 @@ export class GameScreen {
     const owners = [...new Set(st.fleets.filter(f => f.region === r.id && f.ships.length).map(f => f.owner))];
     const lines = owners.map(o => `<span style="color:${this.color(o)}">${esc(this.pname(o))}: ${st.fleets.filter(f => f.region === r.id && f.owner === o).reduce((a, f) => a + f.ships.length, 0)} ships, ${sideHp(o)} hp</span>`);
     if (r.garrison > 0 && (besiegers.length || r.owner !== null)) lines.push(`<span>Garrison ${r.garrison}</span>`);
-    return `<div class="edict" style="border-color:rgba(255,140,80,.5);background:rgba(255,120,60,.08)"><b style="color:#ffb37a">⚔ ${e ? esc(e.name) : 'Siege'}: in progress</b><br>
-      ${e ? `Round ${e.rounds}, since turn ${e.startedTurn}. ` : ''}Battles go on pulse after pulse (${st.rules.combat.roundsPerPulse} round${st.rules.combat.roundsPerPulse > 1 ? 's' : ''} each) until one side is gone. <b>Reinforcements that arrive join in.</b> Leaving costs a parting volley.<br>${lines.join(' · ')}</div>`;
+    const how = `Battles go on pulse after pulse (${st.rules.combat.roundsPerPulse} round${st.rules.combat.roundsPerPulse > 1 ? 's' : ''} each) until one side is gone. Reinforcements that arrive join in. Leaving costs a parting volley.`;
+    return `<div class="status war"><b style="color:#ffb37a">⚔ ${e ? esc(e.name) : 'Siege'}</b>${e ? ` · round ${e.rounds}, since ${this.live ? 'cycle' : 'turn'} ${e.startedTurn}` : ' in progress'}${ip(how)}<br>${lines.join(' · ')}</div>`;
   }
 
   fleetHtml(f: Fleet): string {
-    const st = this.st;
+    const st = this.st, R = st.rules;
     const mine = f.owner === this.you;
     const c = f.commander;
     const d = this.doctrineOf(f);
     const k = this.nextSlot() ?? 0;
     const pos = this.projected(k).get(f.id) ?? f.region;
+    const per = this.live ? 'cycle' : 'turn';
+    const speed = fleetSpeed(st, f), power = fleetPower(st, f);
     const ships = f.ships.map(s => {
-      const def = st.rules.ships[s.cls];
+      const def = R.ships[s.cls];
       return `<div class="ship"><span title="${esc(def?.role ?? '')}">${glyph(s.cls)}</span>
         <div><b>${esc(s.name)}</b>${s.title ? ` <span class="gold">${esc(s.title)}</span>` : ''} <span class="faint">${esc(def?.name ?? s.cls)}${s.kills ? ` · ${s.kills} kills` : ''}${s.battles ? ` · ${s.battles} battles` : ''}</span>
-          <div class="bar"><i style="width:${(s.hp / s.maxHp) * 100}%;background:${s.hp / s.maxHp < 0.4 ? 'var(--bad)' : 'var(--good)'}"></i></div></div>
-        <div class="sys"><i class="${s.sys.engines ? '' : 'off'}" title="engines">E</i><i class="${s.sys.weapons ? '' : 'off'}" title="weapons">W</i><i class="${s.sys.shields ? '' : 'off'}" title="shields">S</i>${mine ? `<input type="checkbox" data-split="${s.id}" title="select for split">` : ''}</div></div>`;
+          <div class="bar" title="Hull ${s.hp}/${s.maxHp}"><i style="width:${(s.hp / s.maxHp) * 100}%;background:${s.hp / s.maxHp < 0.4 ? 'var(--bad)' : 'var(--good)'}"></i></div></div>
+        <div class="sys"><i class="${s.sys.engines ? '' : 'off'}" title="Engines${s.sys.engines ? '' : ' knocked out: speed 1, can\'t retreat'}">E</i><i class="${s.sys.weapons ? '' : 'off'}" title="Weapons${s.sys.weapons ? '' : ' knocked out: can\'t fire'}">W</i><i class="${s.sys.shields ? '' : 'off'}" title="Shields${s.sys.shields ? '' : ' knocked out'}">S</i>${mine ? `<input type="checkbox" data-split="${s.id}" title="Select for Split" aria-label="Select ${esc(s.name)} for split">` : ''}</div></div>`;
     }).join('');
+    const counts = new Map<string, number>();
+    for (const s of f.ships) counts.set(R.ships[s.cls]?.name ?? s.cls, (counts.get(R.ships[s.cls]?.name ?? s.cls) ?? 0) + 1);
+    const damaged = f.ships.filter(s => s.hp < s.maxHp || !s.sys.engines || !s.sys.weapons || !s.sys.shields).length;
+    const upkeep = f.ships.reduce((a, s) => a + (R.ships[s.cls]?.upkeep ?? 0), 0);
     const rivals = Object.entries(c.rivals).filter(([, r]) => r.met > 0).map(([n, r]) => `${esc(n)} ×${r.met}${r.lastWinner ? (r.lastWinner === c.name ? ' (won last)' : ' (lost last: vengeance!)') : ''}`).join(', ');
+    const speedTip = `The slowest ship sets the pace${f.ships.some(s => !s.sys.engines) ? '; ships with knocked-out engines move 1' : ''}.\n${this.live ? `Live: moves go any distance; each jump takes about ${Math.ceil(R.live.stepCost / Math.max(1, speed))} tick${Math.ceil(R.live.stepCost / Math.max(1, speed)) > 1 ? 's' : ''} (${fmtDur(Math.ceil(R.live.stepCost / Math.max(1, speed)) * tickMs(st))}).` : `A Move goes up to ${speed} region${speed > 1 ? 's' : ''}. Overdrive: +${R.overdrive.speedBonus}, but the fleet is fatigued next turn.`}`;
+    const powerTip = `Rough fighting strength: (hull + shields×4) ÷ 2 + attack × shots × 2, summed over ships with working weapons.\nFor a real estimate, pick Seize and hover a target to see the odds.`;
+    const stat = `<div class="stat"><span><b>${f.ships.length}</b> ship${f.ships.length === 1 ? '' : 's'}</span><span class="nt"${tip(powerTip)}>Power <b>${power}</b></span><span class="nt"${tip(speedTip)}>Speed <b>${speed}</b></span>${mine ? `<span class="nt"${tip(`Upkeep: ${upkeep}¢ per ${per} for these ships, paid from credits.`)}>Upkeep <b>${upkeep}¢</b></span>` : ''}</div>`;
+    const statuses: string[] = [];
+    const war = (st.engagements ?? []).find(e => e.region === f.region);
+    if (war && f.siege !== f.region) statuses.push(`<div class="status war">⚔ In battle: ${esc(war.name)}${ip('The fight continues every pulse until one side is gone. Leaving costs a parting volley.')}</div>`);
+    if (f.siege === f.region) statuses.push(`<div class="status war">⚔ Besieging ${esc(st.regions[f.region].name)}${war ? ` · round ${war.rounds}` : ''}${ip('A siege keeps fighting the garrison every pulse, across turns, with no new orders, until it falls or this fleet leaves.')}</div>`);
+    if (f.fatigued) statuses.push(`<div class="status war">Fatigued${ip('After an Overdrive: weaker attacks and no Overdrive this turn.')}</div>`);
+    if (f.fortified) statuses.push(`<div class="status">⛨ Fortified: hits harder and is harder to hit until it moves.</div>`);
+    if (this.live && f.route) statuses.push(`<div class="status">➤ To <b>${esc(st.regions[f.route.path[f.route.path.length - 1] ?? f.region]?.name ?? '?')}</b>${f.route.seize !== null ? ' to seize it' : ''} · arrives in ~${fmtDur((etaTicks(st, f.id) ?? 0) * tickMs(st))}${mine ? ' <button class="small" data-halt title="Stop where it is. Free.">Halt</button>' : ''}</div>`);
     let actions = '';
-    if (mine && this.canPlan) {
+    if (mine && this.you !== null && this.st.winner === null) {
       const here = st.regions[pos];
+      const block = this.fleetBlock(f);
+      const canSeize = [pos, ...here.neighbors].some(n => st.regions[n].owner !== this.you);
       const relic = here.relic === 'unclaimed';
-      const mates = st.fleets.filter(x => x.owner === f.owner && x.id !== f.id && x.region === f.region);
-      actions = `<div class="actions">
-        <button data-a="move" title="${esc(ORDER_INFO.move.help)}">➤ Move <span class="kbd">M</span></button>
-        <button data-a="seize" title="${esc(ORDER_INFO.seize.help)}">⚔ Seize <span class="kbd">S</span></button>
-        <button data-a="fortify" title="${esc(ORDER_INFO.fortify.help)}">⛨ Fortify <span class="kbd">F</span></button>
-        ${relic ? `<button data-a="excavate" title="${esc(ORDER_INFO.excavate.help)}">✧ Excavate</button>` : ''}
+      const dis = (why: string | null) => why ? `disabled title="${esc(why)}"` : '';
+      const used = this.live ? this.queue.filter(o => 'fleet' in o && o.type !== 'build' && o.fleet === f.id).length
+        : this.plan.orders.filter(o => o && 'fleet' in o && o.type !== 'build' && (o.fleet === f.id || (o.type === 'seize' && o.also?.includes(f.id)))).length;
+      actions = `<div class="acts1">
+        <button class="go" data-a="move" ${dis(block)} title="${esc(ORDER_INFO.move.help)}">➤ Move<span class="kbd kh">M</span></button>
+        <button class="go" data-a="seize" ${dis(block ?? (canSeize ? null : 'Nothing to seize: every region next to it is already yours.'))} title="${esc(ORDER_INFO.seize.help)}">⚔ Seize<span class="kbd kh">S</span></button>
+        <button data-a="fortify" ${dis(block)} title="${esc(ORDER_INFO.fortify.help)}">⛨ Fortify<span class="kbd kh">F</span></button>
+        ${relic ? `<button data-a="excavate" ${dis(block ?? (here.owner === this.you ? null : 'You must own the region first: Seize it.'))} title="${esc(ORDER_INFO.excavate.help)}">✧ Excavate</button>` : ''}
       </div>
-      <h3>Doctrine (free, standing orders)</h3>
-      <div class="doctrine">
+      ${block ? `<span class="why">${esc(block)}</span>` : used ? `<span class="note">Already has ${used} order${used > 1 ? 's' : ''} this ${per}. Max ${R.orders.maxPerFleet}${this.live ? '' : `; the next costs +${R.orders.repeatFleetCredits}¢`}.</span>` : ''}`;
+    }
+    const canEdit = mine && this.canPlan;
+    const mates = canEdit ? st.fleets.filter(x => x.owner === f.owner && x.id !== f.id && x.region === f.region) : [];
+    const doctrine = canEdit ? this.sec('doctrine', 'Doctrine', `<div class="doctrine">
         <span>Stance</span><select data-doc="stance">${(['aggressive', 'defensive', 'evasive'] as const).map(x => `<option ${d.stance === x ? 'selected' : ''}>${x}</option>`).join('')}</select>
-        <span>Retreat at</span><span class="row"><input type="range" min="0" max="0.9" step="0.05" value="${d.retreatAt}" data-doc="retreatAt" class="grow"><span>${Math.round(d.retreatAt * 100)}%</span></span>
+        <span>Retreat at</span><span class="row"><input type="range" min="0" max="0.9" step="0.05" value="${d.retreatAt}" data-doc="retreatAt" class="grow" aria-label="Retreat at hull %"><span>${Math.round(d.retreatAt * 100)}%</span></span>
         <span>Target</span><select data-doc="target">${(['weakest', 'strongest', 'cheapest', 'garrison'] as const).map(x => `<option ${d.target === x ? 'selected' : ''}>${x}</option>`).join('')}</select>
         <span>Guard</span><label class="row"><input type="checkbox" data-doc="guard" ${d.guard ? 'checked' : ''}> reinforce adjacent regions you own when invaded</label>
       </div>
-      <div class="faint" style="font-size:12px">Aggressive: attacks anything hostile it meets. Defensive: fights when attacked or at home. Evasive: avoids fights and slips away (taking a parting volley).</div>
-      <div class="actions">${mates.length ? `<select data-mergeinto>${mates.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select><button data-a="merge">Merge into</button>` : ''}
-        ${f.ships.length > 1 ? `<button data-a="split" title="Split the checked ships into a new fleet (free)">Split checked</button>` : ''}</div>`;
-    }
-    return `<div class="sel"><div class="row"><h2 class="grow" style="color:${this.color(f.owner)}">${esc(f.name)}</h2><button class="small" data-close>✕</button></div>
-      <div class="dim" style="font-size:13px">${esc(this.pname(f.owner))} · at ${esc(st.regions[f.region].name)}${pos !== f.region ? ` → <b>${esc(st.regions[pos].name)}</b> (planned)` : ''} · speed ${fleetSpeed(st, f)} · power ${fleetPower(st, f)}${f.fortified ? ' · fortified' : ''}${f.fatigued ? ' · <span class="bad">fatigued</span>' : ''}${f.siege === f.region ? ` · <span class="gold">besieging ${esc(st.regions[f.region].name)}</span>` : ''}${(st.engagements ?? []).some(e => e.region === f.region) ? ' · <span style="color:#ffb37a">⚔ in battle</span>' : ''}</div>
-      ${this.live && f.route ? `<div class="edict" style="margin-top:8px">➤ Travelling to <b>${esc(st.regions[f.route.path[f.route.path.length - 1] ?? f.region]?.name ?? '?')}</b>${f.route.seize !== null ? ' to seize it' : ''} · arrives in ~${fmtDur((etaTicks(st, f.id) ?? 0) * tickMs(st))}${mine ? ' <button class="small" data-halt>Halt (free)</button>' : ''}</div>` : ''}
-      ${mine && this.canPlan ? `<input data-rename value="${esc(this.pendingName(f))}" maxlength="40" style="width:100%;margin-top:6px" title="Rename (free)">` : ''}
-      <h3>Commander</h3>
-      <div><b>${esc(c.name)}</b> <span class="faint">rank ${c.rank} · ${c.xp} xp · ${c.deeds.wins}W/${c.deeds.losses}L · ${c.deeds.kills} kills</span></div>
+      <div class="faint" style="font-size:12px">Standing orders, free to change. Aggressive: attacks anything hostile it meets. Defensive: fights when attacked or at home. Evasive: avoids fights and slips away (taking a parting volley).</div>
+      <h3>Fleet admin (free)</h3>
+      <input data-rename value="${esc(this.pendingName(f))}" maxlength="40" style="width:100%" title="Rename (free)" aria-label="Fleet name">
+      ${mates.length ? `<div class="actions"><select data-mergeinto aria-label="Merge into">${mates.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select><button data-a="merge" title="Merge this fleet into the chosen one (free)">Merge into</button></div>` : ''}`,
+      `${d.stance} · retreat ${Math.round(d.retreatAt * 100)}%${d.guard ? ' · guard' : ''}`) : '';
+    const shipsSec = this.sec('ships', `Ships (${f.ships.length})`, `${ships}${canEdit && f.ships.length > 1 ? `<div class="actions"><button data-a="split" title="Split the checked ships into a new fleet (free)">Split checked</button></div>` : ''}`,
+      `${[...counts].map(([n, x]) => `${x} ${n}`).join(', ')}${damaged ? ` · ${damaged} damaged` : ''}`);
+    const cmd = this.sec('commander', 'Commander', `<div><b>${esc(c.name)}</b> <span class="faint">rank ${c.rank} · ${c.xp} xp · ${c.deeds.wins}W/${c.deeds.losses}L · ${c.deeds.kills} kills</span></div>
       <div>${c.traits.map(t => `<span class="trait" title="${esc(TRAITS[t]?.desc ?? '')}">${esc(TRAITS[t]?.name ?? t)}</span>`).join('') || '<span class="faint" style="font-size:12px">No reputation yet. Traits are earned through deeds.</span>'}</div>
-      ${rivals ? `<div style="font-size:12px;margin-top:3px"><span class="faint">Rivals:</span> ${rivals}</div>` : ''}
-      <h3>Ships (${f.ships.length})</h3>${ships}
-      ${actions}
-      ${f.history.length ? `<h3>Record</h3><div class="history scroll">${f.history.slice().reverse().map(x => esc(x)).join('<br>')}</div>` : ''}</div>`;
+      ${rivals ? `<div style="font-size:12px;margin-top:3px"><span class="faint">Rivals:</span> ${rivals}</div>` : ''}`, `${esc(c.name)}${c.traits.length ? ` · ${c.traits.length} trait${c.traits.length > 1 ? 's' : ''}` : ''}`);
+    const rec = f.history.length ? this.sec('record', 'Record', `<div class="history scroll">${f.history.slice().reverse().map(x => esc(x)).join('<br>')}</div>`, `${f.history.length}`) : '';
+    return `<div class="sel"><div class="head"><h2 style="color:${this.color(f.owner)}">${esc(f.name)}</h2><button class="small" data-close title="Close (Esc)" aria-label="Close">✕</button></div>
+      <div class="sub">${mine ? 'Your fleet' : esc(this.pname(f.owner))} · at <span class="click" data-goto="${f.region}">${esc(st.regions[f.region].name)}</span>${pos !== f.region ? ` → <b>${esc(st.regions[pos].name)}</b> <span class="faint">(planned)</span>` : ''}</div>
+      ${stat}${statuses.join('')}${actions}
+      ${shipsSec}${doctrine}${cmd}${rec}</div>`;
   }
 
   pendingName(f: Fleet): string {
@@ -1018,6 +1195,7 @@ export class GameScreen {
         }
         case 'develop': this.addOrder({ type: 'develop', region: r.id, project: data.proj! }); break;
         case 'influence': this.addOrder({ type: 'influence', target: r.id }); break;
+        case 'seizewith': this.addOrder({ type: 'seize', fleet: Number(data.with), target: r.id }); break;
         case 'scan': this.addOrder({ type: 'scan', target: r.id }); break;
         case 'feint': this.addOrder({ type: 'feint', target: r.id }); break;
       }
@@ -1075,7 +1253,7 @@ export class GameScreen {
         const f0 = c?.events[0];
         if (c && f0 && f0.k === 'move' && f0.pulse === e.pulse && f0.step === e.step && !!f0.guard === !!e.guard) c.events.push(e);
         else push(750, e);
-      } else if (e.k === 'pulse') push(700, e);
+      } else if (e.k === 'pulse') { if (!(this.live && !preview)) push(700, e); } // a live tick is one pulse: no banner beat, fleets keep gliding
       else if (e.k === 'battle' || e.k === 'clash') push(1100, e);
       else if (e.k === 'retreat') push(600, e);
       else if (e.k === 'capture' || e.k === 'excavate' || e.k === 'destroyed') push(650, e);
@@ -1088,6 +1266,9 @@ export class GameScreen {
     this.fx = [];
     this.previewing = preview;
     const owners = result.startOwners.length ? result.startOwners.slice() : st.regions.map(r => r.owner);
+    // a live tick continues from what is on screen; a WEGO replay rewinds to the start of the turn (a cut, not an animation)
+    this.replayCont = this.live && !preview && !this.replay;
+    if (!this.replayCont) { this.map.resetAnim(); this.fleetOff.clear(); this.lastFleetPos.clear(); }
     this.replay = { result, beats, i: -1, prog: 0, last: performance.now(), playing: true, speed, fleets, owners, startLayout: new Map(), endLayout: new Map(), moving: new Set(), pulse: 0, preview };
     this.sel = null; this.mode = null; this.targetSlot = null;
     this.el.tooltip.classList.add('hidden');
@@ -1106,8 +1287,11 @@ export class GameScreen {
     const st = this.st;
     const live = () => [...R.fleets.values()].filter(f => f.alpha > 0);
     R.startLayout = regionLayout(st, live().map(f => ({ id: f.id, region: f.region })), this.map.px(1));
+    // start every token from where it is on screen, so beats (and live ticks) flow into each other without jumps
+    for (const [id, p] of this.lastFleetPos) if (R.startLayout.has(id)) R.startLayout.set(id, p);
     const now = performance.now();
     const text: string[] = [];
+    let focus: Pt | null = null;
     for (const e of beat.events) {
       text.push(eventText(st, e, this.you));
       switch (e.k) {
@@ -1119,14 +1303,23 @@ export class GameScreen {
           break;
         }
         case 'retreat': { const f = R.fleets.get(e.fleet); if (f) { f.region = e.to; f.alpha = 1; R.moving.add(e.fleet); } break; }
-        case 'battle': this.fx.push({ kind: 'battle', pos: st.regions[e.region].site, color: '#ffb36b', t0: now, dur: 1100 * 1.3, text: e.name }); break;
+        case 'battle': this.fx.push({ kind: 'battle', pos: st.regions[e.region].site, color: '#ffb36b', t0: now, dur: 1100 * 1.3, text: e.name }); focus ??= st.regions[e.region].site; break;
         case 'clash': {
           const a = st.regions[e.a].site, b = st.regions[e.b].site;
           this.fx.push({ kind: 'clash', pos: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, color: '#ff6b6b', t0: now, dur: 1200, text: 'CLASH!' });
+          focus ??= { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
           break;
         }
-        case 'destroyed': { const f = R.fleets.get(e.fleet); if (f) f.alpha = 0; this.fx.push({ kind: 'text', pos: st.regions[e.region].site, color: '#ff5d7a', t0: now, dur: 1400, text: `${e.name} destroyed` }); break; }
-        case 'capture': R.owners[e.region] = e.by; this.fx.push({ kind: 'capture', pos: st.regions[e.region].site, color: this.color(e.by), t0: now, dur: 1000, text: e.how === 'influence' ? 'DEFECTS' : 'CAPTURED' }); break;
+        case 'destroyed': {
+          const f = R.fleets.get(e.fleet);
+          // the token bursts where it was drawn
+          const at = this.lastFleetPos.get(e.fleet) ?? R.startLayout.get(e.fleet) ?? st.regions[e.region].site;
+          if (f && f.alpha > 0) this.fx.push({ kind: 'explode', pos: { ...at }, color: this.color(f.owner), t0: now, dur: 900, size: Math.min(2, 0.8 + f.ships * 0.12) });
+          if (f) f.alpha = 0;
+          this.fx.push({ kind: 'text', pos: st.regions[e.region].site, color: '#ff5d7a', t0: now, dur: 1400, text: `${e.name} destroyed` });
+          break;
+        }
+        case 'capture': R.owners[e.region] = e.by; this.fx.push({ kind: 'capture', pos: st.regions[e.region].site, color: this.color(e.by), t0: now, dur: 1000, text: e.how === 'influence' ? 'DEFECTS' : 'CAPTURED' }); focus ??= st.regions[e.region].site; break;
         case 'build': {
           const f = R.fleets.get(e.fleet);
           if (f) f.ships++; else R.fleets.set(e.fleet, { id: e.fleet, owner: e.owner, ships: 1, region: e.region, alpha: 1, name: this.fleet(e.fleet)?.name ?? 'new squadron' });
@@ -1148,6 +1341,8 @@ export class GameScreen {
       }
     }
     R.endLayout = regionLayout(st, live().map(f => ({ id: f.id, region: f.region })), this.map.px(1));
+    // WEGO replays: when the action happens off-screen, glide the camera over (never fights the user's own panning)
+    if (focus && !this.live && R.playing && !this.drag && !this.pinch && !this.curtain && !this.map.onScreen(focus, this.phone ? 70 : 110)) this.map.flyTo(focus, undefined, 750);
     this.el.ticker.innerHTML = text.filter(Boolean).slice(0, 3).join(' · ') || this.el.ticker.innerHTML;
     // these are <a href="#">: without preventDefault the hash change would route back to the lobby
     this.el.ticker.querySelectorAll<HTMLElement>('[data-battle]').forEach(x => x.addEventListener('click', ev => { ev.preventDefault(); this.openBattle(Number(x.dataset.battle)); }));
@@ -1161,6 +1356,7 @@ export class GameScreen {
     this.replay = null;
     this.fx = [];
     this.previewing = false;
+    if (wasPreview) this.map.resetAnim(); // owners/fleets snap back to the plan: not a capture
     if (wasPreview) { this.el.ticker.innerHTML = '<span class="faint">Preview finished. Your plan is unchanged.</span>'; this.renderAll(); return; }
     const n = res.battles.length;
     this.el.ticker.innerHTML = `<b>Turn ${res.turn} resolved.</b> ${n ? `${n} battle${n > 1 ? 's' : ''}. <a href="#" data-tabch>See the Chronicle</a> to watch them.` : 'No battles.'} ${res.signals.length ? `${res.signals.length} intel signals.` : ''}`;
@@ -1172,9 +1368,12 @@ export class GameScreen {
 
   banner(t: string) {
     const b = this.el.banner;
-    b.textContent = t; b.classList.add('show');
+    b.textContent = t;
+    b.dataset.text = t; // the light sweep (fx.css) reads it
+    // restart the sweep animation even if the previous banner is still up
+    b.classList.remove('show', 'hide'); void b.offsetWidth; b.classList.add('show');
     clearTimeout((b as any)._t);
-    (b as any)._t = setTimeout(() => b.classList.remove('show'), 650);
+    (b as any)._t = setTimeout(() => b.classList.replace('show', 'hide'), 760);
   }
 
   openBattle(id: number) {
@@ -1216,31 +1415,53 @@ export class GameScreen {
         const t = Math.min(1, this.replay.prog);
         const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
         owners = this.replay.owners;
+        const byId = this.live ? new Map(st.fleets.map(f => [f.id, f])) : null;
         for (const f of this.replay.fleets.values()) {
           if (f.alpha <= 0 && !this.replay.moving.has(f.id)) continue;
           const a = this.replay.startLayout.get(f.id) ?? st.regions[f.region].site;
           const b = this.replay.endLayout.get(f.id) ?? st.regions[f.region].site;
           const moving = this.replay.moving.has(f.id);
-          const pos = moving ? { x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e } : b;
+          // everyone eases from where they were to their new slot (movers travel, the rest shuffle smoothly)
+          let pos = { x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e };
+          // LIVE: fleets still in transit keep gliding along their route during the tick's replay
+          const sf = !moving ? byId?.get(f.id) : undefined;
+          if (sf && sf.region === f.region && sf.route?.path.length) pos = this.liveGlide(sf, pos);
           fleets.push({ id: f.id, owner: f.owner, ships: f.ships, pos, alpha: f.alpha, name: f.name });
         }
       }
     } else {
       const lay = this.fleetLayout();
       // LIVE: fleets in transit glide toward their next region as the tick approaches
-      const frac = this.live ? Math.min(1, Math.max(0, 1 - (nextTickAt(st) - Date.now()) / tickMs(st))) : 0;
       fleets = st.fleets.map(f => {
         let pos = lay.get(f.id) ?? st.regions[f.region].site;
-        const rt = f.route;
-        if (this.live && rt && rt.path.length && st.regions[rt.path[0]]) {
-          const sp = Math.max(1, fleetSpeed(st, f)) + (rt.overdrive ? st.rules.overdrive.speedBonus : 0);
-          const prog = Math.min(0.92, Math.max(0, (rt.mp + sp * frac) / st.rules.live.stepCost));
-          const to = st.regions[rt.path[0]].site;
-          const e = prog * prog * (3 - 2 * prog);
-          pos = { x: pos.x + (to.x - pos.x) * e * 0.85, y: pos.y + (to.y - pos.y) * e * 0.85 };
-        }
+        if (this.live) pos = this.liveGlide(f, pos);
         return { id: f.id, owner: f.owner, ships: f.ships.length, pos, alpha: 1, name: f.name, fortified: f.fortified, selected: this.sel?.kind === 'fleet' && this.sel.id === f.id, idle: this.isIdle(f) };
       });
+    }
+    // smooth out discontinuities (a new state arriving, replay end, layout reshuffles): the token eases from where it was
+    {
+      const fdt = this.lastFrameAt ? Math.min(100, now - this.lastFrameAt) : 16;
+      this.lastFrameAt = now;
+      const decay = Math.exp(-fdt / 150);
+      const jump = this.map.px(14);
+      const seen = new Set<number>();
+      for (const f of fleets) {
+        seen.add(f.id);
+        const prev = this.lastFleetPos.get(f.id);
+        let off = this.fleetOff.get(f.id);
+        if (prev && !this.replay) {
+          const px = prev.x - (off?.x ?? 0), py = prev.y - (off?.y ?? 0); // last frame's target
+          if (Math.hypot(f.pos.x - px, f.pos.y - py) > jump) { off = { x: prev.x - f.pos.x, y: prev.y - f.pos.y }; this.fleetOff.set(f.id, off); }
+        }
+        if (off) {
+          off.x *= decay; off.y *= decay;
+          if (Math.abs(off.x) + Math.abs(off.y) < this.map.px(0.3)) this.fleetOff.delete(f.id);
+          else f.pos = { x: f.pos.x + off.x, y: f.pos.y + off.y };
+        }
+        const lp = this.lastFleetPos.get(f.id);
+        if (lp) { lp.x = f.pos.x; lp.y = f.pos.y; } else this.lastFleetPos.set(f.id, { x: f.pos.x, y: f.pos.y });
+      }
+      for (const id of this.lastFleetPos.keys()) if (!seen.has(id)) { this.lastFleetPos.delete(id); this.fleetOff.delete(id); }
     }
     if (this.live && now - this.lastClock > 500) { this.lastClock = now; this.tickClocks(); }
     // highlights for modes (memoized: path searches over every region are too costly to redo each frame)
@@ -1340,6 +1561,18 @@ export class GameScreen {
     const v = this.src.view.visible;
     if (this.memo.visSrc !== v) { this.memo.visSrc = v; this.memo.vis = new Set(v); }
     return this.memo.vis!;
+  }
+  /** LIVE: where a fleet in transit is drawn between ticks (eased toward its next region; never quite arrives before the tick). */
+  liveGlide(f: Fleet, base: Pt): Pt {
+    const st = this.st;
+    const rt = f.route;
+    if (!rt || !rt.path.length || !st.regions[rt.path[0]]) return base;
+    const frac = Math.min(1, Math.max(0, 1 - (nextTickAt(st) - Date.now()) / tickMs(st)));
+    const sp = Math.max(1, fleetSpeed(st, f)) + (rt.overdrive ? st.rules.overdrive.speedBonus : 0);
+    const prog = Math.min(0.92, Math.max(0, (rt.mp + sp * frac) / st.rules.live.stepCost));
+    const to = st.regions[rt.path[0]].site;
+    const e = prog * prog * (3 - 2 * prog);
+    return { x: base.x + (to.x - base.x) * e * 0.85, y: base.y + (to.y - base.y) * e * 0.85 };
   }
   /** Token positions of the current fleets (memoized per state and zoom). */
   fleetLayout(): Map<number, Pt> {
@@ -1547,9 +1780,26 @@ export class GameScreen {
       case 'replay': if (this.st.last) this.startReplay(this.st.last); else toast('Nothing to replay yet.'); break;
       case 'panel': this.el.right.classList.toggle('min'); break;
       case 'signals': this.showSignals = !this.showSignals; toast(`Intel signals ${this.showSignals ? 'shown' : 'hidden'} on map`); break;
-      case 'help': { const o = overlay(`<div class="dialog wide scroll help">${helpHtml(this.st)}<div class="row" style="margin-top:12px"><button class="primary" data-x>Got it</button></div></div>`); o.querySelector('[data-x]')!.addEventListener('click', () => o.remove()); break; }
+      case 'help': {
+        const o = overlay(`<div class="dialog wide scroll help">${helpHtml(this.st)}<div class="row" style="margin-top:12px"><button class="primary" data-x>Got it</button>${this.you !== null ? '<button data-tour>↻ Replay the quick tour</button>' : ''}</div></div>`);
+        o.querySelector('[data-x]')!.addEventListener('click', () => o.remove());
+        o.querySelector('[data-tour]')?.addEventListener('click', () => { o.remove(); this.restartTour(); });
+        break;
+      }
       case 'menu': this.menu(); break;
     }
+  }
+
+  /** Start the first-run coach again (menu / help). */
+  restartTour() {
+    if (this.you === null) return;
+    if (this.replay) this.endReplay();
+    this.sel = null; this.mode = null;
+    if (this.phone) this.sheetOpen = false;
+    if (!this.coach) this.coach = new Coach(this);
+    this.coach.restart();
+    this.renderAll();
+    if (!this.coach.active) toast('The tour is only available while you can give orders.');
   }
 
   menu() {
@@ -1558,7 +1808,7 @@ export class GameScreen {
     const o = overlay(`<div class="dialog"><h2>Menu</h2><div class="col">
       ${link ? `<div class="dim" style="font-size:13px">Your private seat link (open it on another device to keep playing; don't share it):</div><input value="${esc(link)}" readonly onclick="this.select()">
       <div class="dim" style="font-size:13px">Invite link for others: <input value="${esc(location.origin + location.pathname + '#/g/' + this.src.meta.id)}" readonly onclick="this.select()"></div>` : ''}
-      <div class="row"><button data-x="replaylast">⟲ Replay last turn</button><button data-x="intel">◎ Intel on map: ${this.showSignals ? 'on' : 'off'}</button><button data-x="help">? How to play</button></div>
+      <div class="row"><button data-x="replaylast">⟲ Replay last turn</button><button data-x="intel">◎ Intel on map: ${this.showSignals ? 'on' : 'off'}</button><button data-x="help">? How to play</button>${this.you !== null ? '<button data-x="tour">↻ Quick tour</button>' : ''}</div>
       <div class="row"><span class="dim">Replay turn</span><input type="number" min="1" max="${this.st.turn - 1}" value="${Math.max(1, this.st.turn - 1)}" data-rt style="width:80px"><button data-x="replayturn">▶</button></div>
       ${local ? `<button data-x="save">💾 Download save file</button><label class="row"><input type="checkbox" data-x="reveal" ${local.save.reveal ? 'checked' : ''}> Reveal the whole map (dev / spectate)</label>` : ''}
       <button data-x="exit">⏏ Back to lobby</button><button data-x="close">Close</button></div></div>`);
@@ -1569,6 +1819,7 @@ export class GameScreen {
       if (x === 'replaylast') { o.remove(); this.toolbar('replay'); }
       if (x === 'intel') { this.showSignals = !this.showSignals; (b as HTMLElement).textContent = `◎ Intel on map: ${this.showSignals ? 'on' : 'off'}`; }
       if (x === 'help') { o.remove(); this.toolbar('help'); }
+      if (x === 'tour') { o.remove(); this.restartTour(); }
       if (x === 'save') this.exportSave();
       if (x === 'reveal' && local) { local.setReveal((b as HTMLInputElement).checked); }
       if (x === 'replayturn') { o.remove(); void this.replayTurn(Number(o.querySelector<HTMLInputElement>('[data-rt]')!.value)); }
@@ -1589,9 +1840,17 @@ export class GameScreen {
     const st = this.st;
     const w = st.players[st.winner!];
     const ranks = st.players.slice().sort((a, b) => b.vp - a.vp);
-    const o = overlay(`<div class="dialog" data-victory style="text-align:center"><h1 style="color:${w.color};font-size:30px">${esc(w.name)}</h1><h2>${w.id === this.you ? 'Victory' : 'has won'}</h2>
-      <p class="dim">${esc(st.winReason)}</p>${ranks.map(p => `<div style="color:${p.color}">${esc(p.name)}: ${p.vp} VP</div>`).join('')}
+    // flourish (fx.css): light rays and embers in the winner's colour behind the card, a crown that drops in, ranks that rise in turn
+    const sparks = reducedMotion() ? '' : Array.from({ length: 18 }, (_, i) => `<i style="--x:${(i * 37) % 100}%;--d:${(i * 0.23) % 2.4}s;--s:${0.6 + ((i * 7) % 5) / 5}"></i>`).join('');
+    const o = overlay(`<div class="vic-rays" aria-hidden="true"></div><div class="vic-sparks" aria-hidden="true">${sparks}</div><div class="dialog vic-card" data-victory style="text-align:center"><div class="vic-crown" aria-hidden="true">♛</div><h1 class="vic-name" style="color:${w.color};font-size:30px">${esc(w.name)}</h1><h2>${w.id === this.you ? 'Victory' : 'has won'}</h2>
+      <p class="dim">${esc(st.winReason)}</p>${ranks.map((p, i) => `<div class="vic-rank" style="color:${p.color};--i:${i}">${esc(p.name)}: ${p.vp} VP</div>`).join('')}
       <p class="dim" style="margin-top:12px">The whole map is now revealed. Browse the Chronicle to relive it.</p><div class="row" style="justify-content:center"><button data-x>Look around</button><button class="primary" data-l>Lobby</button></div></div>`);
+    o.classList.add('victory');
+    o.style.setProperty('--win', w.color);
+    // the winner's banner goes up over every region they hold, rippling out from their capital
+    const now = performance.now();
+    const cap = st.regions[w.capital]?.site ?? st.regions[0].site;
+    for (const r of st.regions) if (r.owner === w.id) this.fx.push({ kind: 'capture', pos: r.site, color: w.color, t0: now + Math.hypot(r.site.x - cap.x, r.site.y - cap.y) * 0.6, dur: 1100 });
     o.querySelector('[data-x]')!.addEventListener('click', () => o.remove());
     o.querySelector('[data-l]')!.addEventListener('click', () => { o.remove(); this.onExit(); });
   }
@@ -1620,6 +1879,13 @@ function hops(st: GameState, from: number, max: number): Map<number, number> {
   }
   return d;
 }
+
+/** Attribute for an info popover (text only; newlines become line breaks). */
+function tip(text: string): string { return ` data-tip="${esc(text)}"`; }
+const ip = (text: string) => `<i class="ip"${tip(text)}>i</i>`;
+const plus = (n: number) => `${n >= 0 ? '+' : ''}${n}`;
+
+function capFirst(t: string | null): string | null { return t ? t[0].toUpperCase() + t.slice(1) + (/[.!?]$/.test(t) ? '' : '.') : null; }
 
 function clampZ(z: number) { return Math.max(0.12, Math.min(3, z)); }
 

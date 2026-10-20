@@ -9,6 +9,8 @@ const errors = [];
 page.on('pageerror', e => errors.push(e.message));
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 await page.goto(base);
+// the first-run tour is exercised by scripts/ux-shots.mjs; skip it here
+await page.evaluate(() => { localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); });
 await page.click('[data-l=start]');
 await page.waitForTimeout(800);
 // helper: screen coordinates of a fleet / region

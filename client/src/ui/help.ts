@@ -5,6 +5,14 @@ export function helpHtml(st: GameState): string {
   const R = st.rules;
   return `<h1 style="color:var(--gold)">How to play Three Crowns</h1>
   <p>Three heirs fight over the frontier of a dead empire. Everyone plans <b>at the same time</b>, in secret. Then all orders resolve together (WEGO). You don't need to be online together: the turn resolves when all three have sealed their orders${''}.</p>
+  <h2>Quick start</h2>
+  <ol>
+    <li><b>Select</b> one of your fleets on the map (idle ones glow) or a region.</li>
+    <li><b>Choose an order</b> in its panel: Move, Seize, Fortify for fleets; Build, Develop, Influence, Scan, Feint for regions.</li>
+    <li><b>Pick a target</b> on the map when asked (highlighted regions are valid).</li>
+    <li>${st.live ? 'Orders act at the <b>next tick</b>. Spend more as they arrive.' : `Fill up to ${R.orders.perTurn} slots, then <b>Seal</b>. Everyone's orders play out together.`}</li>
+  </ol>
+  <p class="dim">Numbers with a dotted underline, and <span class="ip" style="display:inline-flex">i</span> icons, show their breakdown when you hover or tap them. Greyed-out buttons say why when you hover them, and the reason is written underneath.</p>
   <h2>The one rule that matters: ${R.orders.perTurn} orders</h2>
   <ul>
     <li>Your whole empire gets <b>${R.orders.perTurn} orders per turn</b>, forever. It doesn't grow as your empire grows. Bigger empires mean more choices, not more actions.</li>
@@ -64,5 +72,6 @@ export function helpHtml(st: GameState): string {
   <h2>Orders reference</h2>
   <ul>${Object.values(ORDER_INFO).map(o => `<li>${o.icon} <b>${o.name}</b>: ${o.help}</li>`).join('')}</ul>
   <h2>Controls</h2>
+  <p class="dim">On a phone: tap to select, drag to pan, pinch to zoom. The dock at the bottom holds your order slots and Seal; ☰ has Replay, Intel, Help and the quick tour.</p>
   <p class="dim">Drag to pan, wheel or pinch to zoom. Click a fleet or region. <span class="kbd">M</span>/<span class="kbd">S</span>/<span class="kbd">F</span> move/seize/fortify the selected fleet. <span class="kbd">1</span>–<span class="kbd">5</span> choose which pulse the next order goes into. <span class="kbd">Shift</span>-click for Overdrive. <span class="kbd">I</span> toggles intel. <span class="kbd">R</span> replays. <span class="kbd">Ctrl+Enter</span> seals your orders. <span class="kbd">Esc</span> cancels.</p>`;
 }

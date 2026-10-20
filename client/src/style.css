@@ -178,7 +178,6 @@ h3 { font-size: 12px; text-transform: uppercase; color: var(--dim); margin-top: 
 .topbar { min-width: 0; }
 .right.min { bottom: auto; }
 .right.min .tabbody { display: none; }
-}
 .dialog { position: relative; }
 .closex { position: absolute; top: 10px; right: 10px; z-index: 2; }
 .modehint { pointer-events: auto; display: flex; gap: 8px; align-items: center; }
