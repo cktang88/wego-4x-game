@@ -30,6 +30,16 @@ npm run build && npm start        # serves dist/ + API + WS on $PORT (default 87
 
 To play with friends over the internet, run `npm start` on any machine they can reach: a small VPS, Fly.io/Render/Railway, or a tunnel like `cloudflared tunnel --url http://localhost:8787`. Games are stored as JSON in `data/games/` (or `$DATA_DIR`), so restarts don't lose anything.
 
+## On a phone
+
+Works in iPhone/Android browsers. On narrow screens the layout changes:
+- the map fills the screen;
+- a thumb dock at the bottom holds the 5 pulse slots and **Seal**;
+- one bottom sheet opens at a time: the tapped fleet or region, or the Orders / Intel / Chronicle / Score / Chat tabs;
+- Replay, Intel and Help are under ☰.
+
+Pinch to zoom, drag to pan, tap to select. Overdrive is a toggle while targeting. Safe areas (notch, home indicator) are respected, and "Add to Home Screen" gives a full-screen app.
+
 ## Fiddling (this is a prototype: everything is a knob)
 
 | Want to change… | Where |
@@ -65,6 +75,7 @@ node scripts/play-e2e.mjs <outdir>        # plays a few turns through the UI, sc
 node scripts/mp-e2e.mjs                   # 3 isolated browsers create/join/seal an online game
 node scripts/review-e2e.mjs               # long soak: Watch AIs on auto, replays, battles, listener leaks
 node scripts/mp-test.mjs                  # REST + WebSocket protocol smoke test against :8787
+node scripts/phone.mjs <outdir>           # iPhone 15 Pro emulation (393x852 @3x, touch) screenshots of the phone layout
 ```
 
 `sim` prints win rates by AI level (does skill matter?), game length, battles per turn, VP sources, Warden wake rate, and more.

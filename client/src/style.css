@@ -178,22 +178,6 @@ h3 { font-size: 12px; text-transform: uppercase; color: var(--dim); margin-top: 
 .topbar { min-width: 0; }
 .right.min { bottom: auto; }
 .right.min .tabbody { display: none; }
-@media (max-width: 700px) {
-  body { font-size: 14px; }
-  .topbar { gap: 6px 10px; padding: 5px 8px; }
-  .logo { font-size: 11px; letter-spacing: 0.15em; }
-  .players { order: 5; width: 100%; flex-wrap: nowrap; overflow-x: auto; }
-  .pchip { font-size: 12px; padding: 2px 7px; }
-  .res { gap: 8px; font-size: 13px; }
-  .toolbtns { margin-left: auto; }
-  .right { left: 8px; right: 8px; width: auto; top: auto; bottom: 8px; max-height: 52%; }
-  .right.min { max-height: none; }
-  .left { left: 8px; right: 8px; width: auto; top: 8px; bottom: auto; max-height: 42%; }
-  .tabs button { font-size: 11px; padding: 7px 2px; letter-spacing: 0.02em; }
-  .bottombar { padding: 4px 8px; gap: 6px; }
-  .pulsebar span { width: 14px; }
-  .banner { font-size: 22px; }
-  .modehint { bottom: auto; top: 8px; font-size: 12px; max-width: 92%; white-space: normal; text-align: center; }
 }
 .dialog { position: relative; }
 .closex { position: absolute; top: 10px; right: 10px; z-index: 2; }
@@ -205,9 +189,111 @@ h3 { font-size: 12px; text-transform: uppercase; color: var(--dim); margin-top: 
   .left { width: 290px; }
   .right { width: 300px; }
 }
-@media (max-width: 700px) {
-  .targeting .left { display: none; }
-  .targeting .right { display: none; }
-}
 /* hotseat hand-off: fully opaque so the previous player can't glimpse the next player's view */
 .overlay.curtain { background: var(--bg); backdrop-filter: none; z-index: 70; }
+
+/* ============================================================ iOS / touch basics */
+html, body { -webkit-text-size-adjust: 100%; overscroll-behavior: none; }
+body { -webkit-tap-highlight-color: transparent; }
+#app { height: 100dvh; }
+.stage canvas, .topbar, .dock, .tabs { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+button { touch-action: manipulation; }
+@media (pointer: coarse) { input, select, textarea { font-size: 16px; } } /* stops Safari zooming on focus */
+
+/* ============================================================ phone layout (.game.phone, <= 700px) */
+.dock { display: none; }
+.phone .topbar {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 4px 10px;
+  padding: calc(4px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right)) 4px calc(10px + env(safe-area-inset-left));
+  min-height: 0;
+}
+.phone .logo { display: none; }
+.phone .turninfo b { font-size: 12px; }
+.phone .turninfo span { font-size: 11px; max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phone .res { gap: 8px; font-size: 13px; justify-content: flex-end; }
+.phone .res .r small { font-size: 10px; }
+.phone .toolbtns button:not([data-act="menu"]) { display: none; }
+.phone .toolbtns button[data-act="menu"] { padding: 6px 12px; font-size: 16px; }
+.phone .players { grid-column: 1 / -1; margin: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 5px; }
+.phone .players::-webkit-scrollbar { display: none; }
+.phone .pchip { font-size: 12px; padding: 2px 8px; gap: 5px; }
+.phone .pchip > span:nth-child(2) { max-width: 92px; overflow: hidden; text-overflow: ellipsis; }
+
+/* sheets: only one at a time, sliding up from the bottom */
+.phone .panel.left, .phone .panel.right {
+  left: 0; right: 0; bottom: 0; top: auto; width: auto; max-height: 64%;
+  border-radius: 16px 16px 0 0; border-bottom: none;
+  padding-left: calc(12px + env(safe-area-inset-left)); padding-right: calc(12px + env(safe-area-inset-right));
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.6); background: rgba(14, 9, 28, 0.97);
+}
+.phone .panel.right { display: none; padding-left: 0; padding-right: 0; }
+.phone.sheet-open:not(.sel-open) .panel.right { display: flex; height: 64%; }
+.phone .panel.left { padding-top: 14px; }
+.phone .panel.left::before, .phone .panel.right::before {
+  content: ''; position: absolute; top: 6px; left: 50%; width: 38px; height: 4px; margin-left: -19px; border-radius: 2px; background: rgba(255, 255, 255, 0.25);
+}
+.phone.targeting .panel.left, .phone.targeting .panel.right { display: none !important; }
+.phone .tabs { overflow-x: auto; scrollbar-width: none; padding-top: 10px; }
+.phone .tabs button { flex: 0 0 auto; font-size: 12px; padding: 10px 11px; letter-spacing: 0.04em; }
+.phone .tabs .sheetx { margin-left: auto; color: var(--text); font-size: 16px; }
+.phone .tabbody { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
+.phone .sel h2 { font-size: 16px; }
+.phone .actions button, .phone .buildlist button { min-height: 38px; font-size: 14px; }
+.phone .actions { gap: 7px; }
+.phone .slot { min-height: 46px; }
+.phone .slot .acts button { min-width: 32px; min-height: 30px; }
+.phone .doctrine select, .phone .doctrine input[type=range] { min-height: 32px; }
+.phone .history { max-height: none; }
+
+/* bottom bar only when it has something to say (replays, watch-AI controls) */
+.phone .bottombar { padding: 4px 10px; gap: 8px; min-height: 0; }
+.phone .bottombar.quiet { display: none; }
+.phone .bottombar .ticker { font-size: 13px; }
+.phone .pulsebar span { width: 12px; }
+.phone .bottombar button { min-height: 32px; }
+
+/* the dock: pulse slots + Seal, always reachable with a thumb */
+.phone .dock {
+  display: flex; align-items: center; gap: 8px; z-index: 6;
+  padding: 7px calc(10px + env(safe-area-inset-right)) calc(7px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));
+  background: rgba(14, 8, 28, 0.98); border-top: 1px solid var(--line);
+}
+.dock .pills { display: flex; gap: 5px; flex: 1; min-width: 0; }
+.dock .pill {
+  flex: 1; min-width: 0; height: 44px; padding: 0; border-radius: 9px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-size: 16px; line-height: 1; background: rgba(0, 0, 0, 0.3);
+}
+.dock .pill small { font-family: var(--display); font-size: 9px; color: var(--faint); margin-bottom: 2px; }
+.dock .pill.filled { background: rgba(120, 80, 255, 0.28); border-color: var(--accent); }
+.dock .pill.filled small { color: var(--accent); }
+.dock .pill.target { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold) inset; }
+.dock .dockbtn { height: 44px; padding: 0 14px; font-size: 15px; border-radius: 9px; }
+.dock .dockbtn.grow { flex: 1; }
+
+.phone .modehint { top: 10px; bottom: auto; max-width: calc(100% - 20px); font-size: 13px; padding: 7px 10px; flex-wrap: wrap; justify-content: center; }
+.phone .modehint button { min-height: 34px; font-size: 13px; padding: 2px 12px; }
+.phone .banner { font-size: 22px; letter-spacing: 0.3em; }
+.phone .tooltip { display: none !important; }
+@media (max-width: 700px) {
+  .dialog { padding: 18px 16px; max-height: 86dvh; overflow-y: auto; }
+  .toast { top: calc(60px + env(safe-area-inset-top)); max-width: 92vw; text-align: center; }
+  .lobby-inner { padding: calc(20px + env(safe-area-inset-top)) 14px calc(40px + env(safe-area-inset-bottom)); }
+  .cards { grid-template-columns: 1fr; }
+  .form { grid-template-columns: 90px 1fr; }
+  .card button { min-height: 40px; }
+  .tweaks { columns: 1; }
+  .tweaks label { grid-template-columns: 1fr 110px; }
+}
+.phone .turninfo { grid-column: 1; grid-row: 1; }
+.phone .res { grid-column: 2; grid-row: 1; }
+.phone .toolbtns { grid-column: 3; grid-row: 1; margin: 0; }
+.phone .players { grid-row: 2; }
+.phone .pchip > span:nth-child(2) { max-width: 74px; }
+@media (max-width: 700px) {
+  .dialog h1 { font-size: 22px; letter-spacing: 0.08em; }
+  .dialog h2 { font-size: 14px; }
+  .help { font-size: 14px; }
+  .help ul, .help ol { padding-left: 20px; }
+  .closex { position: sticky; float: right; top: 0; }
+}
+@media (max-width: 700px) { .toast { top: calc(96px + env(safe-area-inset-top)); } }

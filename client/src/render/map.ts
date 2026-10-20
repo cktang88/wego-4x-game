@@ -70,6 +70,11 @@ export class MapRenderer {
     const z2 = Math.min((this.w - side * 1.9) / (maxX - minX + 80), this.h / (maxY - minY + 80));
     const zz = side ? Math.max(z * 0.7, z2) : z;
     this.cam = { x: (focus ? focus.x * 0.3 : (minX + maxX) / 2), y: focus ? focus.y * 0.3 : (minY + maxY) / 2, z: zz };
+    if (this.compact) {
+      // phones: start zoomed in on your capital (about half the map visible); pan/pinch for the rest
+      const zp = Math.max(z * 1.35, Math.min(0.32, this.w / 1400));
+      this.cam = { x: focus ? focus.x * 0.6 : (minX + maxX) / 2, y: focus ? focus.y * 0.6 : (minY + maxY) / 2, z: zp };
+    }
     this.fitted = true;
   }
 
@@ -88,10 +93,13 @@ export class MapRenderer {
       if (f.ghost) continue;
       const s = this.toScreen(f.pos);
       const d = Math.hypot(s.x - sx, s.y - sy);
-      if (d < 16 && d < bd) { bd = d; best = f; }
+      if (d < (this.compact ? 26 : 16) && d < bd) { bd = d; best = f; }
     }
     return best;
   }
+
+  /** Phone-sized viewport: smaller labels, bigger touch targets. */
+  get compact() { return this.w > 0 && this.w <= 700; }
 
   /** Screen-constant size in world units. */
   px(n: number) { return n / this.cam.z; }
@@ -343,7 +351,7 @@ export class MapRenderer {
     if (r.buildings.sensor) pips.push('◎'.repeat(r.buildings.sensor));
 
     // labels (with simple collision avoidance: try above, then below, then shifted)
-    const fs = Math.max(11, Math.min(15, 13 * Math.sqrt(k)));
+    const fs = this.compact ? 11 : Math.max(11, Math.min(15, 13 * Math.sqrt(k)));
     ctx.textAlign = 'center';
     ctx.font = `600 ${this.px(fs)}px "Rajdhani", system-ui, sans-serif`;
     ctx.fillStyle = r.kind === 'crown' || r.kind === 'throne' ? 'rgba(255,230,160,0.95)' : 'rgba(220,215,245,0.82)';
@@ -369,7 +377,7 @@ export class MapRenderer {
     letterSpaced(ctx, name, spot.x, ly, this.px(1.2));
     ctx.globalAlpha = 1;
     const below = spot.y > p.y;
-    ctx.font = `500 ${this.px(11)}px "Rajdhani", system-ui, sans-serif`;
+    ctx.font = `500 ${this.px(this.compact ? 9.5 : 11)}px "Rajdhani", system-ui, sans-serif`;
     const sub: string[] = [];
     if (r.garrison > 0) sub.push(`⛨${r.garrison}`);
     else if (r.garrison < 0) sub.push('⛨?');

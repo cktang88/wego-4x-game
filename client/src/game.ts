@@ -98,11 +98,12 @@ export class GameScreen {
         <div class="banner" data-el="banner"></div>
         <div class="modehint hidden" data-el="modehint"></div>
       </div>
-      <div class="bottombar">
+      <div class="bottombar" data-el="bottombar">
         <div class="pulsebar" data-el="pulsebar"></div>
         <div class="ticker" data-el="ticker"></div>
         <div class="row" data-el="rcontrols"></div>
       </div>
+      <div class="dock" data-el="dock"></div>
       <div class="tooltip hidden" data-el="tooltip"></div>`;
     this.root.querySelectorAll<HTMLElement>('[data-el]').forEach(e => (this.el[e.dataset.el!] = e));
     this.map = new MapRenderer(this.el.canvas as HTMLCanvasElement);
@@ -117,7 +118,6 @@ export class GameScreen {
     window.addEventListener('blur', this.onBlur);
     // the stage can change size without a window resize (top bar wrapping, mobile URL bar)
     if ('ResizeObserver' in window) { this.ro = new ResizeObserver(() => this.onResize()); this.ro.observe(this.el.stage); }
-    if (window.innerWidth <= 700) this.el.right.classList.add('min');
     this.onResize();
     this.lastSeenTurn = this.readSeenTurn();
     this.prunePlans();
@@ -278,6 +278,7 @@ export class GameScreen {
     this.targetSlot = null;
     this.mode = null;
     this.savePlan();
+    if (this.phone) { this.sel = null; toast(`Pulse ${roman(k + 1)}: ${describeOrder(this.st, o)}`); }
     this.renderAll();
   }
 
@@ -350,7 +351,43 @@ export class GameScreen {
   }
 
   // ================================================================== rendering
-  renderAll() { this.renderTop(); this.renderTabs(); this.renderTab(); this.renderLeft(); this.renderBottom(); }
+  renderAll() { this.renderTop(); this.renderTabs(); this.renderTab(); this.renderLeft(); this.renderBottom(); this.renderDock(); }
+
+  /** Phone layout: a full-screen map, one bottom sheet at a time, and a dock with the pulse slots + Seal. */
+  get phone(): boolean { return window.matchMedia('(max-width: 700px)').matches; }
+  sheetOpen = false;
+  openSheet(tab?: Tab) {
+    if (tab) this.tab = tab;
+    if (this.tab === 'chat') this.unreadChat = 0;
+    this.sheetOpen = true;
+    if (this.phone) { this.sel = null; this.mode = null; }
+    this.renderAll();
+  }
+  closeSheet() { this.sheetOpen = false; this.renderAll(); }
+
+  renderDock() {
+    const d = this.el.dock;
+    this.root.classList.toggle('sheet-open', this.sheetOpen);
+    this.root.classList.toggle('sel-open', !!this.sel);
+    if (!this.phone) { d.innerHTML = ''; return; }
+    if (this.replay || this.you === null || this.st.winner !== null) {
+      d.innerHTML = `<button class="dockbtn grow" data-d="sheet">${this.sheetOpen ? 'Hide panel ▾' : 'Intel · Chronicle · Score ▴'}</button>`;
+    } else {
+      const pills = this.plan.orders.map((o, i) => `<button class="pill ${o ? 'filled' : ''} ${this.nextSlot() === i && this.canPlan ? 'target' : ''}" data-pill="${i}" aria-label="Pulse ${roman(i + 1)}${o ? ': ' + esc(describeOrder(this.st, o)) : ' (empty)'}"><small>${roman(i + 1)}</small>${o ? ORDER_INFO[o.type].icon : ''}</button>`).join('');
+      const seal = this.submitted
+        ? `<button class="dockbtn" data-d="unseal">✎ Sealed</button>`
+        : `<button class="dockbtn primary" data-d="seal" ${this.canPlan ? '' : 'disabled'}>Seal</button>`;
+      d.innerHTML = `<div class="pills">${pills}</div>${seal}<button class="dockbtn" data-d="sheet" aria-label="Open panel">${this.sheetOpen ? '▾' : '▴'}</button>`;
+    }
+    d.querySelectorAll<HTMLElement>('[data-pill]').forEach(b => b.addEventListener('click', () => {
+      const i = Number(b.dataset.pill);
+      if (this.plan.orders[i]) { this.targetSlot = null; this.openSheet('orders'); }
+      else { this.targetSlot = this.targetSlot === i ? null : i; this.renderDock(); toast(`Next order goes into pulse ${roman(i + 1)}. Tap a fleet or region.`); }
+    }));
+    d.querySelector('[data-d="seal"]')?.addEventListener('click', () => this.submit());
+    d.querySelector('[data-d="unseal"]')?.addEventListener('click', () => this.src.unsubmit());
+    d.querySelector('[data-d="sheet"]')?.addEventListener('click', () => (this.sheetOpen ? this.closeSheet() : this.openSheet()));
+  }
 
   renderTop() {
     const st = this.st, meta = this.src.meta;
@@ -400,9 +437,10 @@ export class GameScreen {
   renderTabs() {
     const tabs: [Tab, string][] = [['orders', 'Orders'], ['intel', 'Intel'], ['chronicle', 'Chronicle'], ['score', 'Score'], ['chat', 'Chat']];
     this.el.tabs.innerHTML = tabs.map(([k, n]) => `<button class="${this.tab === k ? 'on' : ''}" data-tab="${k}">${n}${k === 'chat' && this.unreadChat ? `<span class="badge">${this.unreadChat}</span>` : ''}${k === 'intel' && this.st.last?.signals.length ? `<span class="badge" style="background:var(--accent)">${this.st.last.signals.length}</span>` : ''}</button>`).join('');
+    if (this.phone) this.el.tabs.insertAdjacentHTML('beforeend', '<button class="sheetx" data-sheetx aria-label="Close">✕</button>');
+    this.el.tabs.querySelector('[data-sheetx]')?.addEventListener('click', () => this.closeSheet());
     this.el.tabs.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(b => b.addEventListener('click', () => {
-      if (this.el.right.classList.contains('min')) this.el.right.classList.remove('min');
-      else if (this.tab === b.dataset.tab && window.innerWidth <= 700) this.el.right.classList.add('min');
+      if (!this.phone && this.el.right.classList.contains('min')) this.el.right.classList.remove('min');
       this.tab = b.dataset.tab as Tab; if (this.tab === 'chat') this.unreadChat = 0; this.renderTabs(); this.renderTab();
     }));
   }
@@ -437,6 +475,17 @@ export class GameScreen {
     }).join('');
     const free = this.plan.free.length ? `<h3>Free changes</h3><div class="feed">${this.plan.free.map((x, i) => `<div class="entry row" style="font-size:12px"><span class="grow">${esc(this.freeText(x))}</span>${this.canPlan ? `<button class="small" data-delfree="${i}" title="remove">✕</button>` : ''}</div>`).join('')}</div>` : '';
     const seats = this.src.meta.seats.map(s => `<span style="color:${this.color(s.seat)}">${esc(s.name)} ${s.submitted ? '✓' : '…'}</span>`).join(' · ');
+    if (this.phone) return `<div class="slots">${slots}</div>${free}
+      <div class="costs">Spend: <span>${sp.industry}⚙</span><span>${sp.credits}¢</span><span>${sp.influence}✦</span></div>
+      <div class="row" style="margin-top:6px">
+        ${this.submitted ? `<button data-unsubmit class="grow">✎ Unseal</button>` : `<button class="primary grow" data-submit ${this.canPlan ? '' : 'disabled'}>Seal orders</button>`}
+        <button data-preview ${this.canPlan ? '' : 'disabled'}>👁 Preview</button>
+        <button data-conceal ${this.canPlan ? '' : 'disabled'} aria-label="Conceal">☾</button>
+        <button data-clear ${this.canPlan ? '' : 'disabled'}>Clear</button>
+      </div>
+      <div style="margin-top:8px;font-size:13px" class="dim">${seats}</div>
+      ${this.canPlan ? this.advisorHtml() : ''}
+      <div class="orderhelp">${st.rules.orders.perTurn} orders per turn for your whole empire. Slot ${roman(1)} resolves in pulse ${roman(1)} for everyone at once. Tap a fleet or region on the map to give an order.</div>`;
     return `<h2>Orders: Turn ${st.turn}</h2>${this.canPlan ? this.advisorHtml() : ''}
       <div class="orderhelp">You get <b>${st.rules.orders.perTurn} orders</b> for your whole empire. The order in slot <b>${roman(1)}</b> resolves in pulse ${roman(1)} for everyone at once, and so on. Fleets and cities you don't order still defend themselves. Max <b>${st.rules.orders.maxPerFleet}</b> orders per fleet; a fleet's second order costs ${st.rules.orders.repeatFleetCredits}¢.</div>
       <div class="slots">${slots}</div>${free}
@@ -849,6 +898,8 @@ export class GameScreen {
     const P = this.st.rules.orders.pulses;
     const cur = this.replay ? this.replay.pulse : 0;
     this.el.pulsebar.innerHTML = Array.from({ length: P }, (_, i) => `<span class="${cur === i + 1 ? 'on' : cur > i + 1 ? 'done' : ''}" title="pulse ${roman(i + 1)}"></span>`).join('');
+    const local0 = this.src instanceof LocalSource ? this.src : null;
+    this.el.bottombar.classList.toggle('quiet', !this.replay && !(local0 && local0.humans.length === 0 && this.st.winner === null));
     if (this.replay) {
       const R = this.replay;
       this.el.rcontrols.innerHTML = `<button class="small" data-r="pause">${R.playing ? '❚❚' : '▶'}</button><button class="small" data-r="speed">${R.speed}×</button><button class="small" data-r="skip">Skip ⏭</button>`;
@@ -1018,6 +1069,8 @@ export class GameScreen {
     const st = this.st;
     let owners = st.regions.map(r => r.owner);
     let fleets: FleetDraw[] = [];
+    const local0 = this.src instanceof LocalSource ? this.src : null;
+    this.el.bottombar.classList.toggle('quiet', !this.replay && !(local0 && local0.humans.length === 0 && this.st.winner === null));
     if (this.replay) {
       const R = this.replay;
       const beat = R.beats[R.i];
@@ -1141,6 +1194,9 @@ export class GameScreen {
   // ================================================================== input
   onResize = () => {
     if (this.destroyed) return;
+    const was = this.root.classList.contains('phone');
+    this.root.classList.toggle('phone', this.phone);
+    if (was !== this.phone) this.renderAll();
     this.map.resize();
     if (!this.map.fitted && this.map.w > 0) this.map.fit(this.st, this.you !== null ? this.st.regions[this.st.players[this.you]?.capital]?.site : undefined);
   };
@@ -1284,7 +1340,8 @@ export class GameScreen {
     return out;
   }
 
-  select(s: { kind: 'region' | 'fleet'; id: number }) { this.sel = s; this.mode = null; this.renderLeft(); }
+  select(s: { kind: 'region' | 'fleet'; id: number }) {
+    if (this.phone) this.sheetOpen = false; this.sel = s; this.mode = null; this.renderLeft(); }
   focus(p: Pt) { this.map.cam.x = p.x; this.map.cam.y = p.y; }
 
   tooltip(e: PointerEvent) {
@@ -1338,6 +1395,7 @@ export class GameScreen {
     const o = overlay(`<div class="dialog"><h2>Menu</h2><div class="col">
       ${link ? `<div class="dim" style="font-size:13px">Your private seat link (open it on another device to keep playing; don't share it):</div><input value="${esc(link)}" readonly onclick="this.select()">
       <div class="dim" style="font-size:13px">Invite link for others: <input value="${esc(location.origin + location.pathname + '#/g/' + this.src.meta.id)}" readonly onclick="this.select()"></div>` : ''}
+      <div class="row"><button data-x="replaylast">⟲ Replay last turn</button><button data-x="intel">◎ Intel on map: ${this.showSignals ? 'on' : 'off'}</button><button data-x="help">? How to play</button></div>
       <div class="row"><span class="dim">Replay turn</span><input type="number" min="1" max="${this.st.turn - 1}" value="${Math.max(1, this.st.turn - 1)}" data-rt style="width:80px"><button data-x="replayturn">▶</button></div>
       ${local ? `<button data-x="save">💾 Download save file</button><label class="row"><input type="checkbox" data-x="reveal" ${local.save.reveal ? 'checked' : ''}> Reveal the whole map (dev / spectate)</label>` : ''}
       <button data-x="exit">⏏ Back to lobby</button><button data-x="close">Close</button></div></div>`);
@@ -1345,6 +1403,9 @@ export class GameScreen {
       const x = b.dataset.x;
       if (x === 'exit') { o.remove(); this.onExit(); }
       if (x === 'close') o.remove();
+      if (x === 'replaylast') { o.remove(); this.toolbar('replay'); }
+      if (x === 'intel') { this.showSignals = !this.showSignals; (b as HTMLElement).textContent = `◎ Intel on map: ${this.showSignals ? 'on' : 'off'}`; }
+      if (x === 'help') { o.remove(); this.toolbar('help'); }
       if (x === 'save') this.exportSave();
       if (x === 'reveal' && local) { local.setReveal((b as HTMLInputElement).checked); }
       if (x === 'replayturn') { o.remove(); void this.replayTurn(Number(o.querySelector<HTMLInputElement>('[data-rt]')!.value)); }
