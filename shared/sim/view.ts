@@ -45,6 +45,7 @@ export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
   }
   // rivals' scans reveal where they are looking (and that they paid for it)
   v.scans = v.scans.filter(sc => sc.owner === p);
+  v.engagements = (v.engagements ?? []).filter(e => cov.has(e.region) || s.fleets.some(f => f.owner === p && f.region === e.region));
   // last turn's per-player stats would reveal rivals' unseen battles (captures are public anyway)
   if (v.turnStats) {
     const own = <T>(arr: T[] | undefined, zero: T) => (arr ?? []).map((x, i) => (i === p ? x : zero));

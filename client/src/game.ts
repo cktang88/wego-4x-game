@@ -545,6 +545,11 @@ export class GameScreen {
   advisorHtml(): string {
     const st = this.st, you = this.you!;
     const tips: string[] = [];
+    for (const e of st.engagements ?? []) {
+      const r = st.regions[e.region];
+      const mine = st.fleets.some(f => f.owner === you && f.region === r.id) || r.owner === you;
+      if (mine) tips.push(`⚔ The ${esc(e.name)} is still raging (round ${e.rounds}). Ships you move there this turn join the fight.`);
+    }
     const mine = st.fleets.filter(f => f.owner === you);
     for (const f of mine) {
       const r = st.regions[f.region];
@@ -779,9 +784,24 @@ export class GameScreen {
         ${loyal}
         ${r.battles ? `<span>History</span><span>${r.battles} battle${r.battles > 1 ? 's' : ''}, ${r.wreckage} wrecks</span>` : ''}
       </div>
+      ${this.battleHtml(r)}
       ${r.memorials.length ? `<div class="history">${r.memorials.map(m => `✝ ${esc(m)}`).join('<br>')}</div>` : ''}
       ${fleets.length ? `<h3>Fleets here</h3>${fleets.map(f => `<div class="entry click" data-fleet="${f.id}" style="border-left-color:${this.color(f.owner)}">${esc(f.name)} <span class="faint">${f.ships.length} ship${f.ships.length === 1 ? '' : 's'} · ${esc(f.commander.name)}</span></div>`).join('')}` : ''}
       ${actions}</div>`;
+  }
+
+  /** Ongoing battle / siege status for a region panel. */
+  battleHtml(r: Region): string {
+    const st = this.st;
+    const e = (st.engagements ?? []).find(x => x.region === r.id);
+    const besiegers = st.fleets.filter(f => f.siege === r.id && f.region === r.id && f.ships.length);
+    if (!e && !besiegers.length) return '';
+    const sideHp = (o: number) => st.fleets.filter(f => f.region === r.id && f.owner === o).reduce((a, f) => a + f.ships.reduce((b, x) => b + x.hp, 0), 0);
+    const owners = [...new Set(st.fleets.filter(f => f.region === r.id && f.ships.length).map(f => f.owner))];
+    const lines = owners.map(o => `<span style="color:${this.color(o)}">${esc(this.pname(o))}: ${st.fleets.filter(f => f.region === r.id && f.owner === o).reduce((a, f) => a + f.ships.length, 0)} ships, ${sideHp(o)} hp</span>`);
+    if (r.garrison > 0 && (besiegers.length || r.owner !== null)) lines.push(`<span>Garrison ${r.garrison}</span>`);
+    return `<div class="edict" style="border-color:rgba(255,140,80,.5);background:rgba(255,120,60,.08)"><b style="color:#ffb37a">⚔ ${e ? esc(e.name) : 'Siege'}: in progress</b><br>
+      ${e ? `Round ${e.rounds}, since turn ${e.startedTurn}. ` : ''}Battles go on pulse after pulse (${st.rules.combat.roundsPerPulse} round${st.rules.combat.roundsPerPulse > 1 ? 's' : ''} each) until one side is gone. <b>Reinforcements that arrive join in.</b> Leaving costs a parting volley.<br>${lines.join(' · ')}</div>`;
   }
 
   fleetHtml(f: Fleet): string {
@@ -822,7 +842,7 @@ export class GameScreen {
         ${f.ships.length > 1 ? `<button data-a="split" title="Split the checked ships into a new fleet (free)">Split checked</button>` : ''}</div>`;
     }
     return `<div class="sel"><div class="row"><h2 class="grow" style="color:${this.color(f.owner)}">${esc(f.name)}</h2><button class="small" data-close>✕</button></div>
-      <div class="dim" style="font-size:13px">${esc(this.pname(f.owner))} · at ${esc(st.regions[f.region].name)}${pos !== f.region ? ` → <b>${esc(st.regions[pos].name)}</b> (planned)` : ''} · speed ${fleetSpeed(st, f)} · power ${fleetPower(st, f)}${f.fortified ? ' · fortified' : ''}${f.fatigued ? ' · <span class="bad">fatigued</span>' : ''}</div>
+      <div class="dim" style="font-size:13px">${esc(this.pname(f.owner))} · at ${esc(st.regions[f.region].name)}${pos !== f.region ? ` → <b>${esc(st.regions[pos].name)}</b> (planned)` : ''} · speed ${fleetSpeed(st, f)} · power ${fleetPower(st, f)}${f.fortified ? ' · fortified' : ''}${f.fatigued ? ' · <span class="bad">fatigued</span>' : ''}${f.siege === f.region ? ` · <span class="gold">besieging ${esc(st.regions[f.region].name)}</span>` : ''}${(st.engagements ?? []).some(e => e.region === f.region) ? ' · <span style="color:#ffb37a">⚔ in battle</span>' : ''}</div>
       ${mine && this.canPlan ? `<input data-rename value="${esc(this.pendingName(f))}" maxlength="40" style="width:100%;margin-top:6px" title="Rename (free)">` : ''}
       <h3>Commander</h3>
       <div><b>${esc(c.name)}</b> <span class="faint">rank ${c.rank} · ${c.xp} xp · ${c.deeds.wins}W/${c.deeds.losses}L · ${c.deeds.kills} kills</span></div>

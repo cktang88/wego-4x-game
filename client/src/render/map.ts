@@ -238,6 +238,30 @@ export class MapRenderer {
       }
     }
 
+    // ---------------------------------------------------------------- battles in progress
+    for (const e of st.engagements ?? []) {
+      const r = st.regions[e.region];
+      if (!r) continue;
+      const p = { x: r.site.x + this.px(30), y: r.site.y - this.px(26) };
+      const pulse = 0.5 + 0.5 * Math.sin(I.now / 260);
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, this.px(22));
+      g.addColorStop(0, `rgba(255,120,60,${0.35 + 0.25 * pulse})`); g.addColorStop(1, 'rgba(255,80,40,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, this.px(22), 0, TAU); ctx.fill();
+      ctx.font = `700 ${this.px(15)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#ffd6b0'; ctx.fillText('⚔', p.x, p.y);
+      ctx.font = `600 ${this.px(10)}px "Rajdhani", system-ui, sans-serif`; ctx.fillStyle = 'rgba(255,214,176,0.95)';
+      ctx.fillText(`R${e.rounds}`, p.x, p.y + this.px(15));
+      ctx.textBaseline = 'alphabetic';
+    }
+    // sieges: besieging fleets ring the region in their colour
+    for (const f of st.fleets) {
+      if (f.siege === null || f.siege === undefined || f.siege !== f.region || !f.ships.length) continue;
+      const r = st.regions[f.region];
+      ctx.strokeStyle = hexA(colorOf(f.owner), 0.75); ctx.lineWidth = this.px(2.5); ctx.setLineDash([this.px(6), this.px(5)]);
+      ctx.lineDashOffset = -I.now / 60;
+      ctx.beginPath(); ctx.arc(r.site.x, r.site.y, this.px(24), 0, TAU); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
+    }
+
     // ---------------------------------------------------------------- planned orders
     for (const a of I.plannedArrows) this.arrow(a.from, a.to, a.color, !!a.dashed, a.label, 1);
     if (I.pathPreview && I.pathPreview.pts.length > 1) {

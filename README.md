@@ -4,7 +4,7 @@ A **3-player competitive WEGO space 4X** you can play with friends asynchronousl
 
 - **Five orders per turn, forever.** Your whole empire gets 5 orders a turn, inspired by Old World's Orders. Expansion gives you more options, never more actions.
 - **Simultaneous pulses.** The order in slot *k* resolves in pulse *k* for all three players at once. Everyone plans in secret, then it all happens together, and you watch the replay.
-- **Spaceship conflict over stalemate.** Head-on moves *clash* instead of bouncing, battles always reach a decision, and VP rewards holding contested Crowns, the Throne, and fighting.
+- **Spaceship conflict over stalemate.** Head-on moves *clash* instead of bouncing. Battles are *sustained*: they rage pulse after pulse (bigger ones for longer, often over several turns) so reinforcements can arrive and sieges give defenders time to respond. Every battle still reaches a decision, and VP rewards holding contested Crowns, the Throne, and fighting.
 - **Memorable fleets.** Named commanders earn traits through deeds. Rivals who meet again get vengeance bonuses. Veteran ships earn titles. Engines, weapons and shields get knocked out individually. Battles leave wreckage and memorials on the map.
 - **Light diplomacy and deception.** Intel signals come from rivals' actual orders. Feints, scans, conceal, influence and pacts are breakable, but betrayal costs VP.
 
@@ -85,7 +85,7 @@ In the browser console, `tc.state` / `tc.rules` / `tc.screen` give you the live 
 ## How a turn works
 
 1. **Plan** (secret): up to 5 orders in slots I–V, plus free doctrine changes, fleet splits, merges and renames. **Preview** simulates your plan against idle rivals.
-2. **Resolve** (once all 3 seal their orders): for each pulse, in fixed order, the server runs Prepare (fortify/scan/feint/conceal/pact) → Influence → Movement (clashes, blocking, guard reactions, battles) → Seize → Economy (build/develop/excavate).
+2. **Resolve** (once all 3 seal their orders): for each pulse, in fixed order, the server runs Prepare (fortify/scan/feint/conceal/pact) → Influence → Movement (clashes, blocking, guard reactions) → Sieges → Combat (each ongoing battle fights its rounds; finished sieges capture) → Economy (build/develop/excavate). Then everyone gets 5 fresh orders.
 3. **After pulse V**: the Warden acts, then income/upkeep/repairs/projects, then pacts. Then scoring, which uses the final state only.
 4. **Replay**: every client animates what *they* could see. Battles open in the battle viewer.
 

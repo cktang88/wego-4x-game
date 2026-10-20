@@ -447,14 +447,16 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     const w = report.winner;
     let head: string, col = '#e8e0ff';
     const inBattle = ctx.you !== null && report.sides.some(sd => sd.owner === ctx.you);
-    if (w === null) head = 'No decision';
+    if (report.ongoing) head = 'The battle rages on';
+    else if (w === null) head = 'No decision';
     else {
       col = ctx.playerColor(w);
       if (ctx.you !== null && w === ctx.you) head = 'Victory';
       else if (inBattle) { head = 'Defeat'; col = '#ff5d73'; }
       else head = `${ctx.playerName(w)} prevails`;
     }
-    const sub = w === null ? 'The field remains contested'
+    const sub = report.ongoing ? `Day ${report.day ?? 1} · ${report.totalRounds ?? report.rounds.length} rounds so far · it continues next pulse. Reinforcements can still turn it.`
+      : w === null ? 'The field remains contested'
       : `<span style="color:${esc(ctx.playerColor(w))}">${esc(ctx.playerName(w))}${ctx.you === w ? ' (You)' : ''}</span> holds the field`;
     const rows = sides.map((sd, i) => {
       const rs = report.sides[i];
@@ -468,7 +470,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
          <div style="font-size:11px;letter-spacing:.18em;color:#cbbfee;text-transform:uppercase">${esc(mvp.clsName)} · ${mvp.kills} kill${mvp.kills === 1 ? '' : 's'} · ${mvp.dmg} damage</div></div>`
       : '';
     const hl = report.highlights.length ? `<ul class="bv-hl">${report.highlights.map(h => `<li>${esc(h)}</li>`).join('')}</ul>` : '';
-    outro.innerHTML = `<div class="bv-card-in"><div class="bv-kicker">Battle concluded · ${nRounds} round${nRounds === 1 ? '' : 's'}</div>
+    outro.innerHTML = `<div class="bv-card-in"><div class="bv-kicker">${report.ongoing ? 'This turn' : 'Battle concluded'} · ${nRounds} round${nRounds === 1 ? '' : 's'}</div>
       <div class="bv-big" style="color:${esc(col)};text-shadow:0 0 22px ${esc(col)}">${esc(head)}</div><div class="bv-sub">${sub}</div>
       <div class="bv-rule"></div>
       <table><tr><th>Side</th><th>Ships</th><th>Lost</th><th>Fled</th><th>Garrison</th></tr>${rows}</table>

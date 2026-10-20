@@ -19,13 +19,13 @@
 //  VP is only ever scored on the final end-of-turn state.
 // ============================================================================
 import { RELICS, LORE } from '../config/content.ts';
-import { runBattle, hostile, type BattleOutcome } from './combat.ts';
+import { fightRounds, hostile, wouldFight, engagementAt, newReport, disengage, type FightOutcome } from './combat.ts';
 import { EDICTS } from './edicts.ts';
 import { fleetSpeed, strengthBand, findPath } from './graph.ts';
 import { canAfford, orderCost, pay, validateOrder, ORDER_INFO } from './orders.ts';
 import { Rng } from './rng.ts';
 import { maxGarrison, newFleet, newShip } from './setup.ts';
-import type { BattleReport, Doctrine, Fleet, FreeAction, GameEvent, GameState, Order, PlayerId, RegionId, Signal, Submission, TurnResult } from './types.ts';
+import type { BattleReport, Engagement, Doctrine, Fleet, FreeAction, GameEvent, GameState, Order, PlayerId, RegionId, Signal, Submission, TurnResult } from './types.ts';
 import { coverage, seesFleetsIn } from './visibility.ts';
 
 export function emptySubmission(s: GameState): Submission {
@@ -80,30 +80,76 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   const fail = (pulse: number, p: PlayerId, o: Order, why: string) =>
     emit({ k: 'fail', pulse, owner: p, text: `${ORDER_INFO[o.type].name} failed: ${why}` });
 
-  const recordBattle = (out: BattleOutcome, pulse: number) => {
-    battles.push(out.report);
-    emit({ k: 'battle', pulse, region: out.report.region, battle: out.report.id, name: out.report.name, parties: out.report.sides.map(x => x.owner) });
+  // one report per engagement per turn; rounds from every pulse are appended to it
+  const reports = new Map<number, BattleReport>();
+  const getReport = (eng: Engagement, pulse = 1) => {
+    let r = reports.get(eng.id);
+    if (!r) { r = newReport(s, eng, pulse); reports.set(eng.id, r); battles.push(r); }
+    return r;
+  };
+  const handleFight = (out: FightOutcome, rid: RegionId, pulse: number, report: BattleReport | undefined) => {
+    if (out.rounds > 0 && report) emit({ k: 'battle', pulse, region: rid, battle: report.id, name: report.name, parties: report.sides.map(x => x.owner) });
     for (const r of out.retreats) {
-      emit({ k: 'retreat', pulse, fleet: r.fleet.id, owner: r.fleet.owner, from: out.report.region, to: r.to });
+      emit({ k: 'retreat', pulse, fleet: r.fleet.id, owner: r.fleet.owner, from: rid, to: r.to });
       r.fleet.region = r.to;
       r.fleet.fortified = false;
     }
-    for (const f of out.destroyedFleets) emit({ k: 'destroyed', pulse, fleet: f.id, owner: f.owner, region: out.report.region, name: f.name });
+    for (const f of out.destroyedFleets) emit({ k: 'destroyed', pulse, fleet: f.id, owner: f.owner, region: rid, name: f.name });
     s.fleets = s.fleets.filter(f => f.ships.length > 0);
-    if (s.wardenAwake && !s.wardenDefeated && out.report.sides.some(x => x.owner === -1 && x.fleets.length) && !s.fleets.some(f => f.owner === -1)) wardenDefeated(out.winner);
-    // battle honors
+    if (s.wardenAwake && !s.wardenDefeated && !s.fleets.some(f => f.owner === -1)) wardenDefeated(out.winner);
+    if (!out.ended || !out.eng) return;
+    const E = out.eng;
+    // battle honors for the whole engagement
     const w = out.winner;
-    const enemyLosses = Object.entries(out.report.losses).filter(([o]) => Number(o) !== w).reduce((a, [, n]) => a + n, 0);
+    const enemyLosses = Object.entries(E.losses).filter(([o]) => Number(o) !== w).reduce((a, [, n]) => a + n, 0);
     if (w !== null && w !== -1 && enemyLosses >= R.bounty.battleHonorMinKills && honors[w] < R.bounty.maxHonorPerTurn) {
-      const vsLeader = leader !== null && out.report.sides.some(x => x.owner === leader) && w !== leader;
+      const vsLeader = leader !== null && E.owners.includes(leader) && w !== leader;
       honors[w]++;
-      addVp(s, w, capped(w, vsLeader ? R.bounty.battleHonorVsLeaderVp : R.bounty.battleHonorVp), `Battle honors: ${out.report.name}${vsLeader ? ' (against the leader)' : ''}`);
+      addVp(s, w, capped(w, vsLeader ? R.bounty.battleHonorVsLeaderVp : R.bounty.battleHonorVp), `Battle honors: ${E.name}${vsLeader ? ' (against the leader)' : ''}`);
     }
-    const lost = Object.values(out.report.losses).reduce((a, b) => a + b, 0);
+    const lost = Object.values(E.losses).reduce((a, b) => a + b, 0);
     if (lost >= 2) {
-      const ps = out.report.sides.map(x => x.owner).filter((x): x is number => x >= 0);
-      s.chronicle.push({ turn: s.turn, region: out.report.region, players: ps, major: lost >= 5,
-        text: `The ${out.report.name}: ${lost} ships destroyed. ${w === null ? 'Neither side broke.' : w === -1 ? 'The defenders held.' : `${s.players[w].name} held the field.`}` });
+      const ps = E.owners.filter((x): x is number => x >= 0);
+      const long = s.turn > E.startedTurn ? ` after ${E.rounds} rounds over ${s.turn - E.startedTurn + 1} turns` : '';
+      s.chronicle.push({ turn: s.turn, region: rid, players: ps, major: lost >= 5,
+        text: `The ${E.name} ends${long}: ${lost} ships destroyed. ${w === null ? 'Neither side broke.' : w === -1 ? 'The defenders held.' : `${s.players[w].name} held the field.`}` });
+    }
+  };
+
+  /** Combat step of a pulse: every engagement fights its rounds, then finished sieges capture. */
+  const combatPhase = (pulse: number, cameFrom: Map<number, RegionId>) => {
+    for (const r of rotatedRegions) {
+      const eng = engagementAt(s, r.id);
+      if (!wouldFight(s, r.id) && !eng) continue;
+      let rep: BattleReport | undefined;
+      const out = fightRounds(s, rng, r.id, pulse, R.combat.roundsPerPulse, cameFrom, e => (rep = getReport(e, pulse)));
+      handleFight(out, r.id, pulse, rep);
+    }
+    // captures: a besieger standing in a region whose garrison is gone, with no hostile fleets left, takes it
+    for (const r of rotatedRegions) {
+      const besiegers = s.fleets.filter(f => f.region === r.id && f.siege === r.id && f.ships.length);
+      if (!besiegers.length || r.garrison > 0) continue;
+      const by = besiegers[0].owner;
+      if (s.fleets.some(f => f.region === r.id && f.ships.length && hostile(s, f.owner, by))) continue;
+      for (const f of besiegers) f.siege = null;
+      if (r.owner === by) continue;
+      if (by === -1) {
+        if (r.owner !== null && R.wardenHunt.razes) {
+          const victim = r.owner;
+          r.owner = null; r.garrison = 0; r.project = null; r.dev = Math.max(1, r.dev - 1);
+          s.chronicle.push({ turn: s.turn, region: r.id, players: [victim], major: true, text: `The Warden razes ${r.name}. ${s.players[victim].name} loses it.` });
+          emit({ k: 'note', pulse, owner: null, text: `The Warden razes ${r.name}.`, region: r.id });
+        }
+        continue;
+      }
+      const from = r.owner;
+      capture(s, r.id, by, 'force', pulse, emit, leader, capped);
+      const taker = besiegers.find(f => f.owner === by)!;
+      taker.commander.deeds.captures++;
+      taker.history.push(`T${s.turn}: took ${r.name}${from !== null ? ` from ${s.players[from].name}` : ''}.`);
+      if (from !== null) s.chronicle.push({ turn: s.turn, region: r.id, players: [by, from], major: r.kind !== 'colony',
+        text: `${s.players[by].name} takes ${r.name} from ${s.players[from].name}.` });
+      else if (r.kind === 'crown' || r.kind === 'throne') s.chronicle.push({ turn: s.turn, region: r.id, players: [by], major: true, text: `${s.players[by].name} claims ${r.name}.` });
     }
   };
 
@@ -275,34 +321,26 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         const ra = a.f.region, rb = b.f.region;
         emit({ k: 'clash', pulse, a: ra, b: rb, fleets: [a.f.id, b.f.id] });
         const site = s.regions[ra].owner === a.f.owner ? ra : s.regions[rb].owner === b.f.owner ? rb : Math.min(ra, rb);
-        const cf = new Map([[a.f.id, ra], [b.f.id, rb]]);
-        const out = runBattle(s, rng, site, pulse, [a.f, b.f], null, cf);
-        out.report.name = `Clash on the ${s.regions[ra].name}–${s.regions[rb].name} border`;
-        // everyone returns to their own side of the border first. A loser never
-        // retreats across the border it failed to cross (runBattle can't tell,
-        // since the other fleet is still "in" the battle), and the retreat
-        // destination is fixed up BEFORE it is recorded so events match positions.
+        let rep: BattleReport | undefined;
+        const out = fightRounds(s, rng, site, pulse, 1, new Map(), e => (rep = getReport(e, pulse)),
+          { clash: [a.f, b.f], clashName: `Clash on the ${s.regions[ra].name}–${s.regions[rb].name} border` });
         a.f.region = ra; b.f.region = rb;
-        for (const r of out.retreats) {
-          const own = r.fleet === a.f ? ra : r.fleet === b.f ? rb : null;
-          const other = r.fleet === a.f ? rb : r.fleet === b.f ? ra : null;
-          if (own === null || r.to !== other) continue;
-          r.to = own;
-          for (const rd of out.report.rounds) for (const x of rd.retreats) if (x.fleet === r.fleet.id) x.to = own;
-        }
-        recordBattle(out, pulse);
-        // ...then the winner breaks through and keeps going, the loser stops.
-        for (const m of [a, b]) {
-          const retreated = out.retreats.some(r => r.fleet === m.f);
-          const won = out.winner === m.f.owner && s.fleets.includes(m.f) && !retreated;
-          if (!won) { m.idx = m.path.length; if (s.fleets.includes(m.f) && !retreated) m.f.region = m === a ? ra : rb; }
-        }
+        handleFight(out, site, pulse, rep);
+        // both are thrown back to their own side and stop; the fight can continue if someone presses on
+        for (const m of [a, b]) m.idx = m.path.length;
       }
       // --- advance
       for (const m of stepping) {
         if (m.idx >= m.path.length || !s.fleets.includes(m.f)) continue;
         if (clashed.has(m) && m.idx >= m.path.length) continue;
         const from = m.f.region, to = m.path[m.idx++];
+        if (engagementAt(s, from) && !disengage(s, rng, m.f, pulse, e => getReport(e, pulse))) {
+          emit({ k: 'destroyed', pulse, fleet: m.f.id, owner: m.f.owner, region: from, name: m.f.name });
+          s.fleets = s.fleets.filter(f => f !== m.f);
+          m.idx = m.path.length;
+          continue;
+        }
+        m.f.siege = null;
         cameFrom.set(m.f.id, from);
         m.f.region = to;
         emit({ k: 'move', pulse, step, fleet: m.f.id, owner: m.f.owner, from, to, ships: m.f.ships.length });
@@ -330,19 +368,19 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
           if (movers.some(m => m.f === g && (m.idx < m.path.length || m.o.type === 'seize'))) continue;
           if (s.fleets.some(x => x.region === g.region && x.ships.length && hostile(s, x.owner, g.owner))) continue; // pinned
           g.guardUsed = true;
+          g.siege = null;
           cameFrom.set(g.id, g.region);
           emit({ k: 'move', pulse, step, fleet: g.id, owner: g.owner, from: g.region, to: r.id, ships: g.ships.length, guard: true });
           g.region = r.id;
           g.fortified = false;
         }
       }
-      // --- battles wherever hostile fleets share a region
-      fightEverywhere(pulse, cameFrom);
     }
-    // stationary hostile fleets that ended up together (e.g. via defection) also fight
-    fightEverywhere(pulse, cameFrom);
 
-    // ---------------------------------------------------------- 4. seize
+    // ---------------------------------------------------------- 4. sieges
+    // A Seize order puts the fleet (and any joining fleets) under siege orders at the target.
+    // The siege then continues on its own, pulse after pulse and turn after turn, until the
+    // garrison and defenders are beaten (capture) or the besiegers leave or are driven off.
     for (const m of seizers) {
       const p = m.p, target = m.seize!;
       if (!s.fleets.includes(m.f)) continue;
@@ -350,44 +388,26 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       const r = s.regions[target];
       if (r.owner === p) continue;
       if (r.owner !== null && !hostile(s, p, r.owner) && r.owner !== pulseOwners[target]) {
-        // a pact partner took it earlier this same pulse: that's a race lost, not a betrayal
         fail(pulse, p, m.o, `${s.players[r.owner].name} took ${r.name} first`);
         continue;
       }
       if (r.owner !== null && !hostile(s, p, r.owner)) {
-        // pact betrayal
         const victim = r.owner;
         s.pacts = s.pacts.filter(x => !((x.a === p && x.b === victim) || (x.a === victim && x.b === p)));
         addVp(s, p, -R.influence.pactBreakVp, `Broke the pact with ${s.players[victim].name}`);
         emit({ k: 'betrayal', pulse, by: p, victim, region: r.id });
         s.chronicle.push({ turn: s.turn, region: r.id, players: [p, victim], major: true, text: `${s.players[p].name} breaks its pact and falls on ${r.name}. ${s.players[victim].name} will remember.` });
-        fightEverywhere(pulse, cameFrom);
-        if (!s.fleets.includes(m.f) || m.f.region !== target) continue;
       }
-      const defenders = s.fleets.filter(x => x.region === target && x.ships.length && hostile(s, x.owner, p));
-      if (defenders.length) { fail(pulse, p, m.o, 'defenders still hold the region'); continue; }
-      const mine = s.fleets.filter(x => x.region === target && x.owner === p && x.ships.length);
-      if (r.garrison > 0) {
-        const out = runBattle(s, rng, target, pulse, mine, r.owner === null ? -1 : r.owner, cameFrom);
-        out.report.name = `Siege of ${r.name}${r.battles > 1 ? ` (${r.battles})` : ''}`;
-        recordBattle(out, pulse);
-      }
-      if (r.garrison <= 0 && s.fleets.some(x => x.region === target && x.owner === p && x.ships.length)) {
-        const from = r.owner;
-        capture(s, target, p, 'force', pulse, emit, leader, capped);
-        // credit the lead fleet if it is still there, otherwise a joining fleet that is
-        const taker = s.fleets.includes(m.f) && m.f.region === target ? m.f : s.fleets.find(x => x.region === target && x.owner === p && x.ships.length)!;
-        taker.commander.deeds.captures++;
-        taker.history.push(`T${s.turn}: took ${r.name}${from !== null ? ` from ${s.players[from].name}` : ''}.`);
-        if (from !== null) s.chronicle.push({ turn: s.turn, region: r.id, players: [p, from], major: r.kind !== 'colony',
-          text: `${s.players[p].name} takes ${r.name} from ${s.players[from].name}.` });
-        else if (r.kind === 'crown' || r.kind === 'throne') s.chronicle.push({ turn: s.turn, region: r.id, players: [p], major: true, text: `${s.players[p].name} claims ${r.name}.` });
-      } else if (s.fleets.includes(m.f)) {
-        fail(pulse, p, m.o, `the garrison of ${r.name} held (${r.garrison} left)`);
-      }
+      const group = movers.filter(x => x.o === m.o && s.fleets.includes(x.f) && x.f.region === target).map(x => x.f);
+      for (const f of group) f.siege = target;
+      if (r.garrison > 0 || s.fleets.some(f => f.region === target && f.ships.length && hostile(s, f.owner, p)))
+        emit({ k: 'note', pulse, owner: p, text: `${group.map(f => f.name).join(' + ')} lay${group.length > 1 ? '' : 's'} siege to ${r.name}.`, region: target });
     }
 
-    // ---------------------------------------------------------- 5. economy actions
+    // ---------------------------------------------------------- 5. combat
+    combatPhase(pulse, cameFrom);
+
+    // ---------------------------------------------------------- 6. economy actions
     for (const { p, o } of orders) {
       if (o.type !== 'build' && o.type !== 'develop' && o.type !== 'excavate') continue;
       const err = validateOrder(s, p, o);
@@ -411,24 +431,6 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       } else {
         excavate(s, rng, p, regionId, pulse, emit);
       }
-    }
-  }
-
-  function fightEverywhere(pulse: number, cameFrom: Map<number, RegionId>) {
-    for (const r of rotatedRegions) {
-      const here = s.fleets.filter(f => f.region === r.id && f.ships.length);
-      if (!here.length) continue;
-      let wants = false;
-      for (const a of here) for (const b of here) {
-        if (a.owner >= b.owner || !hostile(s, a.owner, b.owner)) continue;
-        if (a.doctrine.stance !== 'evasive' || b.doctrine.stance !== 'evasive') wants = true;
-      }
-      // an owned garrison always fires on hostile fleets inside its region
-      const garrisonFights = r.owner !== null && r.garrison > 0 && here.some(f => hostile(s, f.owner, r.owner!));
-      if (!wants && !garrisonFights) continue;
-      const garrisonFor = r.owner !== null && r.garrison > 0 ? r.owner : null;
-      const out = runBattle(s, rng, r.id, pulse, here, garrisonFor, cameFrom);
-      recordBattle(out, pulse);
     }
   }
 
@@ -457,20 +459,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         if (best?.length) signal(endPulse, null, warden.region, `THE WARDEN advances on ${s.players[lead].name}: now at ${s.regions[warden.region].name}`, { force: true });
       }
     }
-    const site = s.regions[warden.region];
-    const here = s.fleets.filter(f => f.region === site.id && f.ships.length);
-    const victim = site.owner;
-    if (here.some(f => f.owner !== -1) || (victim !== null && site.garrison > 0)) {
-      const out = runBattle(s, rng, site.id, endPulse, here, victim, new Map());
-      out.report.name = `The Warden's Judgement at ${site.name}`;
-      recordBattle(out, endPulse);
-      if (!s.fleets.some(f => f.owner === -1)) wardenDefeated(out.winner);
-      else if (victim !== null && site.garrison <= 0 && R.wardenHunt.razes && !s.fleets.some(f => f.region === site.id && f.owner === victim)) {
-        site.owner = null; site.garrison = 0; site.project = null; site.dev = Math.max(1, site.dev - 1);
-        s.chronicle.push({ turn: s.turn, region: site.id, players: [victim], major: true, text: `The Warden razes ${site.name}. ${s.players[victim].name} loses it.` });
-        emit({ k: 'note', pulse: endPulse, owner: null, text: `The Warden razes ${site.name}.`, region: site.id });
-      }
-    }
+    // it besieges wherever it stands: fighting happens in next turn's combat steps
+    warden.siege = s.regions[warden.region].owner !== null ? warden.region : null;
   }
   if (s.wardenAwake && !s.wardenDefeated && !s.fleets.some(f => f.owner === -1)) wardenDefeated(null);
   function wardenDefeated(by: number | -1 | null) {
@@ -496,6 +486,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   for (const f of s.fleets) {
     if (f.owner === -1) continue;
     const r = s.regions[f.region];
+    if (engagementAt(s, r.id) && wouldFight(s, r.id)) { f.fatigued = overdrove.has(f.id); continue; } // no repairs mid-battle
     const owned = r.owner === f.owner;
     const yard = owned && (r.buildings.shipyard ?? 0) > 0;
     for (const sh of f.ships) {
@@ -511,7 +502,9 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     f.fatigued = overdrove.has(f.id);
   }
   for (const r of s.regions) {
-    if (r.owner !== null) {
+    const underAttack = (engagementAt(s, r.id) && wouldFight(s, r.id)) || s.fleets.some(f => f.siege === r.id && f.region === r.id && f.ships.length);
+    if (underAttack) { /* a garrison under siege or in battle can't rebuild */ }
+    else if (r.owner !== null) {
       r.garrison = Math.min(maxGarrison(s, r.id), r.garrison + R.garrison.regenPerTurn);
     } else if (r.garrison < (r.baseGarrison ?? 0)) {
       r.garrison = Math.min(r.baseGarrison, r.garrison + R.neutral.garrisonRegen);

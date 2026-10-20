@@ -136,7 +136,14 @@ export const DEFAULT_RULES = {
 
   // ---------------------------------------------------------------- combat
   combat: {
-    maxRounds: 8,
+    maxRounds: 8,              // (legacy single-battle cap; sustained battles use the knobs below)
+    roundsPerPulse: 1,         // battles are SUSTAINED: each engagement fights this many rounds per pulse (5 per turn)
+    frontageBase: 2,           // ships per side that can fire each round = base + perShip x armed ships (max frontage),
+    frontagePerShip: 0.34,     //   so firepower grows slower than hit points: bigger battles take longer
+    frontage: 8,
+    lethality: 0.5,            // share of each ship's shots fired per round: lower = longer, more reinforceable battles
+    maxRoundsBase: 6,          // the weaker side is forced out after base + roundsPerHull x hulls committed
+    roundsPerHull: 1,
     baseHit: 0.68,
     fortifyHitBonus: 0.10,     // fortified fleets hit more
     fortifyEvasion: 0.08,      // and are harder to hit
@@ -190,8 +197,8 @@ export const DEFAULT_RULES = {
   // ---------------------------------------------------------------- victory
   victory: {
     mode: 'vp' as 'vp' | 'conquest',
-    vpTarget: 50,
-    turnLimit: 30,
+    vpTarget: 40,
+    turnLimit: 32,
     vpPerCrownPerTurn: 1,
     crownMajorityVp: 1,        // extra VP per turn while holding 2+ Crowns
     vpPerThronePerTurn: 3,

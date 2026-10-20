@@ -195,7 +195,7 @@ describe('soak', () => {
 
 describe('retreat destinations', () => {
   it('prefer a calm neighbour over one with a hostile garrison', async () => {
-    const { runBattle } = await import('../shared/sim/combat.ts');
+    const { fightRounds, newReport } = await import('../shared/sim/combat.ts');
     const { Rng } = await import('../shared/sim/rng.ts');
     let retreats = 0;
     for (let seed = 700; seed < 740; seed++) {
@@ -208,7 +208,8 @@ describe('retreat destinations', () => {
       a.region = x.id; b.region = x.id;
       a.doctrine = { ...a.doctrine, stance: 'evasive' };
       b.doctrine = { ...b.doctrine, retreatAt: 0 };
-      const out = runBattle(s, new Rng(seed), x.id, 1, [a, b], null, new Map());
+      s.engagements = [];
+      const out = fightRounds(s, new Rng(seed), x.id, 1, 8, new Map(), e => newReport(s, e, 1));
       for (const r of out.retreats) { retreats++; expect(r.to).toBe(calm); }
     }
     expect(retreats).toBeGreaterThan(10);

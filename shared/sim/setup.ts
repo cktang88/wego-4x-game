@@ -39,6 +39,7 @@ export function createGame(setup: GameSetup): GameState {
     players: [], loreFound: 0, battleCount: 0, winner: null, winReason: '', chronicle: [], scans: [],
     last: null, log: [],
     throne: { owner: null, streak: 0 },
+    engagements: [],
     crownHold: { owner: null, turns: 0 },
     edicts: [], edictDeck: [], wardenAwake: false, wardenDefeated: false,
     turnStats: { kills: [0, 0, 0], battlesWon: [0, 0, 0], crownBattlesWon: [0, 0, 0], captures: [0, 0, 0] },

@@ -20,17 +20,21 @@ export function helpHtml(st: GameState): string {
       <ul><li>Two hostile fleets moving through each other's regions <b>clash</b> on the border. There are no bounces: someone wins, and the winner keeps going.</li>
       <li>Entering a region with hostile fleets or a <b>rival-owned</b> garrison stops you. Neutral garrisons let you pass.</li>
       <li><b>Guard</b> fleets automatically jump into an adjacent region of yours that gets invaded (once per turn).</li>
-      <li>Battles break out wherever hostile fleets meet (unless both sides are evasive).</li></ul></li>
-    <li><b>Seize</b>: fleets ordered to seize fight the garrison. If the garrison falls, the region is theirs. Other fleets adjacent to the target can <b>join the assault</b> in the same order.</li>
+      <li>Fleets that end up in the same region as hostiles are now in a battle (unless both sides are evasive). It is fought in the combat step below.</li></ul></li>
+    <li><b>Siege</b>: fleets ordered to Seize begin a siege of the target. Other fleets adjacent to it can <b>join the assault</b> in the same order.</li>
+    <li><b>Combat</b>: every battle in progress fights its rounds, new arrivals join in, and a besieger whose target has no garrison or defenders left captures it.</li>
     <li><b>Economy</b>: builds, projects, excavations.</li>
   </ol>
   <p class="dim">After pulse ${R.orders.pulses}: the Warden acts, then income and upkeep, then pacts. Then VP is scored on the <b>final</b> state.</p>
   <h2>Combat</h2>
   <ul>
+    <li><b>Battles take time.</b> Every pulse, each battle fights ${R.combat.roundsPerPulse} round${R.combat.roundsPerPulse > 1 ? 's' : ''}, so a fight lasts through the turn and often into the next ones. Only part of a big fleet can fire at once (${R.combat.frontageBase} ships + 1 per ${Math.round(1 / R.combat.frontagePerShip)} ships), so <b>bigger battles last longer</b>. Ships that arrive mid-battle, whether moved in, guarding, or newly built, <b>join it</b>. A ⚔ marker shows battles in progress.</li>
+    <li><b>Sieges are persistent.</b> Seize puts a fleet under siege orders. It keeps fighting the garrison every pulse, across turns, with no new orders, until the garrison falls (capture) or the fleet leaves or is driven off. Defenders have time to respond.</li>
+    <li>Leaving a battle you are in costs a parting volley.</li>
     <li>Battles are automatic and deterministic from the game seed. Watch them in the replay (click a battle in the ticker or the Chronicle).</li>
     <li>Hits can knock out <b>engines</b> (the ship can't retreat and is left behind for a last stand), <b>weapons</b>, or <b>shields</b>. Ships repair in your own regions; a shipyard restores everything.</li>
     <li><b>Garrisons</b> have armor (${R.garrison.armor}+fortress level per hit). Only <b>siege</b> damage ignores armor. Bombards crack fortresses, frigates don't.</li>
-    <li>Battles always reach a decision: after ${R.combat.maxRounds} rounds the weaker side retreats. Retreating fleets take a parting volley.</li>
+    <li>Battles always reach a decision eventually: after ${R.combat.maxRoundsBase} + ${R.combat.roundsPerHull} round per ship committed, the weaker side is forced out. Retreating fleets take a parting volley.</li>
     <li>Commanders earn <b>traits through deeds</b> (Hunter, Giantkiller, Survivor, Stalwart…). Repeated foes become rivals, and whoever lost the last meeting gets <b>Vengeance</b>. Ships that survive ${R.combat.veteranBattles} fleet battles earn a name. The dead are remembered in memorials.</li>
   </ul>
   <h2>Economy</h2>

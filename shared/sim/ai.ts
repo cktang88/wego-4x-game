@@ -9,7 +9,7 @@
 //              edicts, hunts the VP leader, and contests the Throne when the
 //              Warden is away.
 // Everything is deterministic: the only randomness is the seeded Rng.
-import { hostile } from './combat.ts';
+import { hostile, engagementAt, wouldFight } from './combat.ts';
 import { EDICTS } from './edicts.ts';
 import { findPath, fleetPower, fleetSpeed, within } from './graph.ts';
 import { canAfford, orderCost, pay, validateOrder } from './orders.ts';
@@ -269,10 +269,17 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         out.push({ o: { type: 'excavate', fleet: f.id }, v, tag: `ex:${here.id}` });
       }
 
+      // sustained battles: a fleet locked in a fight it isn't losing should stay (leaving costs a parting volley)
+      const engagedHere = !!engagementAt(s, here.id) && wouldFight(s, here.id);
+      const myHereHp = s.fleets.filter(x => x.owner === pid && x.region === here.id).reduce((a, x) => a + fleetPower(s, x), 0);
+      const foeHereHp = hostileFleetsAt(here.id).reduce((a, x) => a + fleetPower(s, x), 0) + (here.owner !== pid && here.owner !== null ? here.garrison : 0);
+      const stayInFight = engagedHere && !isScout && myHereHp >= foeHereHp * 0.7 ? 4 + regionValue(here) * 0.3 : 0;
+
       // seize adjacent / current
       for (const tid of [here.id, ...here.neighbors]) {
         const t = s.regions[tid];
         if (t.owner === pid) continue;
+        if (f.siege === tid) continue;   // already besieging: the siege carries on without new orders
         const pact = t.owner !== null && t.owner >= 0 && !hostile(s, pid, t.owner);
         if (pact && !(expert && leader === t.owner)) continue;
         if (isScout && t.garrison > 2) continue;
@@ -318,7 +325,10 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         const dr = s.regions[dest];
         const foes = hostileFleetsAt(dest);
         if (foes.some(x => x.owner === -1) && !expert) continue;                                  // everyone knows not to poke the Warden
-        if (foes.length && (isScout || (!expert && fleetPower(s, f) < foes.reduce((a, x) => a + fleetPower(s, x), 0) * 1.2))) continue;
+        // reinforcing an ongoing battle: our ships already there count toward the odds
+        const friendsThere = s.fleets.filter(x => x.owner === pid && x.region === dest && x !== f).reduce((a, x) => a + fleetPower(s, x), 0);
+        const reinforcing = !!engagementAt(s, dest) && (friendsThere > 0 || dr.owner === pid);
+        if (foes.length && (isScout || (!expert && fleetPower(s, f) + friendsThere < foes.reduce((a, x) => a + fleetPower(s, x), 0) * 1.2))) continue;
         const rivalHeld = dr.owner !== null && dr.owner !== pid && dr.garrison > 0;
         // rival garrisons now open fire on anything parked in their region: only experts with a plan go in
         if (rivalHeld && (!expert || isScout)) continue;
@@ -340,6 +350,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         }
         if (isScout) v = (dr.relic === 'unclaimed' ? 3 : 1.2) + (coverage(s, pid).has(dest) ? 0 : 1.5) - (rivalHeld ? 1 : 0);
         if (flee && !wardenNear(dest)) v += flee;
+        if (reinforcing && !isScout && !novice) v = Math.max(v, 3 + regionValue(dr) * (expert ? 0.8 : 0.5) * Math.min(1.5, (foes.reduce((a, x) => a + fleetPower(s, x), 0) + 1) / (friendsThere + 1)));
+        v -= stayInFight;
         v -= fatiguePenalty + (od ? (expert ? 2.5 : 1.5) : 0);
         out.push({ o: { type: 'move', fleet: f.id, path, overdrive: od || undefined }, v, tag: `move:${f.id}` });
       }

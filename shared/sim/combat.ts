@@ -1,10 +1,15 @@
-// Deterministic auto-resolved fleet battles with qualitative damage.
-// Everything here is driven by the shared seeded RNG so every client & the server
+// Deterministic, SUSTAINED fleet battles with qualitative damage.
+//
+// Battles are engagements that persist on the map. Every pulse each engagement
+// fights only `combat.roundsPerPulse` rounds, and each side can only bring
+// `combat.frontage` ships to bear per round, so big battles take longer, can
+// span several turns, and reinforcements arriving mid-battle join in.
+// Everything is driven by the shared seeded RNG so every client and the server
 // produce identical battles from the same orders.
 import { TRAITS } from '../config/content.ts';
 import { ordinal } from './setup.ts';
 import type { Rng } from './rng.ts';
-import type { BattleReport, BattleSide, Fleet, GameState, PlayerId, RegionId, Ship, ShotRec, Subsystems } from './types.ts';
+import type { BattleReport, Engagement, Fleet, GameState, PlayerId, RegionId, Ship, ShotRec, Subsystems } from './types.ts';
 
 type Owner = PlayerId | -1;
 
@@ -16,11 +21,14 @@ interface Unit {
   pending: number;          // damage queued this round
 }
 
-export interface BattleOutcome {
-  report: BattleReport;
+export interface FightOutcome {
   retreats: { fleet: Fleet; to: RegionId }[];
   destroyedFleets: Fleet[];
+  /** Set when the engagement is over (nobody left who can fight). */
+  ended: boolean;
   winner: Owner | null;
+  rounds: number;           // rounds fought in this call
+  eng?: Engagement;
 }
 
 export function hostile(s: GameState, a: Owner, b: Owner): boolean {
@@ -36,78 +44,132 @@ function traitVal(f: Fleet | null, k: 'hit' | 'evasion' | 'garrisonDmg'): number
   return v;
 }
 
+export function engagementAt(s: GameState, rid: RegionId): Engagement | undefined {
+  return (s.engagements ??= []).find(e => e.region === rid);
+}
+
+/** Whose garrison is in this fight: the owner's (vs any hostile fleet), or a neutral one (only vs besiegers). */
+function garrisonSide(s: GameState, rid: RegionId, fleets: Fleet[]): Owner | null {
+  const r = s.regions[rid];
+  if (r.garrison <= 0) return null;
+  if (r.owner !== null) return fleets.some(f => hostile(s, f.owner, r.owner!)) ? r.owner : null;
+  return fleets.some(f => f.siege === rid && f.owner !== -1) ? -1 : null;
+}
+
+/** Would anything here shoot at anything else right now? */
+export function wouldFight(s: GameState, rid: RegionId): boolean {
+  const here = s.fleets.filter(f => f.region === rid && f.ships.length);
+  if (!here.length) return false;
+  for (const a of here) for (const b of here) {
+    if (a.owner >= b.owner || !hostile(s, a.owner, b.owner)) continue;
+    if (a.doctrine.stance !== 'evasive' || b.doctrine.stance !== 'evasive' || engagementAt(s, rid)) return true;
+  }
+  return garrisonSide(s, rid, here) !== null;
+}
+
+/** A fresh per-turn report for an engagement (one report per engagement per turn). */
+export function newReport(s: GameState, eng: Engagement, pulse: number): BattleReport {
+  return {
+    id: ++s.battleCount, name: eng.name, turn: s.turn, pulse, region: eng.region, sides: [], rounds: [], winner: null,
+    losses: {}, highlights: [], ongoing: true, day: s.turn - eng.startedTurn + 1, totalRounds: eng.rounds, engagement: eng.id,
+  };
+}
+
 /**
- * Fight it out in `rid` between all hostile parties present.
- * `garrisonFor`: whose garrison fights (region owner, -1 for a neutral garrison, or null for none).
- * `cameFrom`: where each fleet entered from this pulse (preferred retreat destination).
+ * Fight up to `maxRounds` rounds of the engagement in region `rid` (creating it if needed).
+ * Appends rounds to `report`. `cameFrom` = where fleets entered from (preferred retreat).
+ * With `clash` the fight is a single border exchange that never persists.
  */
-export function runBattle(
-  s: GameState, rng: Rng, rid: RegionId, pulse: number, fleets: Fleet[],
-  garrisonFor: Owner | null, cameFrom: Map<number, RegionId>,
-): BattleOutcome {
+export function fightRounds(
+  s: GameState, rng: Rng, rid: RegionId, pulse: number, maxRounds: number,
+  cameFrom: Map<number, RegionId>, getReport: (eng: Engagement) => BattleReport,
+  opts: { clash?: Fleet[]; clashName?: string } = {},
+): FightOutcome {
   const R = s.rules;
   const region = s.regions[rid];
-  region.battles++;
-  s.battleCount++;
-  const name = `${region.battles > 1 ? ordinal(region.battles) + ' ' : ''}Battle of ${region.name}`;
-  const owners: Owner[] = [];
-  for (const f of fleets) if (!owners.includes(f.owner)) owners.push(f.owner);
-  if (garrisonFor !== null && !owners.includes(garrisonFor)) owners.push(garrisonFor);
+  let active = opts.clash ? opts.clash.slice() : s.fleets.filter(f => f.region === rid && f.ships.length);
+  const out: FightOutcome = { retreats: [], destroyedFleets: [], ended: false, winner: null, rounds: 0 };
 
-  // ---- report skeleton
-  const startHp = new Map<number, number>();
-  const sides: BattleSide[] = owners.map(o => ({
-    owner: o,
-    fleets: fleets.filter(f => f.owner === o).map(f => ({ id: f.id, name: f.name, commander: f.commander.name })),
-    ships: fleets.filter(f => f.owner === o).flatMap(f => f.ships.map(sh => ({ id: sh.id, name: sh.name, cls: sh.cls, hp: sh.hp, maxHp: sh.maxHp, fleet: f.id }))),
-  }));
-  let garrisonMax = region.garrison;
-  if (garrisonFor !== null && region.garrison > 0) {
-    const side = sides.find(x => x.owner === garrisonFor)!;
-    side.garrison = { id: -rid - 1, hp: region.garrison, maxHp: Math.max(region.garrison, garrisonMax) };
+  // ---- engagement bookkeeping
+  let eng = opts.clash ? undefined : engagementAt(s, rid);
+  if (!eng) {
+    region.battles++;
+    const name = opts.clashName ?? `${region.battles > 1 ? ordinal(region.battles) + ' ' : ''}${active.some(f => f.siege === rid) && !active.some(f => f.siege !== rid && f.owner !== region.owner) ? 'Siege' : 'Battle'} of ${region.name}`;
+    eng = {
+      id: s.nextId++, region: rid, name, startedTurn: s.turn, startedPulse: pulse, rounds: 0, forceAt: R.combat.maxRoundsBase,
+      startHp: {}, fleets: [], owners: [], losses: {}, lastStand: [], firstBlood: false, garrisonStart: region.garrison,
+      hulls: {}, cmds: {},
+    };
+    if (!opts.clash) s.engagements.push(eng);
   }
-  for (const f of fleets) startHp.set(f.id, f.ships.reduce((a, x) => a + x.hp, 0) || 1);
-  const report: BattleReport = {
-    id: s.battleCount, name, turn: s.turn, pulse, region: rid, sides, rounds: [], winner: null, losses: {}, highlights: [],
+  const E = eng;
+  out.eng = E;
+  const report = getReport(E);
+  const hl = (t: string) => { if (report.highlights.length < 16 && !report.highlights.includes(t)) report.highlights.push(t); };
+
+  // ---- (re)joiners: every fleet present joins; reinforcements extend how long the fight can last
+  const garrisonFor = (): Owner | null => opts.clash ? null : garrisonSide(s, rid, active);
+  for (const f of active) {
+    if (!E.fleets.includes(f.id)) {
+      E.fleets.push(f.id);
+      E.startHp[f.id] = f.ships.reduce((a, x) => a + x.hp, 0) || 1;
+      E.forceAt += f.ships.length * R.combat.roundsPerHull;
+      E.hulls[f.owner] = (E.hulls[f.owner] ?? 0) + f.ships.length;
+      E.cmds[f.commander.name] = f.owner;
+      if (E.rounds > 0) hl(`Reinforcements: ${f.name} (${f.ships.length} ship${f.ships.length > 1 ? 's' : ''}) joins the fight.`);
+      // rivalry bookkeeping (nemesis / vengeance)
+      for (const o of active) {
+        if (o === f || !hostile(s, o.owner, f.owner)) continue;
+        for (const [x, y] of [[f, o], [o, f]] as const) {
+          const rec = x.commander.rivals[y.commander.name] ?? (x.commander.rivals[y.commander.name] = { met: 0, lastWinner: null });
+          rec.met++;
+          if (rec.met === 3 && x.commander.name < y.commander.name) hl(`${x.commander.name} and ${y.commander.name} meet for the third time. This is personal now.`);
+        }
+      }
+    }
+    if (!E.owners.includes(f.owner)) E.owners.push(f.owner);
+  }
+  // report sides: every ship that fights this turn appears with the hp it had when it first fought this turn
+  const sideOf = (o: Owner) => {
+    let side = report.sides.find(x => x.owner === o);
+    if (!side) { side = { owner: o, fleets: [], ships: [] }; report.sides.push(side); }
+    return side;
   };
-  const hl = (t: string) => { if (report.highlights.length < 12 && !report.highlights.includes(t)) report.highlights.push(t); };
+  const syncSides = () => {
+    for (const f of active) {
+      const side = sideOf(f.owner);
+      if (!side.fleets.some(x => x.id === f.id)) side.fleets.push({ id: f.id, name: f.name, commander: f.commander.name });
+      for (const sh of f.ships) if (!side.ships.some(x => x.id === sh.id)) side.ships.push({ id: sh.id, name: sh.name, cls: sh.cls, hp: sh.hp, maxHp: sh.maxHp, fleet: f.id });
+    }
+    const g = garrisonFor();
+    if (g !== null) {
+      const side = sideOf(g);
+      if (!side.garrison) side.garrison = { id: -rid - 1, hp: region.garrison, maxHp: Math.max(region.garrison, E.garrisonStart) };
+    }
+  };
+  syncSides();
 
-  // ---- rivalry bookkeeping (nemesis / vengeance)
-  for (const a of fleets) for (const b of fleets) {
-    if (a === b || !hostile(s, a.owner, b.owner)) continue;
-    const rec = a.commander.rivals[b.commander.name] ?? (a.commander.rivals[b.commander.name] = { met: 0, lastWinner: null });
-    rec.met++;
-    if (rec.met === 3 && a.commander.name < b.commander.name) hl(`${a.commander.name} and ${b.commander.name} meet for the third time. This is personal now.`);
-  }
-  const hullCount = (o: Owner) => fleets.filter(f => f.owner === o).reduce((a, f) => a + f.ships.length, 0);
-  const startHulls = new Map(owners.map(o => [o, hullCount(o)]));
-
-  const lastStand = new Set<number>(); // fleet ids
-  let active = fleets.slice();
-  const retreats: { fleet: Fleet; to: RegionId }[] = [];
-  const destroyedFleets: Fleet[] = [];
+  const lastStand = new Set(E.lastStand);
   const killedBy = new Map<number, Fleet | null>();
-  let firstBlood = false;
-
-  const garrisonAlive = () => garrisonFor !== null && region.garrison > 0;
-  const liveOwners = (): Owner[] => {
-    const o = new Set<Owner>();
-    for (const f of active) if (f.ships.length) o.add(f.owner);
-    if (garrisonAlive()) o.add(garrisonFor!);
-    return [...o];
-  };
-  const anyHostilePair = () => {
-    const lo = liveOwners();
-    for (let i = 0; i < lo.length; i++) for (let j = i + 1; j < lo.length; j++) if (hostile(s, lo[i], lo[j])) return true;
-    return false;
-  };
+  const hullCount = (o: Owner) => active.filter(f => f.owner === o).reduce((a, f) => a + f.ships.length, 0);
 
   const units = (): Unit[] => {
     const u: Unit[] = [];
     for (const f of active) for (const sh of f.ships) u.push({ uid: sh.id, owner: f.owner, fleet: f, ship: sh, pending: 0 });
-    if (garrisonAlive()) u.push({ uid: -rid - 1, owner: garrisonFor!, fleet: null, ship: null, pending: 0 });
+    const g = garrisonFor();
+    if (g !== null) u.push({ uid: -rid - 1, owner: g, fleet: null, ship: null, pending: 0 });
     return u;
   };
+  // neutral garrisons only trade fire with the fleets besieging them
+  const canTarget = (a: Unit, b: Unit): boolean => {
+    if (!hostile(s, a.owner, b.owner)) return false;
+    const neutralGar = (u: Unit) => !u.ship && region.owner === null;
+    if (neutralGar(b) && a.fleet && a.fleet.siege !== rid && a.owner !== -1) return false;
+    if (neutralGar(a) && b.fleet && b.fleet.siege !== rid) return false;
+    if (b.fleet && a.fleet && a.fleet.doctrine.stance === 'evasive' && b.fleet.doctrine.stance === 'evasive' && !E.rounds) return false;
+    return true;
+  };
+  const fighting = () => { const u = units(); return u.some(a => u.some(b => canTarget(a, b))); };
 
   const hitChance = (sh: Unit, tg: Unit): number => {
     let h = R.combat.baseHit;
@@ -131,7 +193,6 @@ export function runBattle(
       h += 0.05; // garrisons are dug in
     }
     if (region.feature === 'nebula') h -= R.combat.nebulaHitPenalty;
-    // target evasion
     if (tg.ship) {
       h -= R.ships[tg.ship.cls].evasion * (tg.ship.sys.engines ? 1 : 0.3);
       const tf = tg.fleet!;
@@ -144,7 +205,7 @@ export function runBattle(
   };
 
   const pickTarget = (sh: Unit, all: Unit[]): Unit | null => {
-    const cands = all.filter(t => hostile(s, sh.owner, t.owner) && (t.ship ? t.ship.hp - t.pending > 0 : region.garrison - t.pending > 0));
+    const cands = all.filter(t => canTarget(sh, t) && (t.ship ? t.ship.hp - t.pending > 0 : region.garrison - t.pending > 0));
     if (!cands.length) return null;
     const pref = sh.fleet?.doctrine.target ?? 'weakest';
     const hpOf = (t: Unit) => (t.ship ? t.ship.hp : region.garrison) - t.pending;
@@ -161,6 +222,22 @@ export function runBattle(
     return rng.chance(0.8) ? sorted[0] : sorted[Math.min(sorted.length - 1, 1 + Math.floor(rng.next() * 2))];
   };
 
+  /** Frontage: each side brings frontageBase + frontagePerShip x armed ships to bear per round (rotating),
+ *  so firepower grows slower than hit points and bigger battles last longer. */
+  const frontline = (all: Unit[]): Unit[] => {
+    const out: Unit[] = [];
+    const owners = [...new Set(all.map(u => u.owner))];
+    for (const o of owners) {
+      const armed = all.filter(u => u.owner === o && u.ship && u.ship.sys.weapons);
+      const gar = all.filter(u => u.owner === o && !u.ship);
+      out.push(...gar);
+      const width = Math.min(R.combat.frontage, R.combat.frontageBase + Math.floor(armed.length * R.combat.frontagePerShip));
+      if (armed.length <= width) { out.push(...armed); continue; }
+      out.push(...rng.shuffle(armed.slice()).slice(0, width));
+    }
+    return out;
+  };
+
   const fire = (shooters: Unit[], targets: Unit[], shots: ShotRec[], volleyMult = 1) => {
     for (const sh of shooters) {
       let n: number, atk: number, siege = 0;
@@ -173,9 +250,12 @@ export function runBattle(
         if (sh.fleet?.fatigued) atk = Math.max(1, Math.round(atk * R.overdrive.fatigueAttackMult));
       } else {
         const fort = region.buildings.fortress ?? 0;
-        n = R.garrison.shotsBase + fort * R.garrison.shotsPerFortress + Math.floor(region.garrison / R.garrison.hpPerShot);
+        n = Math.max(1, Math.round((R.garrison.shotsBase + fort * R.garrison.shotsPerFortress + Math.floor(region.garrison / R.garrison.hpPerShot)) * volleyMult));
         atk = R.garrison.attackBase + fort * R.garrison.attackPerFortress;
       }
+      // lethality: fraction of a ship's shots that fire each round (stochastic rounding keeps it fair)
+      const want = n * R.combat.lethality;
+      n = Math.floor(want) + (rng.chance(want - Math.floor(want)) ? 1 : 0);
       for (let i = 0; i < n; i++) {
         const tg = pickTarget(sh, targets);
         if (!tg) break;
@@ -183,8 +263,8 @@ export function runBattle(
         let dmg: number;
         if (!tg.ship) dmg = Math.max(1, atk - (R.garrison.armor + (region.buildings.fortress ?? 0) * R.garrison.armorPerFortress)) + siege;
         else {
-          const sh = tg.ship.sys.shields ? R.ships[tg.ship.cls].shields : 0;
-          dmg = Math.max(1, Math.ceil(atk * (1 - R.shieldsCap.maxReduction)), atk - sh);
+          const shd = tg.ship.sys.shields ? R.ships[tg.ship.cls].shields : 0;
+          dmg = Math.max(1, Math.ceil(atk * (1 - R.shieldsCap.maxReduction)), atk - shd);
         }
         tg.pending += dmg;
         const rec: ShotRec = { from: sh.uid, to: tg.uid, dmg };
@@ -195,6 +275,24 @@ export function runBattle(
         if (tg.ship && tg.ship.hp - tg.pending <= 0 && !killedBy.has(tg.uid)) { rec.kill = true; killedBy.set(tg.uid, sh.fleet); }
         shots.push(rec);
       }
+    }
+  };
+
+  const loseFleet = (f: Fleet) => {
+    if (out.destroyedFleets.includes(f)) return;
+    out.destroyedFleets.push(f);
+    f.ships = [];
+    if (f.owner === -1) return;
+    const c = f.commander;
+    if (c.name.endsWith('flag captain')) return;
+    if (rng.chance(R.commanderFate.dieChance)) {
+      c.alive = false;
+      region.memorials.push(`${c.name} (rank ${c.rank}${c.traits.length ? ', ' + c.traits.map(t => TRAITS[t]?.name ?? t).join(', ') : ''}) fell with ${f.name} in the ${E.name}, turn ${s.turn}.`);
+      hl(`${c.name} goes down with ${f.name}.`);
+    } else {
+      c.alive = true;
+      (s.players[f.owner].reserveCommanders ??= []).push(c);
+      hl(`${c.name} escapes the wreck of ${f.name} and will command again.`);
     }
   };
 
@@ -211,15 +309,15 @@ export function runBattle(
       if (u?.ship && u.ship.hp > 0) {
         u.ship.sys[sh.crit] = false;
         const big = R.ships[u.ship.cls].hp >= 20;
-        if (sh.crit === 'engines' && (big || !firstBlood)) hl(`${u.ship.name}'s engines are knocked out. It can't run now.`);
+        if (sh.crit === 'engines' && (big || !E.firstBlood)) hl(`${u.ship.name}'s engines are knocked out. It can't run now.`);
         if (sh.crit === 'weapons' && big) hl(`${u.ship.name}'s guns fall silent.`);
       }
     }
-    // remove dead ships, credit kills
     for (const f of active) {
       const dead = f.ships.filter(x => x.hp <= 0);
       for (const d of dead) {
         report.losses[f.owner] = (report.losses[f.owner] ?? 0) + 1;
+        E.losses[f.owner] = (E.losses[f.owner] ?? 0) + 1;
         region.wreckage++;
         const killer = killedBy.get(d.id);
         if (killer) {
@@ -230,37 +328,36 @@ export function runBattle(
           if (ks) ks.kills++;
           if (f.owner !== -1 && killer.owner !== -1) s.turnStats.kills[killer.owner] = (s.turnStats.kills[killer.owner] ?? 0) + 1;
         }
-        if (!firstBlood) { firstBlood = true; hl(`First blood: ${d.name} (${R.ships[d.cls].name}) is destroyed.`); }
+        if (!E.firstBlood) { E.firstBlood = true; hl(`First blood: ${d.name} (${R.ships[d.cls].name}) is destroyed.`); }
         if (d.title || d.battles >= R.combat.veteranBattles) {
           hl(`The veteran ${d.name}${d.title ? ' ' + d.title : ''} is lost after ${d.battles} battles.`);
-          region.memorials.push(`${d.name}${d.title ? ' ' + d.title : ''}, lost in the ${name} (turn ${s.turn})`);
+          region.memorials.push(`${d.name}${d.title ? ' ' + d.title : ''}, lost in the ${E.name} (turn ${s.turn})`);
         }
       }
       f.ships = f.ships.filter(x => x.hp > 0);
+      if (!f.ships.length) loseFleet(f);
     }
+    active = active.filter(f => f.ships.length);
   };
 
   // ---------------------------------------------------------------- rounds
-  let round = 0;
-  while (anyHostilePair() && round < R.combat.maxRounds) {
-    round++;
+  while (out.rounds < maxRounds && fighting()) {
+    out.rounds++;
+    E.rounds++;
     const all = units();
     const shots: ShotRec[] = [];
-    fire(all, all, shots);
+    fire(frontline(all), all, shots);
     apply(all, shots);
-    const rr: BattleReport['rounds'][number] = { shots, retreats: [] };
+    const rr: BattleReport['rounds'][number] = { shots, retreats: [], pulse };
     report.rounds.push(rr);
+    if (opts.clash || !fighting()) break;
 
-    // fleets with no ships left
-    for (const f of active) if (!f.ships.length && !destroyedFleets.includes(f)) destroyedFleets.push(f);
-    active = active.filter(f => f.ships.length);
-    if (!anyHostilePair()) break;
-
-    // retreat checks
-    const forced = round === R.combat.maxRounds && R.combat.forceDecision ? weakestOwner() : null;
+    // retreat checks (thresholds are against each fleet's strength when it joined)
+    const forced = R.combat.forceDecision && E.rounds >= E.forceAt ? weakestOwner() : null;
+    if (forced !== null && E.rounds === E.forceAt) hl(`After ${E.rounds} rounds, ${forced === -1 ? 'the defenders' : s.players[forced]?.name ?? 'one side'} can fight no longer.`);
     for (const f of active.slice()) {
       if (f.owner === -1) continue;
-      const frac = f.ships.reduce((a, x) => a + x.hp, 0) / (startHp.get(f.id) ?? 1);
+      const frac = f.ships.reduce((a, x) => a + x.hp, 0) / (E.startHp[f.id] ?? 1);
       const wants = forced === f.owner || (!lastStand.has(f.id) &&
         (f.doctrine.stance === 'evasive' || (f.doctrine.retreatAt > 0 && frac < f.doctrine.retreatAt)));
       if (!wants) continue;
@@ -268,162 +365,193 @@ export function runBattle(
       const stranded = f.ships.filter(x => !x.sys.engines);
       const cornered = () => {
         if (forced === f.owner) { // nowhere to go and the battle is lost: scuttle
-          for (const x of f.ships) { x.hp = 0; report.losses[f.owner] = (report.losses[f.owner] ?? 0) + 1; region.wreckage++; }
-          f.ships = [];
-          destroyedFleets.push(f);
+          for (const x of f.ships) { report.losses[f.owner] = (report.losses[f.owner] ?? 0) + 1; E.losses[f.owner] = (E.losses[f.owner] ?? 0) + 1; region.wreckage++; }
           hl(`${f.name} is cornered with nowhere to run and is destroyed to the last hull.`);
+          loseFleet(f);
+          active = active.filter(x => x !== f);
           return;
         }
         if (!lastStand.has(f.id)) { lastStand.add(f.id); hl(`LAST STAND: ${f.name} can't escape and fights to the end.`); }
       };
       if (to === null || stranded.length === f.ships.length) { cornered(); continue; }
-      // pursuit volley at the retreating fleet
-      if (!f.commander.traits.includes('survivor') && R.combat.retreatPursuitShots > 0) {
-        const all2 = units();
-        const pursuers = all2.filter(u => hostile(s, u.owner, f.owner));
-        const targets = all2.filter(u => u.fleet === f);
-        const shots2: ShotRec[] = [];
-        for (let i = 0; i < R.combat.retreatPursuitShots; i++) fire(pursuers, targets, shots2, 0.5);
-        apply(all2, shots2);
-        rr.shots.push(...shots2);
-        if (!f.ships.length) { destroyedFleets.push(f); hl(`${f.name} is cut down while fleeing.`); continue; }
-      }
-      // ships without engines are left behind and fight on
+      if (!pursue(f, rr)) { hl(`${f.name} is cut down while fleeing.`); continue; }
       const left = f.ships.filter(x => !x.sys.engines);
-      if (left.length === f.ships.length) { cornered(); continue; } // the pursuit crippled every engine
-      if (left.length && left.length < f.ships.length) {
+      if (left.length === f.ships.length) { cornered(); continue; }
+      if (left.length) {
         f.ships = f.ships.filter(x => x.sys.engines);
         const rem: Fleet = {
           ...structuredClone(f), id: s.nextId++, name: `Remnant of ${f.name}`, ships: left,
           commander: { ...structuredClone(f.commander), name: `${f.commander.name}'s flag captain` },
-          history: [`Left behind at ${region.name} on turn ${s.turn}.`],
+          history: [`Left behind at ${region.name} on turn ${s.turn}.`], siege: null,
         };
         rem.commander.alive = true;
         s.fleets.push(rem);
         active.push(rem);
-        startHp.set(rem.id, left.reduce((a, x) => a + x.maxHp, 0));
+        E.fleets.push(rem.id);
+        E.startHp[rem.id] = left.reduce((a, x) => a + x.maxHp, 0);
         lastStand.add(rem.id);
         hl(`${left.map(x => x.name).join(', ')} ${left.length > 1 ? 'have' : 'has'} no engines and must stay behind: last stand.`);
       }
       f.commander.deeds.retreats++;
-      retreats.push({ fleet: f, to });
+      f.siege = null;
+      out.retreats.push({ fleet: f, to });
       rr.retreats.push({ owner: f.owner, fleet: f.id, to });
       active = active.filter(x => x !== f);
     }
     active = active.filter(f => f.ships.length);
+    syncSides();
+  }
+  E.lastStand = [...lastStand];
+
+  /** Parting volley at a fleet leaving the fight. Returns false if it didn't survive. */
+  function pursue(f: Fleet, rr: BattleReport['rounds'][number]): boolean {
+    if (f.commander.traits.includes('survivor') || R.combat.retreatPursuitShots <= 0) return true;
+    const all2 = units();
+    const pursuers = frontline(all2.filter(u => canTarget(u, { uid: 0, owner: f.owner, fleet: f, ship: f.ships[0] ?? null, pending: 0 })));
+    const targets = all2.filter(u => u.fleet === f);
+    const shots2: ShotRec[] = [];
+    for (let i = 0; i < R.combat.retreatPursuitShots; i++) fire(pursuers, targets, shots2, 0.5);
+    apply(all2, shots2);
+    rr.shots.push(...shots2);
+    return f.ships.length > 0;
   }
 
+  /** Side forced out when a battle drags on. A garrison can't leave: if it is the weakest, the siege grinds on. */
   function weakestOwner(): Owner | null {
-    const lo = liveOwners().filter(o => o !== garrisonFor || active.some(f => f.owner === o));
+    const g = garrisonFor();
+    const lo = [...new Set([...active.map(f => f.owner), ...(g !== null ? [g] : [])])];
     let worst: Owner | null = null, wf = 2;
     for (const o of lo) {
       const fl = active.filter(f => f.owner === o);
-      if (!fl.length) continue;
       const cur = fl.reduce((a, f) => a + f.ships.reduce((b, x) => b + x.hp, 0), 0);
-      const st = fl.reduce((a, f) => a + (startHp.get(f.id) ?? 1), 0);
-      let frac = cur / st;
-      if (o === garrisonFor && garrisonAlive()) frac = Math.max(frac, region.garrison / Math.max(1, garrisonMax));
+      const st = fl.reduce((a, f) => a + (E.startHp[f.id] ?? 1), 0);
+      let frac = fl.length ? cur / st : 0;
+      if (o === g && region.garrison > 0) frac = Math.max(frac, region.garrison / Math.max(1, E.garrisonStart));
+      else if (!fl.length) continue;
       if (frac < wf) { wf = frac; worst = o; }
     }
+    if (worst !== null && worst === g && !active.some(f => f.owner === g)) return null;
     return worst;
   }
 
   function retreatDest(f: Fleet): RegionId | null {
     const enemyAt = (r: RegionId) => s.fleets.some(x => x.region === r && x.ships.length && hostile(s, x.owner, f.owner) && !active.includes(x));
-    // a hostile garrison would just shoot the fleet again: only flee into one as a last resort
     const enemyGarrison = (r: RegionId) => { const g = s.regions[r]; return g.owner !== null && g.garrison > 0 && hostile(s, g.owner, f.owner); };
     const cf = cameFrom.get(f.id);
     const cfOk = cf !== undefined && cf !== rid && !enemyAt(cf);
     if (cfOk && !enemyGarrison(cf)) return cf;
-    const opts = region.neighbors.filter(n => !enemyAt(n));
-    const own = opts.filter(n => s.regions[n].owner === f.owner);
+    const opts2 = region.neighbors.filter(n => !enemyAt(n));
+    const own = opts2.filter(n => s.regions[n].owner === f.owner);
     if (own.length) return rng.pick(own);
-    const calm = opts.filter(n => !enemyGarrison(n));
+    const calm = opts2.filter(n => !enemyGarrison(n));
     if (calm.length) return rng.pick(calm);
     if (cfOk) return cf;
-    return opts.length ? rng.pick(opts) : null;
+    return opts2.length ? rng.pick(opts2) : null;
   }
 
-  // ---------------------------------------------------------------- aftermath
-  const survivors = liveOwners();
-  const hostileLeft = anyHostilePair();
-  const winner: Owner | null = !hostileLeft && survivors.length >= 1
-    ? (survivors.length === 1 ? survivors[0] : survivors.find(o => active.some(f => f.owner === o)) ?? survivors[0])
-    : null;
-  report.winner = winner;
-  // only real fleet engagements count toward a ship's legend (not sieges)
-  const fleetFight = new Set(fleets.map(f => f.owner)).size > 1;
-  if (fleetFight) {
-    for (const f of active) f.ships.forEach(x => (x.battles++));
-    for (const r of retreats) r.fleet.ships.forEach(x => (x.battles++));
+  // ---------------------------------------------------------------- end of the engagement?
+  if (opts.clash) { report.ongoing = false; return out; }
+  report.totalRounds = E.rounds;
+  if (!fighting()) {
+    out.ended = true;
+    report.ongoing = false;
+    s.engagements = s.engagements.filter(e => e !== E);
+    const survivors = [...new Set(active.map(f => f.owner))];
+    const g = garrisonFor() ?? (region.garrison > 0 && E.owners.length ? (region.owner ?? null) : null);
+    if (g !== null && !survivors.includes(g)) survivors.push(g);
+    out.winner = survivors.length === 1 ? survivors[0] : survivors.length ? (survivors.find(o => active.some(f => f.owner === o)) ?? survivors[0]) : null;
+    report.winner = out.winner;
+    finish(out.winner);
   }
-  for (const side of report.sides) for (const sh of side.ships) {
-    const live = s.fleets.flatMap(f => f.ships).find(x => x.id === sh.id);
-    if (live && live.battles === R.combat.veteranBattles && !live.title) {
-      live.title = rng.pick(['the Unbowed', 'the Lucky', 'the Grim', 'the Stubborn', 'Who Came Back', 'the Scarred', 'the Patient']);
-      hl(`${live.name} survives its ${ordinal(live.battles)} battle and is now known as "${live.name} ${live.title}".`);
-    }
-  }
+  return out;
 
-  // commanders: xp, deeds, traits, rivalry results
-  const allFleets = [...new Set([...fleets, ...active, ...retreats.map(r => r.fleet), ...destroyedFleets])];
-  const winnerCmd = allFleets.filter(f => f.owner === winner && f.ships.length).map(f => f.commander.name);
-  for (const f of allFleets) {
-    const c = f.commander;
-    c.xp += fleetFight ? R.commanders.xpPerBattle : 1;
-    const won = winner !== null && f.owner === winner;
-    if (won) { c.deeds.wins++; if (region.owner === f.owner) c.deeds.defWins++; }
-    else c.deeds.losses++;
-    for (const [rn, rec] of Object.entries(c.rivals)) {
-      if (allFleets.some(o => o.commander.name === rn && hostile(s, o.owner, f.owner))) {
-        rec.lastWinner = won ? c.name : winnerCmd.includes(rn) ? rn : rec.lastWinner;
+  /** Aftermath once a whole engagement is over: legends, xp, traits, rivalries. */
+  function finish(winner: Owner | null) {
+    const involved = s.fleets.filter(f => E.fleets.includes(f.id) && f.ships.length);
+    const fleetFight = E.owners.length > 1;   // sieges against a lone garrison don't make legends
+    if (fleetFight) for (const f of involved) f.ships.forEach(x => (x.battles++));
+    for (const f of involved) for (const live of f.ships) {
+      if (live.battles === R.combat.veteranBattles && !live.title) {
+        live.title = rng.pick(['the Unbowed', 'the Lucky', 'the Grim', 'the Stubborn', 'Who Came Back', 'the Scarred', 'the Patient']);
+        hl(`${live.name} survives its ${ordinal(live.battles)} battle and is now known as "${live.name} ${live.title}".`);
       }
     }
-    const outnumbered = (startHulls.get(f.owner) ?? 0) * 1.5 <= Math.max(0, ...owners.filter(o => o !== f.owner).map(o => startHulls.get(o) ?? 0));
-    earnTraits(s, f, { won, outnumbered, hl });
-    while (c.rank < R.commanders.maxRank && c.xp >= c.rank * R.commanders.xpPerRank) {
-      c.rank++;
-      hl(`${c.name} is promoted to rank ${c.rank}.`);
+    const winnerCmd = involved.filter(f => f.owner === winner).map(f => f.commander.name);
+    for (const f of involved) {
+      const c = f.commander;
+      c.xp += fleetFight ? R.commanders.xpPerBattle : 1;
+      const won = winner !== null && f.owner === winner;
+      if (won) { c.deeds.wins++; if (region.owner === f.owner) c.deeds.defWins++; }
+      else c.deeds.losses++;
+      for (const [rn, rec] of Object.entries(c.rivals)) {
+        if (rn in E.cmds && hostile(s, E.cmds[rn], f.owner)) {
+          if (won) rec.lastWinner = c.name; else if (winnerCmd.includes(rn)) rec.lastWinner = rn;
+        }
+      }
+      const outnumbered = (E.hulls[f.owner] ?? 0) * 1.5 <= Math.max(0, ...Object.entries(E.hulls).filter(([o]) => Number(o) !== f.owner).map(([, n]) => n));
+      earnTraits(f, { won, outnumbered });
+      while (c.rank < R.commanders.maxRank && c.xp >= c.rank * R.commanders.xpPerRank) {
+        c.rank++;
+        hl(`${c.name} is promoted to rank ${c.rank}.`);
+      }
+      f.history.push(`T${s.turn}: ${won ? 'won' : winner === null ? 'fought' : 'lost'} the ${E.name}${s.turn > E.startedTurn ? ` after ${E.rounds} rounds over ${s.turn - E.startedTurn + 1} turns` : ''}.`);
     }
-    if (f.ships.length) f.history.push(`T${s.turn}: ${won ? 'won' : winner === null ? 'fought' : 'lost'} the ${name}.`);
+    if (winner !== null && winner !== -1) {
+      s.turnStats.battlesWon[winner]++;
+      if (region.kind === 'crown' || region.kind === 'throne') s.turnStats.crownBattlesWon[winner]++;
+    }
   }
 
-  // destroyed fleets: commander fate & memorials
-  for (const f of [...new Set(destroyedFleets)]) {
-    f.ships = [];
-    if (f.owner === -1) continue;
+  function earnTraits(f: Fleet, ctx: { won: boolean; outnumbered: boolean }) {
     const c = f.commander;
-    if (c.name.endsWith('flag captain')) continue;
-    if (rng.chance(R.commanderFate.dieChance)) {
-      c.alive = false;
-      region.memorials.push(`${c.name} (rank ${c.rank}${c.traits.length ? ', ' + c.traits.map(t => TRAITS[t]?.name ?? t).join(', ') : ''}) fell with ${f.name} in the ${name}, turn ${s.turn}.`);
-      hl(`${c.name} goes down with ${f.name}.`);
-    } else {
-      c.alive = true;
-      (s.players[f.owner].reserveCommanders ??= []).push(c);
-      hl(`${c.name} escapes the wreck of ${f.name} and will command again.`);
-    }
+    if (c.traits.length >= 3 || f.owner === -1) return;
+    const give = (t: string) => {
+      if (c.traits.includes(t) || c.traits.length >= 3) return;
+      c.traits.push(t);
+      hl(`${c.name} earns a reputation: ${TRAITS[t].name}. ${TRAITS[t].desc}`);
+    };
+    if (ctx.won && ctx.outnumbered) give('giantkiller');
+    if (c.deeds.kills >= 4) give('hunter');
+    if (!ctx.won && f.ships.length && c.deeds.losses >= 1) give('bloodied');
+    if (c.deeds.retreats >= 2) give('survivor');
+    if (c.deeds.defWins >= 2) give('stalwart');
+    if (c.deeds.captures >= 2) give('siegebreaker');
+    if (Object.values(c.rivals).some(r => r.met >= 3)) give('nemesis');
   }
-  if (winner !== null && winner !== -1) {
-    s.turnStats.battlesWon[winner]++;
-    if (region.kind === 'crown' || region.kind === 'throne') s.turnStats.crownBattlesWon[winner]++;
-  }
-  return { report, retreats, destroyedFleets: [...new Set(destroyedFleets)], winner };
 }
 
-function earnTraits(s: GameState, f: Fleet, ctx: { won: boolean; outnumbered: boolean; hl: (t: string) => void }) {
-  const c = f.commander;
-  if (c.traits.length >= 3 || f.owner === -1) return;
-  const give = (t: string) => {
-    if (c.traits.includes(t) || c.traits.length >= 3) return;
-    c.traits.push(t);
-    ctx.hl(`${c.name} earns a reputation: ${TRAITS[t].name}. ${TRAITS[t].desc}`);
-  };
-  if (ctx.won && ctx.outnumbered) give('giantkiller');
-  if (c.deeds.kills >= 4) give('hunter');
-  if (!ctx.won && f.ships.length && c.deeds.losses >= 1) give('bloodied');
-  if (c.deeds.retreats >= 2) give('survivor');
-  if (c.deeds.defWins >= 2) give('stalwart');
-  if (c.deeds.captures >= 2) give('siegebreaker');
-  if (Object.values(c.rivals).some(r => r.met >= 3)) give('nemesis');
+/** A fleet leaving an ongoing engagement takes a parting volley (used for disengaging moves). */
+export function disengage(s: GameState, rng: Rng, f: Fleet, pulse: number, getReport: (eng: Engagement) => BattleReport): boolean {
+  const eng = engagementAt(s, f.region);
+  if (!eng || !wouldFight(s, f.region)) return true;
+  const enemies = s.fleets.some(x => x.region === f.region && x.ships.length && hostile(s, x.owner, f.owner));
+  const r = s.regions[f.region];
+  const gar = r.owner !== null && hostile(s, r.owner, f.owner) && r.garrison > 0;
+  if (!enemies && !gar) return true;
+  const R = s.rules;
+  if (f.commander.traits.includes('survivor') || R.combat.retreatPursuitShots <= 0) return true;
+  const stayers = s.fleets.filter(x => x.region === f.region && x !== f && x.ships.length && hostile(s, x.owner, f.owner));
+  const before = f.ships.length;
+  const report = getReport(eng);
+  let side = report.sides.find(x => x.owner === f.owner);
+  if (!side) { side = { owner: f.owner, fleets: [], ships: [] }; report.sides.push(side); }
+  if (!side.fleets.some(x => x.id === f.id)) side.fleets.push({ id: f.id, name: f.name, commander: f.commander.name });
+  for (const sh of f.ships) if (!side.ships.some(x => x.id === sh.id)) side.ships.push({ id: sh.id, name: sh.name, cls: sh.cls, hp: sh.hp, maxHp: sh.maxHp, fleet: f.id });
+  const rr: BattleReport['rounds'][number] = { shots: [], retreats: [{ owner: f.owner, fleet: f.id, to: -1 }], pulse };
+  const hit = 0.5 * R.combat.baseHit;
+  let shotsLeft = Math.min(R.combat.frontage, stayers.reduce((a, x) => a + x.ships.filter(sh => sh.sys.weapons).length, 0)) + (gar ? 1 : 0);
+  while (shotsLeft-- > 0 && f.ships.length) {
+    const tg = rng.pick(f.ships);
+    if (!rng.chance(hit)) { rr.shots.push({ from: gar ? -f.region - 1 : stayers[0]?.ships[0]?.id ?? -f.region - 1, to: tg.id, dmg: 0, miss: true }); continue; }
+    const dmg = 3;
+    tg.hp -= dmg;
+    const kill = tg.hp <= 0;
+    rr.shots.push({ from: gar ? -f.region - 1 : stayers[0]?.ships[0]?.id ?? -f.region - 1, to: tg.id, dmg, kill: kill || undefined });
+    if (kill) { report.losses[f.owner] = (report.losses[f.owner] ?? 0) + 1; eng.losses[f.owner] = (eng.losses[f.owner] ?? 0) + 1; s.regions[f.region].wreckage++; }
+    f.ships = f.ships.filter(x => x.hp > 0);
+  }
+  if (rr.shots.length) report.rounds.push(rr);
+  if (before !== f.ships.length && !report.highlights.includes(`${f.name} breaks off under fire.`)) report.highlights.push(`${f.name} breaks off under fire.`);
+  f.siege = null;
+  return f.ships.length > 0;
 }

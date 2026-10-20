@@ -77,11 +77,32 @@ export interface Fleet {
   commander: Commander;
   doctrine: Doctrine;
   fortified: boolean;
+  siege?: RegionId | null;  // besieging this region (set by Seize; persists until it leaves)
   fatigued: boolean;        // overdrove last turn
   ordersThisTurn: number;
   guardUsed: boolean;
   history: string[];        // short chronicle lines
   bornTurn: number;
+}
+
+/** A battle in progress. Persists across pulses and turns until one side is gone. */
+export interface Engagement {
+  id: number;
+  region: RegionId;
+  name: string;
+  startedTurn: number;
+  startedPulse: number;
+  rounds: number;                       // total rounds fought so far
+  forceAt: number;                      // the weaker side is forced out after this many rounds
+  startHp: Record<number, number>;      // fleet id -> hp when it joined (retreat thresholds)
+  fleets: number[];                     // every fleet that ever fought here
+  owners: number[];                     // fleet owners that fought here
+  hulls: Record<number, number>;        // owner -> hulls committed (incl. reinforcements)
+  cmds: Record<string, number>;         // commander name -> owner
+  losses: Record<string, number>;
+  lastStand: number[];
+  firstBlood: boolean;
+  garrisonStart: number;
 }
 
 export interface Pact { a: PlayerId; b: PlayerId; until: number }
@@ -175,10 +196,14 @@ export interface BattleReport {
   pulse: number;
   region: RegionId;
   sides: BattleSide[];
-  rounds: { shots: ShotRec[]; retreats: { owner: PlayerId; fleet: FleetId; to: RegionId | null }[] }[];
+  rounds: { shots: ShotRec[]; retreats: { owner: PlayerId; fleet: FleetId; to: RegionId | null }[]; pulse?: number }[];
   winner: PlayerId | -1 | null;
   losses: Record<string, number>;    // owner -> ships lost
   highlights: string[];
+  ongoing?: boolean;          // the engagement continues next pulse/turn
+  day?: number;               // which turn of the engagement this report covers (1 = first)
+  totalRounds?: number;       // rounds fought in the whole engagement so far
+  engagement?: number;        // engagement id
 }
 
 export interface Signal {
@@ -211,6 +236,7 @@ export interface GameState {
   winReason: string;
   chronicle: ChronicleEntry[];
   scans: { owner: PlayerId; region: RegionId; until: number }[];
+  engagements: Engagement[];   // battles in progress
   throne: { owner: PlayerId | null; streak: number };
   crownHold: { owner: PlayerId | null; turns: number };
   edicts: Edict[];           // active/upcoming public objectives
