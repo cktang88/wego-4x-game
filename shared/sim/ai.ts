@@ -92,7 +92,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
   const usedTargets = new Set<string>();
   const fleetUses = new Map<number, number>();
   for (let slot = 0; slot < R.orders.perTurn; slot++) {
-    const valid = candidates().filter(c => c.v > 0.3 && !usedTargets.has(c.tag) && !validateOrder(s, pid, c.o) && canAfford(me0().res, orderCost(s, c.o, pid)));
+    const valid = candidates().filter(c => c.v > 0.3 && !usedTargets.has(c.tag) && !validateOrder(s, pid, c.o) && canAfford(me0().res, orderCost(s, c.o, pid), s.rules));
     if (!valid.length) continue;
     valid.sort((a, b) => b.v - a.v);
     let pick: Cand;
@@ -119,7 +119,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
   function topVp() { return s.players.every(p => p.id === pid || p.eliminated || p.vp < me0().vp + 3); }
 
   function project(o: Order) {
-    pay(me0().res, orderCost(s, o, pid));
+    pay(me0().res, orderCost(s, o, pid), s.rules);
     if ('fleet' in o && o.fleet !== null && o.type !== 'build') fleetUses.set(o.fleet, (fleetUses.get(o.fleet) ?? 0) + 1);
     if (o.type === 'move') { const f = s.fleets.find(x => x.id === o.fleet)!; f.region = o.path[o.path.length - 1]; f.fortified = false; }
     if (o.type === 'seize') {
@@ -537,7 +537,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
   function expertBuild(r: Region, need: number, joinable: Fleet | undefined, mainArmy: Fleet | undefined): { cls: string; v: number } | null {
     const yard = r.buildings.shipyard ?? 0;
     const res = me0().res;
-    const ok = (c: string) => R.ships[c] && R.ships[c].needsShipyard <= yard && canAfford(res, orderCost(s, { type: 'build', region: r.id, cls: c, fleet: null }, pid));
+    const ok = (c: string) => R.ships[c] && R.ships[c].needsShipyard <= yard && canAfford(res, orderCost(s, { type: 'build', region: r.id, cls: c, fleet: null }, pid), s.rules);
     const army = mainArmy ? mainArmy.ships : [];
     const bombards = army.filter(x => (R.ships[x.cls]?.siege ?? 0) >= 5).length;
     // a hard nut within reach of the army (fortified capitals, crowns, the Throne) wants siege hulls

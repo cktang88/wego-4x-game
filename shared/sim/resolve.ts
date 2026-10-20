@@ -87,6 +87,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     }
     for (const f of out.destroyedFleets) emit({ k: 'destroyed', pulse, fleet: f.id, owner: f.owner, region: out.report.region, name: f.name });
     s.fleets = s.fleets.filter(f => f.ships.length > 0);
+    if (s.wardenAwake && !s.wardenDefeated && out.report.sides.some(x => x.owner === -1 && x.fleets.length) && !s.fleets.some(f => f.owner === -1)) wardenDefeated(out.winner);
     // battle honors
     const w = out.winner;
     const enemyLosses = Object.entries(out.report.losses).filter(([o]) => Number(o) !== w).reduce((a, [, n]) => a + n, 0);
@@ -127,8 +128,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       const err = validateOrder(s, p, o);
       if (err) { fail(pulse, p, o, err); continue; }
       const cost = orderCost(s, o, p);
-      if (!canAfford(s.players[p].res, cost)) { fail(pulse, p, o, 'not enough resources'); continue; }
-      pay(s.players[p].res, cost);
+      if (!canAfford(s.players[p].res, cost, R)) { fail(pulse, p, o, 'not enough resources'); continue; }
+      pay(s.players[p].res, cost, R);
       switch (o.type) {
         case 'fortify': {
           const f = s.fleets.find(x => x.id === o.fleet)!;
@@ -170,28 +171,30 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     }
 
     // ---------------------------------------------------------- 2. influence
+    // all pushes and purges land together, then defections are checked
+    const purges: { p: PlayerId; r: RegionId }[] = [];
     for (const { p, o } of orders) {
       if (o.type !== 'influence') continue;
       const err = validateOrder(s, p, o);
       if (err) { fail(pulse, p, o, err); continue; }
-      const cost = orderCost(s, o, p);
-      if (!canAfford(s.players[p].res, cost)) { fail(pulse, p, o, 'not enough influence'); continue; }
-      pay(s.players[p].res, cost);
       const r = s.regions[o.target];
       const key = `${p}:${r.id}`;
       if (R.influenceLimits.onePerTargetPerTurn && influencedThisTurn.has(key)) { fail(pulse, p, o, `already influenced ${r.name} this turn`); continue; }
+      const cost = orderCost(s, o, p);
+      if (!canAfford(s.players[p].res, cost, R)) { fail(pulse, p, o, 'not enough influence'); continue; }
+      pay(s.players[p].res, cost, R);
       influencedThisTurn.add(key);
-      if (r.owner === p) {
-        // counter-intelligence: purge rival agents from your own region
-        for (let i = 0; i < r.loyalty.length; i++) if (i !== p) r.loyalty[i] = Math.max(0, r.loyalty[i] - R.influenceLimits.purgeAmount);
-        emit({ k: 'note', pulse, owner: p, text: `Rival agents purged from ${r.name}.`, region: r.id });
-        continue;
-      }
+      if (r.owner === p) { purges.push({ p, r: r.id }); continue; }
       const adj = r.neighbors.some(n => s.regions[n].owner === p);
       r.loyalty[p] = (r.loyalty[p] ?? 0) + R.influence.pushAmount + (adj ? R.influence.adjacentBonus : 0);
       if (R.influenceLimits.capAtThreshold) r.loyalty[p] = Math.min(r.loyalty[p], flipThreshold(s, r.id));
       emit({ k: 'influence', pulse, region: r.id, owner: p, loyalty: r.loyalty[p] });
       signal(pulse, p, r.id, `${s.players[p].name} agents active in ${r.name}${r.owner !== null ? ` (loyalty ${r.loyalty[p]}/${flipThreshold(s, r.id)})` : ''}`);
+    }
+    for (const { p, r: rid } of purges) {
+      const r = s.regions[rid];
+      for (let i = 0; i < r.loyalty.length; i++) if (i !== p) r.loyalty[i] = Math.max(0, r.loyalty[i] - R.influenceLimits.purgeAmount);
+      emit({ k: 'note', pulse, owner: p, text: `Rival agents purged from ${r.name}.`, region: r.id });
     }
     // defections (resolved together: the highest loyalty over threshold wins)
     for (const r of s.regions) {
@@ -200,7 +203,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       for (const p of s.players) if (p.id !== r.owner && !p.eliminated && r.loyalty[p.id] >= thr && (best === null || r.loyalty[p.id] > r.loyalty[best])) best = p.id;
       if (best === null) continue;
       if (r.owner !== null && s.players[r.owner].capital === r.id) continue;
-      const occupied = s.fleets.some(f => f.region === r.id && f.owner !== best && f.ships.length && hostile(s, f.owner, best!));
+      const occupied = s.fleets.some(f => f.region === r.id && f.owner !== best && f.ships.length && (f.owner === r.owner || hostile(s, f.owner, best!)));
       if (occupied) continue; // can't defect under someone else's guns
       const from = r.owner;
       capture(s, r.id, best, 'influence', pulse, emit, leader, capped);
@@ -227,6 +230,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
           if (!g || g === f || movers.some(m => m.f === g)) continue;
           if (g.region !== o.target && !s.regions[g.region].neighbors.includes(o.target)) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is not adjacent to ${s.regions[o.target].name} and can't join the assault` }); continue; }
           if (g.ordersThisTurn >= R.orders.maxPerFleet) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is exhausted (max ${R.orders.maxPerFleet} orders per turn)` }); continue; }
+          if (g.ordersThisTurn > 0) s.players[p].res.credits -= R.orders.repeatFleetCredits;
           g.ordersThisTurn++;
           g.fortified = false;
           movers.push({ f: g, path: g.region === o.target ? [] : [o.target], idx: 0, seize: null, p, o });
@@ -298,7 +302,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       // --- guard reactions (free standing order)
       for (const r of s.regions) {
         if (r.owner === null) continue;
-        const invaders = s.fleets.filter(x => x.region === r.id && x.ships.length && hostile(s, x.owner, r.owner!) && x.owner !== -1);
+        const invaders = s.fleets.filter(x => x.region === r.id && x.ships.length && hostile(s, x.owner, r.owner!) && x.owner !== -1
+          && x.doctrine.stance !== 'evasive' && !x.ships.every(sh => sh.cls === 'scout'));
         if (!invaders.length) continue;
         for (const g of s.fleets) {
           if (g.owner !== r.owner || !g.doctrine.guard || g.guardUsed || !g.ships.length) continue;
@@ -364,8 +369,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       const regionId = o.type === 'excavate' ? s.fleets.find(f => f.id === o.fleet)!.region : o.region;
       if (s.fleets.some(f => f.region === regionId && f.ships.length && hostile(s, f.owner, p))) { fail(pulse, p, o, 'enemies present'); continue; }
       const cost = orderCost(s, o, p);
-      if (!canAfford(s.players[p].res, cost)) { fail(pulse, p, o, 'not enough resources'); continue; }
-      pay(s.players[p].res, cost);
+      if (!canAfford(s.players[p].res, cost, R)) { fail(pulse, p, o, 'not enough resources'); continue; }
+      pay(s.players[p].res, cost, R);
       if (o.type === 'build') {
         let f = o.fleet !== null ? s.fleets.find(x => x.id === o.fleet)! : null;
         if (!f) f = newFleet(s, rng, p, o.region);
@@ -386,15 +391,16 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   function fightEverywhere(pulse: number, cameFrom: Map<number, RegionId>) {
     for (const r of s.regions) {
       const here = s.fleets.filter(f => f.region === r.id && f.ships.length);
-      if (here.length < 2) continue;
+      if (!here.length) continue;
       let wants = false;
       for (const a of here) for (const b of here) {
         if (a.owner >= b.owner || !hostile(s, a.owner, b.owner)) continue;
         if (a.doctrine.stance !== 'evasive' || b.doctrine.stance !== 'evasive') wants = true;
       }
-      if (!wants) continue;
-      const owners = new Set(here.map(f => f.owner));
-      const garrisonFor = r.owner !== null && owners.has(r.owner) && r.garrison > 0 ? r.owner : null;
+      // an owned garrison always fires on hostile fleets inside its region
+      const garrisonFights = r.owner !== null && r.garrison > 0 && here.some(f => hostile(s, f.owner, r.owner!));
+      if (!wants && !garrisonFights) continue;
+      const garrisonFor = r.owner !== null && r.garrison > 0 ? r.owner : null;
       const out = runBattle(s, rng, r.id, pulse, here, garrisonFor, cameFrom);
       recordBattle(out, pulse);
     }
@@ -444,6 +450,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   function wardenDefeated(by: number | -1 | null) {
     if (s.wardenDefeated) return;
     s.wardenDefeated = true;
+    const throne = s.regions.find(r => r.kind === 'throne')!;
     const victor = by !== null && by !== -1 ? by : null;
     if (victor !== null) addVp(s, victor, R.warden.defeatVp, 'Destroyed the Warden');
     s.chronicle.push({ turn: s.turn, region: throne.id, players: victor !== null ? [victor] : [], major: true,
@@ -455,7 +462,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     if (p.eliminated) continue;
     const inc = income(s, p.id);
     const top = Math.max(...s.players.filter(x => !x.eliminated).map(x => x.vp));
-    const boost = top - p.vp >= R.comeback.gap ? 1 + R.comeback.incomeBonus : 1;
+    const boost = top - p.vp >= R.comeback.gap && s.regions.find(r => r.kind === 'throne')?.owner !== p.id ? 1 + R.comeback.incomeBonus : 1;
     p.res.industry += Math.round(inc.industry * boost); p.res.credits += Math.round(inc.credits * boost); p.res.influence += inc.influence;
     const upkeep = s.fleets.filter(f => f.owner === p.id).reduce((a, f) => a + f.ships.reduce((b, sh) => b + (R.ships[sh.cls]?.upkeep ?? 0), 0), 0);
     p.res.credits -= upkeep;
@@ -550,7 +557,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   // ---- edicts
   for (const e of s.edicts.filter(x => x.scoresTurn === s.turn)) {
     const def = EDICTS[e.id];
-    const winners = def ? def.check(s) : [];
+    const winners = def ? def.check(s, { startOwners }) : [];
     for (const w of winners) addVp(s, w, e.vp, e.name);
     s.chronicle.push({ turn: s.turn, players: winners, major: winners.length > 0,
       text: `${e.name} is judged: ${winners.length ? winners.map(w => s.players[w].name).join(' and ') + ` gain ${e.vp} VP` : 'no one satisfied it'}.` });
@@ -564,6 +571,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       s.chronicle.push({ turn: s.turn, players: [0, 1, 2], text: `A new edict echoes from the Throne: ${d.name}. ${d.desc} (${d.vp} VP, judged at the end of next turn)` });
     }
   }
+
+  maybeWakeWarden(s, rng, endPulse, emit);
 
   // ---- relic ghost echoes (noise that gives feints cover)
   for (const r of s.regions) {
@@ -694,7 +703,10 @@ function capture(s: GameState, rid: RegionId, by: PlayerId, how: 'force' | 'infl
   s.turnStats.captures[by]++;
   emit({ k: 'capture', pulse, region: rid, by, from, how });
   if (from !== null) {
-    if (s.players[from].capital === rid) addVp(s, by, s.rules.victory.vpCapitalCapture, `Captured ${s.players[from].name}'s capital`);
+    if (r.homeOf === from && !(s.capitalsTaken ?? []).includes(from)) {
+      (s.capitalsTaken ??= []).push(from);
+      addVp(s, by, s.rules.victory.vpCapitalCapture, `Captured ${s.players[from].name}'s capital`);
+    }
     if (leader !== null && from === leader) addVp(s, by, capped(by, s.rules.bounty.vpTakeFromLeader), `Bounty: took ${r.name} from the leader`);
   }
 }
@@ -711,6 +723,10 @@ function excavate(s: GameState, rng: Rng, p: PlayerId, rid: RegionId, pulse: num
   emit({ k: 'excavate', pulse, owner: p, region: rid, relic: relic?.id ?? 'empty', lore });
   s.chronicle.push({ turn: s.turn, region: rid, players: [0, 1, 2], major: true,
     text: `${s.players[p].name} unearths ${relic?.name ?? 'an empty vault'} at ${r.name}. Fragment ${lore + 1}: "${LORE[Math.min(lore, LORE.length - 2)]}"` });
+}
+
+/** Called at the very end of the turn (after scoring) so it never ambushes mid-turn. */
+function maybeWakeWarden(s: GameState, rng: Rng, pulse: number, emit: (e: GameEvent) => void) {
   if (s.loreFound >= s.rules.warden.wakeAtLore && !s.wardenAwake) {
     s.wardenAwake = true;
     const throne = s.regions.find(x => x.kind === 'throne')!;

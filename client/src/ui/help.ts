@@ -33,6 +33,11 @@ export function helpHtml(st: GameState): string {
     <li>Battles always reach a decision: after ${R.combat.maxRounds} rounds the weaker side retreats. Retreating fleets take a parting volley.</li>
     <li>Commanders earn <b>traits through deeds</b> (Hunter, Giantkiller, Survivor, Stalwart…). Repeated foes become rivals, and whoever lost the last meeting gets <b>Vengeance</b>. Ships that survive ${R.combat.veteranBattles} fleet battles earn a name. The dead are remembered in memorials.</li>
   </ul>
+  <h2>Economy</h2>
+  <ul><li>⚙ Industry builds ships and projects. ¢ Credits pay ship upkeep, project costs, and a fleet's second order. Spare credits automatically cover an industry shortfall at ${R.economy.creditsPerIndustry}¢ per ⚙.</li>
+  <li>✦ Influence buys subversion, scans, feints, conceal and pacts.</li>
+  <li>Fleets and squadrons formed this turn (new builds, splits) can act from next turn.</li>
+  <li>Garrisons fire on any hostile fleet inside their region, so parking in enemy territory is never free.</li></ul>
   <h2>Intel and deception</h2>
   <ul><li>Every order leaves traces. Within sensor range you see rival fleet movements with origin, destination, arrival pulse and a size band, plus construction and agents.</li>
   <li><b>Feint</b> broadcasts fake movements. <b>Scan</b> exposes feints and fleets hidden in nebulae. <b>Conceal</b> hides all your signals but makes your capital jam loudly.</li></ul>

@@ -38,6 +38,7 @@ if (cmd === 'new') {
   sub.free ??= [];
   // pre-validate against a projection of your own earlier orders (like the browser UI does)
   const proj: GameState = structuredClone(s);
+  for (const f of proj.fleets) f.ordersThisTurn = 0;
   const problems: string[] = [];
   sub.orders.forEach((o, i) => {
     if (!o) return;

@@ -216,6 +216,7 @@ export interface GameState {
   edicts: Edict[];           // active/upcoming public objectives
   edictDeck: string[];
   wardenAwake: boolean;
+  capitalsTaken?: PlayerId[];   // victims whose original capital has already paid capture VP
   wardenDefeated: boolean;
   /** Per-turn stats used by edicts and battle honors. */
   turnStats: { kills: number[]; battlesWon: number[]; crownBattlesWon: number[]; captures: number[] };

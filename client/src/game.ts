@@ -199,7 +199,7 @@ export class GameScreen {
     const c = orderCost(this.st, o, this.you!);
     const res = this.st.players[this.you!].res;
     const after = { industry: res.industry - spend.industry, credits: res.credits - spend.credits, influence: res.influence - spend.influence };
-    if (!canAfford(after, c)) toast(`Warning: you can't afford that with your other orders (${costText(c)}). It will fail unless you free up resources.`);
+    if (!canAfford(after, c, this.st.rules)) toast(`Warning: you can't afford that with your other orders (${costText(c)}). It will fail unless you free up resources.`);
     this.plan.orders[k] = o;
     this.targetSlot = null;
     this.mode = null;

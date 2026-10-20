@@ -81,6 +81,7 @@ export const DEFAULT_RULES = {
     maxDev: 5,
     mineBonus: 4,           // +industry per mine level
     tradeHubBonus: 5,       // +credits per trade hub level
+    creditsPerIndustry: 2,  // spare credits cover an industry shortfall at this rate (0 = disabled)
     shipRepairPerTurn: 4,   // hp repaired per ship per turn in an owned region
     shipyardRepairBonus: 6, // extra repair (and subsystem repair) at a shipyard
     bankruptAttrition: 3,   // hp lost per ship per turn while credits < 0
@@ -286,7 +287,7 @@ export const PLAYTEST_DEFAULTS = {
   influenceLimits: {
     onePerTargetPerTurn: true,
     capAtThreshold: true,       // loyalty can't exceed the flip threshold
-    purgeAmount: 45,            // Influence on your OWN region removes this much rival loyalty
+    purgeAmount: 30,            // Influence on your OWN region removes this much rival loyalty
     perFortress: 15,            // each fortress level adds this to the rival flip threshold
     crownMult: 2,               // Crowns and the Throne need this many times the normal loyalty
   },
@@ -303,7 +304,7 @@ export const PLAYTEST_DEFAULTS = {
   },
   comeback: {
     gap: 10,                    // players at least this many VP behind the leader…
-    incomeBonus: 0.25,          // …get this much extra income (never extra orders)
+    incomeBonus: 0.15,          // …get this much extra income (never extra orders; not while holding the Throne)
   },
   intel: {
     ghostEchoChance: 0.35,      // chance per unclaimed relic per turn of a fake "unidentified movement"

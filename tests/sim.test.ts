@@ -124,3 +124,43 @@ describe('playtest fixes', () => {
     expect(x.winner).toBe(1);
   });
 });
+
+describe('exploit fixes (playtest round 2)', () => {
+  const idle = (s: GameState) => ({ 0: emptySubmission(s), 1: emptySubmission(s), 2: emptySubmission(s) });
+  it('a scout parked in a rival capital gets shot by the garrison', () => {
+    const s = ai3(77);
+    const scout = s.fleets.find(f => f.owner === 0 && f.ships.every(x => x.cls === 'scout'))!;
+    scout.region = s.players[1].capital;
+    for (const f of s.fleets) if (f.owner === 1) f.region = s.regions[s.players[1].capital].neighbors[0];
+    const n = resolveTurn(s, idle(s));
+    expect(n.fleets.some(f => f.id === scout.id && f.region === s.players[1].capital)).toBe(false);
+  });
+  it('fleets formed this turn cannot be ordered until next turn', () => {
+    let s = ai3(5);
+    s = resolveTurn(s, idle(s));
+    const f = s.fleets.find(x => x.owner === 0)!;
+    f.bornTurn = s.turn;
+    expect(validateOrder(s, 0, { type: 'fortify', fleet: f.id })).toMatch(/just formed/);
+  });
+  it('capital capture VP is paid once per victim', () => {
+    const s = ai3(8);
+    const cap = s.players[1].capital;
+    s.regions[cap].garrison = 0;
+    s.fleets = s.fleets.filter(f => f.owner !== 1);
+    const f = s.fleets.find(x => x.owner === 0 && x.ships.length > 1)!;
+    f.region = s.regions[cap].neighbors[0];
+    const sub = emptySubmission(s); sub.orders[0] = { type: 'seize', fleet: f.id, target: cap };
+    const n = resolveTurn(s, { 0: sub, 1: emptySubmission(s), 2: emptySubmission(s) });
+    expect(n.regions[cap].owner).toBe(0);
+    expect(n.players[0].vpLog.filter(v => v.why.includes('capital')).length).toBe(1);
+    expect(n.capitalsTaken).toContain(1);
+  });
+  it('credits can cover an industry shortfall', () => {
+    const s = ai3(4);
+    const cap = s.players[0].capital;
+    s.players[0].res = { industry: 0, credits: 500, influence: 0 };
+    const sub = emptySubmission(s); sub.orders[0] = { type: 'build', region: cap, cls: 'frigate', fleet: null };
+    const n = resolveTurn(s, { 0: sub, 1: emptySubmission(s), 2: emptySubmission(s) });
+    expect(n.last!.events.some(e => e.k === 'build' && e.owner === 0)).toBe(true);
+  });
+});

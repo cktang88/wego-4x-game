@@ -7,7 +7,7 @@ export interface EdictDef {
   desc: string;
   vp: number;
   /** Return the players who satisfy the edict at the end of the scoring turn. */
-  check: (s: GameState) => PlayerId[];
+  check: (s: GameState, ctx: { startOwners: (PlayerId | null)[] }) => PlayerId[];
 }
 
 const alive = (s: GameState) => s.players.filter(p => !p.eliminated).map(p => p.id);
@@ -36,8 +36,8 @@ export const EDICTS: Record<string, EdictDef> = {
   },
   throne_hold: {
     name: 'Edict of the Empty Seat', vp: 4,
-    desc: 'Hold the Hollow Throne at the end of the turn.',
-    check: s => alive(s).filter(p => s.regions.some(r => r.kind === 'throne' && r.owner === p)),
+    desc: 'Hold the Hollow Throne for the whole turn.',
+    check: (s, c) => alive(s).filter(p => s.regions.some(r => r.kind === 'throne' && r.owner === p && c.startOwners[r.id] === p)),
   },
   deep_strike: {
     name: 'Edict of the Knife', vp: 4,
@@ -56,7 +56,7 @@ export const EDICTS: Record<string, EdictDef> = {
   },
   two_crowns: {
     name: 'Edict of the Pair', vp: 3,
-    desc: 'Hold two or more Crowns.',
-    check: s => alive(s).filter(p => s.regions.filter(r => r.kind === 'crown' && r.owner === p).length >= 2),
+    desc: 'Hold two or more Crowns for the whole turn.',
+    check: (s, c) => alive(s).filter(p => s.regions.filter(r => r.kind === 'crown' && r.owner === p && c.startOwners[r.id] === p).length >= 2),
   },
 };

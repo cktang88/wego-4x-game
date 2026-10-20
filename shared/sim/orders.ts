@@ -29,7 +29,7 @@ export function orderCost(s: GameState, o: Order, p: PlayerId): Partial<Res> {
     case 'develop': return { ...s.rules.projects[o.project]?.cost };
     case 'influence': {
       const r = s.regions[o.target];
-      return { influence: r && r.owner !== null && r.owner !== p ? I.rivalSubvertCost : r && r.owner === p ? Math.ceil(I.orderCost / 2) : I.orderCost };
+      return { influence: r && r.owner !== null && r.owner !== p ? I.rivalSubvertCost : I.orderCost };
     }
     case 'scan': return { influence: I.scanCost };
     case 'feint': return { influence: I.feintCost };
@@ -39,11 +39,20 @@ export function orderCost(s: GameState, o: Order, p: PlayerId): Partial<Res> {
   }
 }
 
-export function canAfford(have: Res, cost: Partial<Res>): boolean {
-  return (Object.keys(cost) as (keyof Res)[]).every(k => (have[k] ?? 0) >= (cost[k] ?? 0));
+/** Credits can cover an industry shortfall at economy.creditsPerIndustry ¢ per ⚙ (a sink for spare cash). */
+export function canAfford(have: Res, cost: Partial<Res>, rules?: { economy: { creditsPerIndustry: number } }): boolean {
+  const rate = rules?.economy.creditsPerIndustry ?? 0;
+  const shortInd = Math.max(0, (cost.industry ?? 0) - Math.max(0, have.industry));
+  const credNeed = (cost.credits ?? 0) + (rate > 0 ? shortInd * rate : shortInd > 0 ? Infinity : 0);
+  return have.credits >= credNeed && have.influence >= (cost.influence ?? 0);
 }
-export function pay(have: Res, cost: Partial<Res>) {
-  for (const k of Object.keys(cost) as (keyof Res)[]) have[k] -= cost[k] ?? 0;
+export function pay(have: Res, cost: Partial<Res>, rules?: { economy: { creditsPerIndustry: number } }) {
+  const rate = rules?.economy.creditsPerIndustry ?? 0;
+  const ind = cost.industry ?? 0;
+  const fromInd = Math.min(ind, Math.max(0, have.industry));
+  have.industry -= fromInd;
+  have.credits -= (ind - fromInd) * rate + (cost.credits ?? 0);
+  have.influence -= cost.influence ?? 0;
 }
 export function costText(c: Partial<Res>): string {
   const parts: string[] = [];
@@ -84,6 +93,7 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
     if (!fleet || !fleet.ships.length) return 'fleet no longer exists';
     if (fleet.owner !== p) return 'not your fleet';
   }
+  if (usesFleet && fleet!.bornTurn === s.turn && s.turn > 1) return 'this fleet was only just formed and can act next turn';
   if (usesFleet && fleet!.ordersThisTurn > s.rules.orders.maxPerFleet) return `a fleet can take at most ${s.rules.orders.maxPerFleet} orders per turn`;
   const own = (rid: number) => s.regions[rid]?.owner === p;
   switch (o.type) {
@@ -142,6 +152,7 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       if (r.owner === p) return r.loyalty.some((x, i) => i !== p && x > 0) ? null : 'no rival agents to purge here';
       if (r.kind === 'void') return 'nobody lives there';
       if (r.owner !== null && s.players[r.owner].capital === r.id) return 'capitals cannot be subverted';
+      if (r.owner !== null && s.pacts.some(x => x.until >= s.turn && ((x.a === p && x.b === r.owner) || (x.b === p && x.a === r.owner)))) return 'you have a pact with its owner';
       const near = r.neighbors.some(n => s.regions[n].owner === p) || s.fleets.some(f => f.owner === p && f.region === r.id && f.ships.length);
       if (!near) return 'must border a region you own (or have a fleet there)';
       return null;
