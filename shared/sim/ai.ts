@@ -94,9 +94,9 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     valid.sort((a, b) => b.v - a.v);
     let pick: Cand;
     if (novice) {
-      // naive: usually one of the top three, sometimes something further down
-      const k = rng.chance(0.75) ? Math.min(valid.length, 3) : Math.min(valid.length, 6);
-      pick = valid[Math.floor(rng.next() * k)];
+      // naive: usually the obvious move, often one of the next few
+      const r = rng.next();
+      pick = valid[Math.min(valid.length - 1, r < 0.45 ? 0 : r < 0.7 ? 1 : r < 0.85 ? 2 : 3 + Math.floor(rng.next() * 3))];
     } else if (!expert && rng.chance(0.2)) pick = valid[Math.min(valid.length - 1, 1)];
     else pick = valid[0];
     sub.orders[slot] = pick.o;
@@ -189,17 +189,18 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       (t.owner !== null && f.owner === t.owner && f.doctrine.guard && t.neighbors.includes(f.region))));
     const D = defFleets.flatMap(f => unitsOf(s, f));
     const fort = t.buildings.fortress ?? 0;
+    const gar = Math.round(t.garrison * (novice && t.owner === null ? 0.8 : 1)); // novices underrate neutral garrisons
     let res: SimResult;
     if (D.length) {
       // fleet battle (garrison helps only if its owner has ships here), then the siege
       const garHelps = t.owner !== null && defFleets.some(f => f.owner === t.owner);
-      const b1 = simBattle(s, t.id, units, D, garHelps ? t.garrison : 0, fort, 0.35);
+      const b1 = simBattle(s, t.id, units, D, garHelps ? gar : 0, fort, 0.35);
       if (!b1.win) res = b1;
       else {
-        const b2 = simBattle(s, t.id, b1.left, [], b1.garLeft || (garHelps ? 0 : t.garrison), fort, 0.35);
+        const b2 = simBattle(s, t.id, b1.left, [], b1.garLeft || (garHelps ? 0 : gar), fort, 0.35);
         res = { ...b2, p: Math.min(b1.p, b2.p), lost: b1.lost + b2.lost };
       }
-    } else res = simBattle(s, t.id, units, [], t.garrison, fort, 0.35);
+    } else res = simBattle(s, t.id, units, [], gar, fort, 0.35);
     simCache.set(ck, res);
     return res;
   }
@@ -264,7 +265,9 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
           if (pact) v -= R.influence.pactBreakVp * 2;
           if (edictsNow.includes('crown_battle') && t.kind === 'crown' && s.fleets.some(x => x.region === tid && x.owner !== pid && x.ships.length)) v += 3;
         } else {
-          const p = winP(pow, defense(t, pid));
+          // standard & novice: same predictor, but no thought for what happens next
+          const p = seizeOdds(units, t, ukey).p;
+          if (p < (novice ? 0.3 : 0.2)) continue;
           v = regionValue(t) * p * aggr - (1 - p) * pow * 0.08 - fatiguePenalty;
         }
         if (t.owner !== null && t.owner !== pid && t.owner >= 0) v += 1.5 * aggr; // conflict is the point
@@ -287,14 +290,14 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         if (foes.length && (isScout || (!expert && fleetPower(s, f) < foes.reduce((a, x) => a + fleetPower(s, x), 0) * 1.2))) continue;
         const rivalHeld = dr.owner !== null && dr.owner !== pid && dr.garrison > 0;
         let v = 0;
-        if (expert) v = moveValueExpert(f, units, dest, path.length, mainArmy) - leaveCost;
+        if (!novice) v = moveValue(f, units, dest, path.length, mainArmy) - leaveCost;
         else {
           if (rivalHeld) continue;
           let best = 0;
           for (const n of [dest, ...dr.neighbors]) {
             const t = s.regions[n];
             if (t.owner === pid) continue;
-            best = Math.max(best, regionValue(t) * winP(pow, defense(t, pid)));
+            best = Math.max(best, regionValue(t) * seizeOdds(units, t, ukey).p);
           }
           v = best * 0.45 * aggr / Math.max(1, path.length * 0.6);
           if (dr.owner === pid) {
@@ -312,8 +315,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         if (expert) {
           const p = threatened.get(here.id) ?? 0;
           if (p > 0.25) out.push({ o: { type: 'fortify', fleet: f.id }, v: 2 + regionValue(here) * p * 0.5, tag: `fort:${f.id}` });
-        } else if (enemyPowerNear(s, pid, here.id, 1) > pow * 0.5) {
-          out.push({ o: { type: 'fortify', fleet: f.id }, v: 4 + regionValue(here) * 0.2, tag: `fort:${f.id}` });
+        } else if (enemyPowerNear(s, pid, here.id, 1) > pow * 0.8 && here.kind !== 'colony') {
+          out.push({ o: { type: 'fortify', fleet: f.id }, v: 2.5 + regionValue(here) * 0.15, tag: `fort:${f.id}` });
         }
       }
     }
@@ -385,13 +388,13 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     return out;
   }
 
-  // ---------------------------------------------------------------- expert: moves
-  function moveValueExpert(f: Fleet, units: SimUnit[], dest: number, dist: number, mainArmy: Fleet | undefined): number {
+  // ---------------------------------------------------------------- moves (standard: opportunity + battle check; expert: everything)
+  function moveValue(f: Fleet, units: SimUnit[], dest: number, dist: number, mainArmy: Fleet | undefined): number {
     const dr = s.regions[dest];
     const isScout = isScoutFleet(f);
     if (isScout) return 0;
     // friends already at dest will be merged next turn: plan with the combined force
-    const friends = s.fleets.filter(x => x.owner === pid && x.region === dest && x.ships.length && x !== f && !isScoutFleet(x));
+    const friends = expert ? s.fleets.filter(x => x.owner === pid && x.region === dest && x.ships.length && x !== f && !isScoutFleet(x)) : [];
     const combined = friends.length ? [...units, ...friends.flatMap(x => unitsOf(s, x))] : units;
     const ckey = unitsKey(f) + friends.map(x => unitsKey(x)).join('+');
     let v = 0;
@@ -403,8 +406,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       if (b.p < 0.65) return -99;
       v += unitsCost(foes.flatMap(x => unitsOf(s, x))) * 0.06 * b.p - b.lost * 0.1;
       if (foes.some(x => x.owner === -1)) v += R.warden.defeatVp * b.p;
-      if (edictsNow.includes('crown_battle') && dr.kind === 'crown') v += 3;
-      if (edictsNow.includes('slaughter') && foes.reduce((a, x) => a + x.ships.length, 0) >= 4) v += 3;
+      if (expert && edictsNow.includes('crown_battle') && dr.kind === 'crown') v += 3;
+      if (expert && edictsNow.includes('slaughter') && foes.reduce((a, x) => a + x.ships.length, 0) >= 4) v += 3;
     }
 
     // (a) next-turn opportunity from dest
@@ -430,6 +433,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       // sitting on a held Crown/Throne blocks influence and seizes
       if ((dr.kind === 'crown' || dr.kind === 'throne') && !s.fleets.some(x => x.owner === pid && x.region === dest && x !== f)) v = Math.max(v, 1.2);
     }
+    if (!expert) return v;
     // (c) rally: small detachments join the main army
     if (mainArmy && mainArmy !== f && mainArmy.region === dest && f.ships.length + mainArmy.ships.length <= R.maxShipsPerFleet) {
       v = Math.max(v, 1 + Math.min(3, unitsCost(units) / 40));

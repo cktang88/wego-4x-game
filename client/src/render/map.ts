@@ -36,6 +36,7 @@ export class MapRenderer {
   private nebulaBlobs: { p: Pt; r: number; c: string }[] = [];
   private seed = -1;
   fitted = false;
+  private labelBoxes: { x: number; y: number; w: number; h: number }[] = [];
 
   constructor(public canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -186,7 +187,9 @@ export class MapRenderer {
     // (drawn implicitly by region borders)
 
     // ---------------------------------------------------------------- sites & labels
-    for (const r of st.regions) this.drawSite(r, I, colorOf(I.owners[r.id]));
+    this.labelBoxes = [];
+    const prio = (r: Region) => ({ throne: 0, crown: 1, home: 2, relic: 3, colony: 4, void: 5 })[r.kind];
+    for (const r of st.regions.slice().sort((a, b) => prio(a) - prio(b))) this.drawSite(r, I, colorOf(I.owners[r.id]));
 
     // ---------------------------------------------------------------- signals (intel)
     if (I.showSignals) {
@@ -291,13 +294,33 @@ export class MapRenderer {
     if (r.buildings.tradehub) pips.push('¢'.repeat(r.buildings.tradehub));
     if (r.buildings.sensor) pips.push('◎'.repeat(r.buildings.sensor));
 
-    // labels
+    // labels (with simple collision avoidance: try above, then below, then shifted)
     const fs = Math.max(11, Math.min(15, 13 * Math.sqrt(k)));
     ctx.textAlign = 'center';
     ctx.font = `600 ${this.px(fs)}px "Rajdhani", system-ui, sans-serif`;
     ctx.fillStyle = r.kind === 'crown' || r.kind === 'throne' ? 'rgba(255,230,160,0.95)' : 'rgba(220,215,245,0.82)';
-    const ly = p.y - size * 1.9 - this.px(6);
-    letterSpaced(ctx, r.name.toUpperCase(), p.x, ly, this.px(1.2));
+    const name = r.name.toUpperCase();
+    const lw = ctx.measureText(name).width + this.px(1.2) * name.length;
+    const lh = this.px(fs);
+    const cands = [
+      { x: p.x, y: p.y - size * 1.9 - this.px(6) },
+      { x: p.x, y: p.y - size * 1.9 - this.px(6) - lh * 1.1 },
+      { x: p.x + lw * 0.45, y: p.y - size * 1.9 - this.px(6) },
+      { x: p.x - lw * 0.45, y: p.y - size * 1.9 - this.px(6) },
+      { x: p.x, y: p.y + size * 1.9 + this.px(30) },
+      { x: p.x + lw * 0.45, y: p.y + size * 1.9 + this.px(30) },
+      { x: p.x - lw * 0.45, y: p.y + size * 1.9 + this.px(30) },
+    ];
+    let spot = cands[0], free = false;
+    const hit = (c: Pt) => { const box = { x: c.x - lw / 2, y: c.y - lh, w: lw, h: lh * 1.2 }; return this.labelBoxes.some(b => box.x < b.x + b.w && box.x + box.w > b.x && box.y < b.y + b.h && box.y + box.h > b.y); };
+    for (const c of cands) if (!hit(c)) { spot = c; free = true; break; }
+    const minor = r.kind === 'colony' || r.kind === 'void' || r.kind === 'relic';
+    if (!free) ctx.globalAlpha = minor && I.hoverRegion !== r.id ? 0 : 0.45;
+    this.labelBoxes.push({ x: spot.x - lw / 2, y: spot.y - lh, w: lw, h: lh * 1.2 });
+    const ly = spot.y;
+    letterSpaced(ctx, name, spot.x, ly, this.px(1.2));
+    ctx.globalAlpha = 1;
+    const below = spot.y > p.y;
     ctx.font = `500 ${this.px(11)}px "Rajdhani", system-ui, sans-serif`;
     const sub: string[] = [];
     if (r.garrison > 0) sub.push(`⛨${r.garrison}`);
@@ -306,7 +329,7 @@ export class MapRenderer {
     if (pips.length) sub.push(pips.join(' '));
     if (r.project) sub.push(`⏳${I.state.rules.projects[r.project.key]?.name ?? r.project.key}`);
     if (r.memorials.length) sub.push(`✝${r.memorials.length}`);
-    if (sub.length) { ctx.fillStyle = 'rgba(200,195,230,0.7)'; ctx.fillText(sub.join('  '), p.x, p.y + size * 1.9 + this.px(14)); }
+    if (sub.length) { ctx.fillStyle = 'rgba(200,195,230,0.7)'; ctx.fillText(sub.join('  '), below ? spot.x : p.x, below ? spot.y + this.px(13) : p.y + size * 1.9 + this.px(14)); }
     // influence progress (your loyalty)
     if (I.you !== null && r.owner !== I.you && (r.loyalty[I.you] ?? 0) > 0) {
       const thr = r.owner === null ? I.state.rules.influence.flipThreshold : I.state.rules.influence.rivalFlipThreshold;

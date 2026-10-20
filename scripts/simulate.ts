@@ -31,6 +31,7 @@ for (const lvStr of suite) {
   const wins: Record<string, number> = {};
   const vpByLevel: Record<string, number[]> = {};
   const builds: Record<string, Record<string, number>> = {};
+  const orderMix: Record<string, Record<string, number>> = {};
   const seatWins = [0, 0, 0];
   let turns = 0, battles = 0, captures = 0, shipsLost = 0, warden = 0, wardenKilled = 0, pacts = 0, betrayals = 0, influenceCaps = 0, earlyDecided = 0;
   const reasons: Record<string, number> = {};
@@ -45,7 +46,10 @@ for (const lvStr of suite) {
     let leaderT6: number | null = null;
     while (s.winner === null && s.turn < 200) {
       const subs: any = {};
-      for (const p of s.players) subs[p.id] = planTurn(s, p.id);
+      for (const p of s.players) {
+        subs[p.id] = planTurn(s, p.id);
+        for (const o of subs[p.id].orders) { const k = o ? o.type : 'none'; (orderMix[p.aiLevel] ??= {})[k] = (orderMix[p.aiLevel][k] ?? 0) + 1; }
+      }
       s = resolveTurn(s, subs);
       battles += s.last!.battles.length;
       for (const e of s.last!.events) {
@@ -87,5 +91,6 @@ for (const lvStr of suite) {
   console.log(`avg turns ${(turns / games).toFixed(1)} | battles/turn ${(battles / turns).toFixed(2)} | ships lost/game ${(shipsLost / games).toFixed(1)} | captures/game ${(captures / games).toFixed(1)} (influence ${(influenceCaps / games).toFixed(1)})`);
   console.log('VP sources/game:', Object.fromEntries(Object.entries(vpSrc).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, +(v / games).toFixed(1)])));
   console.log('builds/game  :', Object.fromEntries(Object.entries(builds).map(([l, b]) => [l, Object.fromEntries(Object.entries(b).map(([c, n]) => [c, +(n / games).toFixed(1)]))])));
+  console.log('orders (% by level):', Object.fromEntries(Object.entries(orderMix).map(([l, m]) => { const t = Object.values(m).reduce((a, b) => a + b, 0); return [l, Object.entries(m).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}:${Math.round(100 * n / t)}`).join(' ')]; })));
   console.log(`relics/game ${(relics / games).toFixed(1)} | warden woke ${warden}/${games} (killed ${wardenKilled}) | pacts ${pacts} | betrayals ${betrayals} | margin ${avg(vpSpread)} VP | decided-by-T6 ${earlyDecided}/${games}`);
 }

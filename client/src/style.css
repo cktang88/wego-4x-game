@@ -172,3 +172,26 @@ h3 { font-size: 12px; text-transform: uppercase; color: var(--dim); margin-top: 
   .players { margin-left: 0; }
   .res { gap: 8px; }
 }
+
+/* ------------------------------------------------------------ collapsible panel + phones */
+.game { grid-template-columns: minmax(0, 1fr); }
+.topbar { min-width: 0; }
+.right.min { bottom: auto; }
+.right.min .tabbody { display: none; }
+@media (max-width: 700px) {
+  body { font-size: 14px; }
+  .topbar { gap: 6px 10px; padding: 5px 8px; }
+  .logo { font-size: 11px; letter-spacing: 0.15em; }
+  .players { order: 5; width: 100%; flex-wrap: nowrap; overflow-x: auto; }
+  .pchip { font-size: 12px; padding: 2px 7px; }
+  .res { gap: 8px; font-size: 13px; }
+  .toolbtns { margin-left: auto; }
+  .right { left: 8px; right: 8px; width: auto; top: auto; bottom: 8px; max-height: 52%; }
+  .right.min { max-height: none; }
+  .left { left: 8px; right: 8px; width: auto; top: 8px; bottom: auto; max-height: 42%; }
+  .tabs button { font-size: 11px; padding: 7px 2px; letter-spacing: 0.02em; }
+  .bottombar { padding: 4px 8px; gap: 6px; }
+  .pulsebar span { width: 14px; }
+  .banner { font-size: 22px; }
+  .modehint { bottom: auto; top: 8px; font-size: 12px; max-width: 92%; white-space: normal; text-align: center; }
+}

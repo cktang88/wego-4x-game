@@ -104,7 +104,7 @@ export const DEFAULT_RULES = {
     ownedBase: 12,          // max garrison of an owned region before fortresses
     perDev: 3,
     perFortress: 10,
-    kindBonus: { home: 10, crown: 18, throne: 22 } as Record<string, number>,
+    kindBonus: { home: 10, crown: 30, throne: 22 } as Record<string, number>,
     regenPerTurn: 5,
     attackBase: 3,          // garrison damage per hit
     attackPerFortress: 1,
@@ -164,10 +164,10 @@ export const DEFAULT_RULES = {
     orderCost: 5,              // influence spent by an Influence order
     pushAmount: 30,            // loyalty gained per Influence order
     adjacentBonus: 10,         // extra if you own an adjacent region
-    flipThreshold: 110,        // neutral region joins you at this loyalty
+    flipThreshold: 130,        // neutral region joins you at this loyalty
     decayPerTurn: 6,           // loyalty drifts back toward 0
     rivalSubvertCost: 8,       // influence cost to Influence a RIVAL-owned region
-    rivalFlipThreshold: 150,   // rival regions are harder to flip (not capitals)
+    rivalFlipThreshold: 180,   // rival regions are harder to flip (not capitals)
     pactCost: 2,               // influence to propose a non-aggression pact
     pactTurns: 4,
     pactBreakVp: 3,            // VP penalty for attacking a pact partner
@@ -191,7 +191,7 @@ export const DEFAULT_RULES = {
     vpTarget: 50,
     turnLimit: 30,
     vpPerCrownPerTurn: 1,
-    crownMajorityVp: 2,        // extra VP per turn while holding 2+ Crowns
+    crownMajorityVp: 1,        // extra VP per turn while holding 2+ Crowns
     vpPerThronePerTurn: 3,
     vpPerRelic: 2,
     vpPerBattleWon: 1,         // only for battles involving >= 2 ships destroyed

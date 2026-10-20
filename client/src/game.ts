@@ -2,7 +2,7 @@
 // chronicle, scoreboard, chat. Works with either a local or remote GameSource.
 import { describeOrder, orderCost, validateOrder, costText, canAfford, ORDER_INFO } from '../../shared/sim/orders.ts';
 import { findPath, fleetSpeed, fleetPower } from '../../shared/sim/graph.ts';
-import { income, currentLeader } from '../../shared/sim/resolve.ts';
+import { income, currentLeader, resolveTurn, emptySubmission } from '../../shared/sim/resolve.ts';
 import { TRAITS, RELICS, NEUTRAL_COLOR } from '../../shared/config/content.ts';
 import { EDICTS } from '../../shared/sim/edicts.ts';
 import type { Doctrine, Fleet, GameEvent, GameState, Order, Pt, Region, Submission, TurnResult } from '../../shared/sim/types.ts';
@@ -54,6 +54,7 @@ export class GameScreen {
   pointers = new Map<number, { x: number; y: number }>();
   el: Record<string, HTMLElement> = {};
   destroyed = false;
+  previewing = false;
 
   constructor(parent: HTMLElement, public src: GameSource, public onExit: () => void) {
     this.root = h('div', { class: 'game' });
@@ -65,6 +66,7 @@ export class GameScreen {
         <div class="res" data-el="res"></div>
         <div class="players" data-el="players"></div>
         <div class="toolbtns">
+          <button class="small" data-act="panel" title="Show/hide the side panel (P)">▤</button>
           <button class="small" data-act="replay" title="Replay the last turn (R)">⟲ Replay</button>
           <button class="small" data-act="signals" title="Toggle intel signals on the map (I)">◎ Intel</button>
           <button class="small" data-act="help" title="How to play (H)">?</button>
@@ -96,6 +98,7 @@ export class GameScreen {
     if (src instanceof LocalSource) src.onHandoff = seat => this.handoff(seat);
     window.addEventListener('resize', this.onResize);
     window.addEventListener('keydown', this.onKey);
+    if (window.innerWidth <= 700) this.el.right.classList.add('min');
     this.onResize();
     this.lastSeenTurn = this.seenTurnKey() ? Number(localStorage.getItem(this.seenTurnKey()) ?? 0) : 0;
     this.onSourceChange('view');
@@ -218,6 +221,12 @@ export class GameScreen {
     if (this.src.mySubmission) this.plan = structuredClone(this.src.mySubmission);
     if (this.sel?.kind === 'fleet' && !this.fleet(this.sel.id)) this.sel = null;
     const last = this.st.last;
+    if (last && last.turn > this.lastSeenTurn && this.st.turn > 1 && this.src.kind === 'remote' && document.hidden) {
+      document.title = `(!) Turn ${this.st.turn} · Three Crowns`;
+      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Three Crowns', { body: `Turn ${last.turn} resolved. Your move, commander.` }); } catch { /* */ }
+      const back = () => { document.title = 'Three Crowns'; document.removeEventListener('visibilitychange', back); };
+      document.addEventListener('visibilitychange', back);
+    }
     if (last && last.turn > this.lastSeenTurn && this.st.turn > 1) {
       this.lastSeenTurn = last.turn;
       try { localStorage.setItem(this.seenTurnKey(), String(last.turn)); } catch { /* */ }
@@ -242,7 +251,7 @@ export class GameScreen {
     this.el.turn.textContent = `TURN ${st.turn} / ${st.rules.victory.turnLimit}`;
     let phase = '';
     if (st.winner !== null) phase = `${this.pname(st.winner)} wins`;
-    else if (this.replay) phase = `Replaying turn ${this.replay.result.turn}`;
+    else if (this.replay) phase = this.previewing ? 'PREVIEW: rivals assumed idle' : `Replaying turn ${this.replay.result.turn}`;
     else if (this.you === null) phase = 'Spectating';
     else if (this.submitted) {
       const waiting = meta.seats.filter(s => !s.submitted).map(s => s.name);
@@ -283,6 +292,8 @@ export class GameScreen {
     const tabs: [Tab, string][] = [['orders', 'Orders'], ['intel', 'Intel'], ['chronicle', 'Chronicle'], ['score', 'Score'], ['chat', 'Chat']];
     this.el.tabs.innerHTML = tabs.map(([k, n]) => `<button class="${this.tab === k ? 'on' : ''}" data-tab="${k}">${n}${k === 'chat' && this.unreadChat ? `<span class="badge">${this.unreadChat}</span>` : ''}${k === 'intel' && this.st.last?.signals.length ? `<span class="badge" style="background:var(--accent)">${this.st.last.signals.length}</span>` : ''}</button>`).join('');
     this.el.tabs.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(b => b.addEventListener('click', () => {
+      if (this.el.right.classList.contains('min')) this.el.right.classList.remove('min');
+      else if (this.tab === b.dataset.tab && window.innerWidth <= 700) this.el.right.classList.add('min');
       this.tab = b.dataset.tab as Tab; if (this.tab === 'chat') this.unreadChat = 0; this.renderTabs(); this.renderTab();
     }));
   }
@@ -322,6 +333,7 @@ export class GameScreen {
       <div class="row" style="margin-top:8px">
         ${this.submitted ? `<button data-unsubmit class="grow">✎ Unseal orders</button>` :
           `<button class="primary grow" data-submit ${this.canPlan ? '' : 'disabled'}>Seal orders & end turn ⏎</button>`}
+        <button data-preview ${this.canPlan ? '' : 'disabled'} title="Simulate your plan as if rivals hold still (they won't!)">👁 Preview</button>
         <button data-clear ${this.canPlan ? '' : 'disabled'} title="Clear all orders">Clear</button>
       </div>
       <div style="margin-top:10px;font-size:13px" class="dim">${seats}</div>
@@ -348,12 +360,34 @@ export class GameScreen {
     b.querySelector('[data-submit]')?.addEventListener('click', () => this.submit());
     b.querySelector('[data-unsubmit]')?.addEventListener('click', () => this.src.unsubmit());
     b.querySelector('[data-clear]')?.addEventListener('click', () => { this.plan = this.freshPlan(); this.savePlan(); this.renderAll(); });
+    b.querySelector('[data-preview]')?.addEventListener('click', () => this.preview());
+  }
+
+  /** Ghost planner: run the real resolver on your fogged view, rivals giving no orders. */
+  preview() {
+    if (this.you === null) return;
+    try {
+      const st = structuredClone(this.st);
+      if (!st.rngState) st.rngState = (st.seed ^ st.turn) >>> 0;
+      const subs: Record<number, Submission> = {};
+      for (const p of st.players) subs[p.id] = p.id === this.you ? structuredClone(this.plan) : emptySubmission(st);
+      const res = resolveTurn(st, subs).last;
+      if (!res) return;
+      this.previewing = true;
+      this.startReplay(res);
+      this.banner('PREVIEW');
+      toast('Preview: rivals are assumed to sit still. Dice may differ. Nothing is submitted.');
+    } catch (e) { toast(`Preview failed: ${e}`); }
   }
 
   submit() {
     if (!this.canPlan) return;
     const used = this.plan.orders.filter(Boolean).length;
-    const go = () => { this.mode = null; this.src.submit(structuredClone(this.plan)); };
+    const go = () => {
+      this.mode = null;
+      this.src.submit(structuredClone(this.plan));
+      if (this.src.kind === 'remote' && 'Notification' in window && Notification.permission === 'default') void Notification.requestPermission();
+    };
     if (used < this.plan.orders.length) {
       const o = overlay(`<div class="dialog"><h2>Seal with ${used}/${this.plan.orders.length} orders?</h2><p class="dim">Unused orders are wasted. Your fleets will still follow their doctrines.</p>
         <div class="row"><button class="primary" data-y>Seal anyway</button><button data-n>Keep planning</button></div></div>`);
@@ -711,6 +745,7 @@ export class GameScreen {
     const res = this.replay.result;
     this.replay = null;
     this.fx = [];
+    if (this.previewing) { this.previewing = false; this.el.ticker.innerHTML = '<span class="faint">Preview finished. Your plan is unchanged.</span>'; this.renderAll(); return; }
     const n = res.battles.length;
     this.el.ticker.innerHTML = `<b>Turn ${res.turn} resolved.</b> ${n ? `${n} battle${n > 1 ? 's' : ''}. <a href="#" data-tabch>See the Chronicle</a> to watch them.` : 'No battles.'} ${res.signals.length ? `${res.signals.length} intel signals.` : ''}`;
     this.el.ticker.querySelector('[data-tabch]')?.addEventListener('click', e => { e.preventDefault(); this.tab = 'chronicle'; this.renderTabs(); this.renderTab(); });
@@ -726,7 +761,7 @@ export class GameScreen {
   }
 
   openBattle(id: number) {
-    const rep = this.st.last?.battles.find(b => b.id === id) ?? this.replay?.result.battles.find(b => b.id === id);
+    const rep = (this.previewing ? undefined : this.st.last?.battles.find(b => b.id === id)) ?? this.replay?.result.battles.find(b => b.id === id);
     if (!rep) { toast('Battle report not available.'); return; }
     if (this.replay) this.replay.playing = false;
     openBattleViewer(rep, {
@@ -847,6 +882,7 @@ export class GameScreen {
       if (e.key === 'f') this.action('fortify', {});
     }
     if (e.key === 'i') { this.showSignals = !this.showSignals; }
+    if (e.key === 'p') this.toolbar('panel');
     if (e.key === 'h' || e.key === '?') this.toolbar('help');
     if (e.key === 'r') this.toolbar('replay');
     if (e.key === 'Shift' && this.mode?.type === 'move') this.mode.overdrive = true;
@@ -960,6 +996,7 @@ export class GameScreen {
   toolbar(a: string) {
     switch (a) {
       case 'replay': if (this.st.last) this.startReplay(this.st.last); else toast('Nothing to replay yet.'); break;
+      case 'panel': this.el.right.classList.toggle('min'); break;
       case 'signals': this.showSignals = !this.showSignals; toast(`Intel signals ${this.showSignals ? 'shown' : 'hidden'} on map`); break;
       case 'help': { const o = overlay(`<div class="dialog wide scroll help">${helpHtml(this.st)}<div class="row" style="margin-top:12px"><button class="primary" data-x>Got it</button></div></div>`); o.querySelector('[data-x]')!.addEventListener('click', () => o.remove()); break; }
       case 'menu': this.menu(); break;
