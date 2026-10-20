@@ -15,7 +15,8 @@ import { findPath, fleetPower, fleetSpeed, within } from './graph.ts';
 import { canAfford, orderCost, pay, validateOrder } from './orders.ts';
 import { Rng } from './rng.ts';
 import { emptySubmission, currentLeader, flipThreshold } from './resolve.ts';
-import type { Fleet, FreeAction, GameState, Order, PlayerId, Region, Submission } from './types.ts';
+import { maxGarrison } from './setup.ts';
+import type { Fleet, FreeAction, GameState, Order, PlayerId, Region, RegionId, Submission } from './types.ts';
 import { coverage, seesFleetsIn } from './visibility.ts';
 
 interface Cand { o: Order; v: number; tag: string }
@@ -288,8 +289,9 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
               if (sim2.p > sim.p + 0.1) { sim = sim2; also = helpers.slice(0, 3).map(g => g.id); }
             }
           }
-          if (sim.p < 0.3) continue; // never throw a fleet at a wall
-          v = regionValue(t) * sim.p * aggr - sim.lost * 0.12 - (1 - sim.p) * unitsCost(units) * 0.05 - fatiguePenalty - leaveCost - also.length * 0.5;
+          // never throw a fleet at a wall: battles are noisy, so demand a real margin unless the prize is huge
+          if (sim.p < (regionValue(t) >= 25 ? 0.45 : 0.6)) continue;
+          v = regionValue(t) * sim.p * aggr - sim.lost * 0.2 - (1 - sim.p) * unitsCost(units) * 0.05 - fatiguePenalty - leaveCost - also.length * 0.5;
           if (pact) v -= R.influence.pactBreakVp * 2;
           if (edictsNow.includes('crown_battle') && t.kind === 'crown' && s.fleets.some(x => x.region === tid && x.owner !== pid && x.ships.length)) v += 3;
         } else {
@@ -317,6 +319,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         if (foes.some(x => x.owner === -1) && !expert) continue;                                  // everyone knows not to poke the Warden
         if (foes.length && (isScout || (!expert && fleetPower(s, f) < foes.reduce((a, x) => a + fleetPower(s, x), 0) * 1.2))) continue;
         const rivalHeld = dr.owner !== null && dr.owner !== pid && dr.garrison > 0;
+        // rival garrisons now open fire on anything parked in their region: only experts with a plan go in
+        if (rivalHeld && (!expert || isScout)) continue;
         let v = 0;
         if (!novice) v = moveValue(f, units, dest, path.length, mainArmy) - leaveCost;
         else {
@@ -407,6 +411,10 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         // a neutral we could just take by force with a fleet next door is not worth the influence
         if (r.owner === null && r.garrison <= 12 && r.kind === 'colony') v *= 0.5;
         if (r.loyalty[pid] > 0) v += 1;
+        // one push per turn against decay: if it takes ages to flip, the Order is better spent elsewhere
+        const perTurn = R.influence.pushAmount + R.influence.adjacentBonus - R.influence.decayPerTurn;
+        const turns = Math.ceil((thr - r.loyalty[pid]) / Math.max(1, perTurn));
+        if (turns > 3 && me0().res.influence < 30) v *= 3 / (turns + 1); // ...unless influence is piling up anyway
       }
       out.push({ o: { type: 'influence', target: r.id }, v, tag: `inf:${r.id}` });
     }
@@ -443,10 +451,16 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     const ckey = unitsKey(f) + friends.map(x => unitsKey(x)).join('+');
     let v = 0;
 
-    // moving onto enemy ships means a battle: only if we win it convincingly
+    // moving onto enemy ships (or into a rival's garrisoned region) means a battle: only if we win it convincingly
     const foes = hostileFleetsAt(dest);
+    const garFights = dr.owner !== null && dr.owner !== pid && dr.garrison > 0 && hostile(s, pid, dr.owner);
+    if (garFights && !foes.length) {
+      const b = simBattle(s, dest, units, [], dr.garrison, dr.buildings.fortress ?? 0, 0.35);
+      if (b.p < 0.75) return -99;
+      v += regionValue(dr) * 0.3 * b.p - b.lost * 0.1; // grinds the garrison down for next turn's seize
+    }
     if (foes.length) {
-      const b = simBattle(s, dest, units, foes.flatMap(x => unitsOf(s, x, true)), foes.some(x => x.owner === dr.owner) ? dr.garrison : 0, dr.buildings.fortress ?? 0, 0.35);
+      const b = simBattle(s, dest, units, foes.flatMap(x => unitsOf(s, x, true)), garFights || foes.some(x => x.owner === dr.owner) ? dr.garrison : 0, dr.buildings.fortress ?? 0, 0.35);
       if (b.p < 0.65) return -99;
       v += unitsCost(foes.flatMap(x => unitsOf(s, x))) * 0.06 * b.p - b.lost * 0.1;
       if (foes.some(x => x.owner === -1)) v += R.warden.defeatVp * b.p;
@@ -462,7 +476,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         if (t.owner === pid || usedTargets.has(`seize:${n}`)) continue;
         if (t.owner !== null && t.owner >= 0 && !hostile(s, pid, t.owner)) continue;
         const sim = seizeOdds(combined, t, ckey);
-        if (sim.p < 0.35) continue;
+        if (sim.p < (expert ? 0.55 : 0.35)) continue;
         best = Math.max(best, regionValue(t) * sim.p - sim.lost * 0.1);
       }
       v += best * 0.5 * aggr / Math.max(1, dist * 0.6);
@@ -545,7 +559,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       (!mainArmy || within(s, mainArmy.region, 3).has(t.id)));
     let cls: string | null = null;
     const allBombards = myFleets().reduce((n, f) => n + f.ships.filter(x => (R.ships[x.cls]?.siege ?? 0) >= 5).length, 0);
-    if (hardTarget && bombards < 1 + Math.floor(army.length / 5) && allBombards < 3 && ok('bombard')) cls = 'bombard';
+    if (hardTarget && bombards < 1 + Math.floor(army.length / 5) && allBombards < 2 && ok('bombard')) cls = 'bombard';
     else if (ok('dread') && res.industry > 100) cls = 'dread';
     else if (ok('cruiser')) cls = 'cruiser';
     else if (ok('frigate')) cls = 'frigate';
@@ -574,9 +588,9 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     if (left < 4) return;
     if (r.dev < R.economy.maxDev && r.kind !== 'void') {
       const y = R.economy.yields[r.kind] ?? R.economy.yields.colony;
-      add('develop', 1.5 + (y.industry + y.credits) * 0.3 + early * 1.5);
+      add('develop', 1.5 + (y.industry + y.credits) * 0.3 + early * 2);
     }
-    if ((r.buildings.mine ?? 0) < 2 && r.kind !== 'void') add('mine', 3 + early);
+    if ((r.buildings.mine ?? 0) < 2 && r.kind !== 'void') add('mine', 3 + early * 3); // cheap compounding industry: early mines out-build everyone later
     // credits are usually the binding resource: turn spare industry into trade
     const res = me0().res;
     if ((r.buildings.tradehub ?? 0) < 2 && r.kind !== 'void' && res.industry > res.credits * 1.5) add('tradehub', 3.5 + early + Math.min(2, (res.industry - res.credits) / 40));
@@ -653,6 +667,38 @@ function simBattle(s: GameState, rid: number, A: SimUnit[], D: SimUnit[], gar: n
   const left = a.filter(u => u.cur > 0.5).map(u => ({ hp: u.cur, atk: u.atk, shots: u.shots, sh: u.sh, siege: u.siege, eva: u.eva, cost: u.cost }));
   const lost = a.reduce((t, u) => t + (u.cur <= 0.5 ? u.cost : u.cost * (1 - u.cur / u.hp) * 0.3), 0);
   return { win, p, left, garLeft: Math.max(0, garU.cur), lost };
+}
+
+/**
+ * UI helper: predicted odds that `fleetIds` (as they are now) take `target` in one seize,
+ * against visible hostile fleets there plus the garrison. Pure and deterministic.
+ */
+export function predictAssault(s: GameState, pid: PlayerId, fleetIds: number[], target: RegionId): { p: number; win: boolean; note: string } {
+  const R = s.rules, t = s.regions[target];
+  const mine = s.fleets.filter(f => fleetIds.includes(f.id) && f.owner === pid && f.ships.length);
+  if (!t || !mine.length) return { p: 0, win: false, note: 'no fleet selected' };
+  const A = mine.flatMap(f => unitsOf(s, f));
+  const foes = s.fleets.filter(f => f.region === target && f.ships.length && f.owner !== pid && hostile(s, f.owner, pid));
+  const fort = t.buildings.fortress ?? 0;
+  // fogged garrisons may arrive as -1: assume the starting/max strength
+  const gar = t.garrison >= 0 ? t.garrison : t.owner === null ? (t.baseGarrison ?? 0) : maxGarrison(s, target);
+  let res: SimResult;
+  if (foes.length) {
+    const garHelps = t.owner !== null && foes.some(f => f.owner === t.owner);
+    const b1 = simBattle(s, target, A, foes.flatMap(f => unitsOf(s, f, true)), garHelps ? gar : 0, fort, 0.35);
+    if (!b1.win) res = b1;
+    else { const b2 = simBattle(s, target, b1.left, [], b1.garLeft || (garHelps ? 0 : gar), fort, 0.35); res = { ...b2, p: Math.min(b1.p, b2.p), lost: b1.lost + b2.lost }; }
+  } else res = gar > 0 ? simBattle(s, target, A, [], gar, fort, 0.35) : { win: true, p: 0.98, left: A, garLeft: 0, lost: 0 };
+  // hint: what decides this fight
+  const armor = R.garrison.armor + fort * R.garrison.armorPerFortress;
+  const blocked = A.filter(u => u.atk - armor <= 0 && u.siege === 0).length;
+  let note: string;
+  if (foes.length) note = `rival fleet of ${foes.reduce((n, f) => n + f.ships.length, 0)} ship${foes.reduce((n, f) => n + f.ships.length, 0) > 1 ? 's' : ''} defends${gar > 0 ? `, backed by a garrison of ${gar}` : ''}`;
+  else if (gar > 0 && blocked * 2 > A.length) note = `armor ${armor} blocks most of your fire — bring bombards`;
+  else if (gar > 0) note = `garrison ${gar}${fort ? ` behind fortress ${fort}` : ''}`;
+  else note = 'undefended';
+  if (!res.win && res.p < 0.3) note += ' (likely repulsed)';
+  return { p: Math.round(res.p * 100) / 100, win: res.win, note };
 }
 
 /** The AI's view of the world: fleets it can't see are removed (unless cheatVision). */

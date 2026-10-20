@@ -44,12 +44,12 @@ export class LocalSource implements GameSource {
   /** Hotseat: called when control should pass to another human (show a curtain). */
   onHandoff: (seat: number) => void = () => {};
 
-  constructor(public save: LocalSave) { this.refresh(); }
+  constructor(public save: LocalSave, public storageKey = 'tc.local.autosave') { this.refresh(); }
 
-  static create(name: string, seats: LocalSave['seats'], names: (string | undefined)[], seed: number | undefined, rules: unknown): LocalSource {
+  static create(name: string, seats: LocalSave['seats'], names: (string | undefined)[], seed: number | undefined, rules: unknown, storageKey = 'tc.local.autosave'): LocalSource {
     const state = createGame({ seed, rules, players: seats.map((s, i) => ({ kind: s.kind, aiLevel: s.aiLevel, name: names[i] })) });
     const first = Math.max(0, seats.findIndex(s => s.kind === 'human'));
-    return new LocalSource({ v: 1, name, state, seats, pending: {}, current: first, history: [], reveal: seats.every(s => s.kind === 'ai') });
+    return new LocalSource({ v: 1, name, state, seats, pending: {}, current: first, history: [], reveal: seats.every(s => s.kind === 'ai') }, storageKey);
   }
 
   get humans() { return this.save.seats.map((s, i) => ({ s, i })).filter(x => x.s.kind === 'human' && !this.save.state.players[x.i].eliminated).map(x => x.i); }
@@ -66,7 +66,7 @@ export class LocalSource implements GameSource {
       seats: this.save.seats.map((s, i) => ({ seat: i, name: st.players[i].name, kind: s.kind, aiLevel: s.aiLevel, claimed: s.kind === 'human',
         submitted: s.kind === 'ai' || !!this.save.pending[i], online: true, missedTurns: 0 })),
     };
-    try { localStorage.setItem('tc.local.autosave', JSON.stringify(this.save)); } catch { /* quota */ }
+    try { localStorage.setItem(this.storageKey, JSON.stringify(this.save)); } catch { /* quota */ }
   }
 
   submit(sub: Submission) {
@@ -92,6 +92,17 @@ export class LocalSource implements GameSource {
     this.onChange('view');
   }
   unsubmit() { delete this.save.pending[this.save.current]; this.refresh(); this.onChange('view'); }
+  /** All-AI games (Watch AIs): resolve the next turn with AI plans for everyone. */
+  advance() {
+    if (this.humans.length || this.save.state.winner !== null) return;
+    const subs: Record<number, Submission> = {};
+    for (let i = 0; i < 3; i++) subs[i] = planTurn(this.save.state, i);
+    this.save.state = resolveTurn(this.save.state, subs);
+    if (this.save.state.last) this.save.history.push(this.save.state.last);
+    if (this.save.history.length > 60) this.save.history.shift();
+    this.refresh();
+    this.onChange('view');
+  }
   sendChat(text: string) { this.chat.push({ at: Date.now(), seat: this.save.current, to: null, text }); this.onChange('chat'); }
   async history(turn: number) {
     const r = this.save.history.find(h => h.turn === turn);

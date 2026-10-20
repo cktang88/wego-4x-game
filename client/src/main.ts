@@ -14,16 +14,17 @@ function route() {
   screen = null;
   app.innerHTML = '';
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
-  if (parts[0] === 'local') return openLocal();
+  if (parts[0] === 'local') return openLocal('tc.local.autosave');
+  if (parts[0] === 'watch') return openLocal('tc.local.watch');
   if (parts[0] === 'g' && parts[1]) return openRemote(parts[1], parts[2]);
   lobby();
 }
 window.addEventListener('hashchange', route);
 
-function openLocal() {
-  const raw = localStorage.getItem('tc.local.autosave');
+function openLocal(key: string) {
+  const raw = localStorage.getItem(key);
   if (!raw) { location.hash = '#/'; return; }
-  const src = new LocalSource(JSON.parse(raw) as LocalSave);
+  const src = new LocalSource(JSON.parse(raw) as LocalSave, key);
   screen = new GameScreen(app, src, () => (location.hash = '#/'));
   expose();
 }
@@ -128,6 +129,13 @@ function lobby() {
     </div></div></div>`;
   const q = (s: string) => app.querySelector<HTMLInputElement>(s)!;
   q('[data-l="start"]').addEventListener('click', () => {
+    const prev = localStorage.getItem('tc.local.autosave');
+    if (prev) {
+      try {
+        const sv = JSON.parse(prev) as LocalSave;
+        if (sv.state.winner === null && sv.state.turn > 1 && !confirm(`Start a new game? Your saved game (turn ${sv.state.turn}) will be replaced. Download it first from the in-game menu if you want to keep it.`)) return;
+      } catch { /* ignore */ }
+    }
     const nm = q('[data-l="name"]').value.trim();
     if (nm) localStorage.setItem('tc.name', nm);
     const lv = (k: string) => q(`[data-l="${k}"]`).value;
@@ -138,9 +146,9 @@ function lobby() {
     location.hash = '#/local';
   });
   q('[data-l="watch"]').addEventListener('click', () => {
-    const src = LocalSource.create('AI exhibition', [{ kind: 'ai', aiLevel: 'expert' }, { kind: 'ai', aiLevel: 'standard' }, { kind: 'ai', aiLevel: 'novice' }], [], undefined, loadOverrides());
+    const src = LocalSource.create('AI exhibition', [{ kind: 'ai', aiLevel: 'expert' }, { kind: 'ai', aiLevel: 'standard' }, { kind: 'ai', aiLevel: 'novice' }], ['Expert AI', 'Standard AI', 'Novice AI'], undefined, loadOverrides(), 'tc.local.watch');
     src.refresh();
-    location.hash = '#/local';
+    location.hash = '#/watch';
   });
   app.querySelector('[data-l="continue"]')?.addEventListener('click', () => (location.hash = '#/local'));
   q('[data-l="load"]').addEventListener('click', () => {

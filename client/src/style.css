@@ -195,3 +195,17 @@ h3 { font-size: 12px; text-transform: uppercase; color: var(--dim); margin-top: 
   .banner { font-size: 22px; }
   .modehint { bottom: auto; top: 8px; font-size: 12px; max-width: 92%; white-space: normal; text-align: center; }
 }
+.dialog { position: relative; }
+.closex { position: absolute; top: 10px; right: 10px; z-index: 2; }
+.modehint { pointer-events: auto; display: flex; gap: 8px; align-items: center; }
+.modehint button { font-size: 12px; padding: 1px 8px; }
+.odds { font-weight: 700; }
+.odds.hi { color: var(--good); } .odds.mid { color: var(--gold); } .odds.lo { color: var(--bad); }
+@media (max-width: 1280px) and (min-width: 701px) {
+  .left { width: 290px; }
+  .right { width: 300px; }
+}
+@media (max-width: 700px) {
+  .targeting .left { display: none; }
+  .targeting .right { display: none; }
+}

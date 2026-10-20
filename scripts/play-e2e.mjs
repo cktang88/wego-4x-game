@@ -48,6 +48,7 @@ for (let turn = 0; turn < Number(process.argv[4] ?? 3); turn++) {
   const dlg = await page.$('[data-y]'); if (dlg) await dlg.click();
   await page.waitForTimeout(2500);
   await page.screenshot({ path: `${out}/e2e-replay-${turn}.png` });
+  console.log('after seal', turn, await page.evaluate(() => [window.tc.state.turn, !!window.tc.screen.src.mySubmission, window.tc.screen.canPlan, document.querySelector('.overlay')?.textContent?.slice(0,80)]));
   await page.evaluate(() => window.tc.screen.endReplay());
   await page.waitForTimeout(300);
 }

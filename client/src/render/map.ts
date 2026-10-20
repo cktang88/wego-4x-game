@@ -438,7 +438,14 @@ export function regionLayout(st: GameState, fleets: { id: number; region: number
       const m = Math.min(n - row * 6, 6);
       const dx = (col - (m - 1) / 2) * 26 * scale;
       const dy = (34 + row * 24) * scale;
-      out.set(id, { x: r.site.x + dx, y: r.site.y + dy + Math.abs(dx) * 0.15 });
+      let p = { x: r.site.x + dx, y: r.site.y + dy + Math.abs(dx) * 0.15 };
+      // keep the stack inside its own region: pull toward the centroid until it is
+      for (let k = 1; k <= 6 && !pointInPoly(p, r.poly); k++) {
+        const t = k / 6;
+        const ax = r.site.x + (r.centroid.x - r.site.x) * t, ay = r.site.y + (r.centroid.y - r.site.y) * t;
+        p = { x: ax + dx, y: ay + dy * (1 - t * 0.5) };
+      }
+      out.set(id, p);
     });
   }
   return out;

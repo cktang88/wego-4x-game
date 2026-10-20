@@ -73,7 +73,7 @@ const server = createServer(async (req, res) => {
         const b = await body(req);
         try {
           const token = store.join(g, Number(b.seat), b.name);
-          pushMeta(g);
+          pushView(g);
           return json(res, 200, { token, seat: Number(b.seat) });
         } catch (e: any) { return json(res, 409, { error: e.message }); }
       }

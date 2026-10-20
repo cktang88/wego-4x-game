@@ -20,7 +20,14 @@ export function toast(msg: string) {
 /** Modal overlay. Click on the backdrop closes it unless `closable` is false. */
 export function overlay(html: string, closable = true): HTMLElement {
   const o = h('div', { class: 'overlay' }, html);
-  if (closable) o.addEventListener('click', e => { if (e.target === o) o.remove(); });
+  if (closable) {
+    o.addEventListener('click', e => { if (e.target === o) o.remove(); });
+    const x = h('button', { class: 'small closex', title: 'Close (Esc)' }, '✕');
+    x.addEventListener('click', () => o.remove());
+    o.querySelector('.dialog')?.prepend(x);
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape' && o.isConnected) { e.stopPropagation(); o.remove(); } if (!o.isConnected) window.removeEventListener('keydown', esc, true); };
+    window.addEventListener('keydown', esc, true);
+  }
   document.body.appendChild(o);
   return o;
 }
