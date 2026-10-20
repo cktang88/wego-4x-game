@@ -251,7 +251,7 @@ export const EXTRA_DEFAULTS = {
   },
   warden: {
     wakeAtLore: 6,             // the Warden wakes in the Throne when this many relics are excavated
-    ships: ['dread', 'cruiser', 'cruiser', 'frigate', 'frigate', 'frigate'],
+    ships: ['cruiser', 'cruiser', 'frigate', 'frigate'],  // it hunts the leader now: strong, but garrisons + a fleet can kill it
     defeatVp: 5,
   },
   overdrive: {

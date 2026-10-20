@@ -108,6 +108,11 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
 
   // ====================================================================== helpers
   function me0() { return s.players[pid]; }
+  /** Is region rid within the hunting Warden's next step (and are we its likely prey)? */
+  function wardenNear(rid: number): boolean {
+    const w = warden();
+    return !!w && !!R.wardenHunt?.enabled && topVp() && (w.region === rid || s.regions[rid].neighbors.includes(w.region));
+  }
   /** Am I (or would I soon be) the one the Warden hunts? */
   function topVp() { return s.players.every(p => p.id === pid || p.eliminated || p.vp < me0().vp + 3); }
 
@@ -259,6 +264,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       const units = unitsOf(s, f);
       const ukey = unitsKey(f);
       // leaving a threatened key world costs (expert only)
+      // the hunting Warden is about to land on us: get weak fleets out of its way
+      const flee = expert && wardenNear(f.region) && !isScout ? 3 : 0;
       const leaveCost = expert && threatened.has(here.id) && !isScout ? regionValue(here) * Math.max(0, threatWithout(f) - (threatened.get(here.id) ?? 0)) * 1.2 : 0;
 
       // excavate
@@ -336,6 +343,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
           }
         }
         if (isScout) v = (dr.relic === 'unclaimed' ? 3 : 1.2) + (coverage(s, pid).has(dest) ? 0 : 1.5) - (rivalHeld ? 1 : 0);
+        if (flee && !wardenNear(dest)) v += flee;
         v -= fatiguePenalty + (od ? (expert ? 2.5 : 1.5) : 0);
         out.push({ o: { type: 'move', fleet: f.id, path, overdrive: od || undefined }, v, tag: `move:${f.id}` });
       }
@@ -364,8 +372,9 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         } else {
           for (const [cls, d] of Object.entries(R.ships)) {
             if (d.needsShipyard > yard || cls === 'scout') continue;
-            const eff = (d.hp * 0.5 + d.attack * d.shots * 2 + d.shields * 2) / Math.max(10, (d.cost.industry ?? 0) + (d.cost.credits ?? 0));
-            const v = (3 + need * 3.5 * aggr) * eff * 2.2 + (novice ? rng.next() * 2 : 0);
+            // bang per buck, with a nod to the fact that Orders (not money) are the real limit
+            const eff = (d.hp * 0.5 + d.attack * d.shots * 2 + d.shields * 3) / Math.pow(Math.max(10, (d.cost.industry ?? 0) + (d.cost.credits ?? 0)), 0.85);
+            const v = (3 + need * 3.5 * aggr) * eff * 1.4 + (novice ? rng.next() * 2 : 0);
             out.push({ o: { type: 'build', region: r.id, cls, fleet: joinable ? joinable.id : null }, v, tag: `build:${r.id}:${cls}` });
           }
         }
@@ -421,7 +430,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       }
       for (const p of s.players) {
         if (p.id === pid || p.eliminated || inPact(p.id) || !p.pactOffers?.includes(pid)) continue;
-        if (p.vp > me0().vp + 6) continue; // never prop up the leader
+        if (p.id === leader || p.vp > me0().vp + 6) continue; // never prop up the leader
         out.push({ o: { type: 'pact', with: p.id }, v: 3, tag: 'pact' });
       }
       // scan a nebula next to the capital when anything is lurking around
@@ -545,7 +554,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       (!mainArmy || within(s, mainArmy.region, 3).has(t.id)));
     let cls: string | null = null;
     if (hardTarget && bombards < 1 + Math.floor(army.length / 4) && ok('bombard')) cls = 'bombard';
-    else if (ok('dread') && res.industry > 130) cls = 'dread';
+    else if (ok('dread') && res.industry > 100) cls = 'dread';
     else if (ok('cruiser')) cls = 'cruiser';
     else if (ok('frigate')) cls = 'frigate';
     else if (ok('corvette') && (s.turn <= 3 || (threatened.get(r.id) ?? 0) > 0.3)) cls = 'corvette';
