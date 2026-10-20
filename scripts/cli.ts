@@ -30,10 +30,24 @@ if (cmd === 'new') {
 } else if (cmd === 'orders') {
   const s = load();
   if (s.winner !== null) { console.log('Game over.'); process.exit(0); }
-  const json = args.find((a, i) => i > 0 && a.trim().startsWith('{'));
-  const sub: Submission = json ? JSON.parse(json) : { orders: [null, null, null, null, null], free: [] };
+  const raw = args.slice(1).filter((a, i) => !(a.startsWith('--') || args.slice(1)[i - 1]?.startsWith('--'))).join(' ').trim();
+  let sub: Submission;
+  try { sub = raw ? JSON.parse(raw) : { orders: [], free: [] }; } catch (e) { console.error(`Orders are not valid JSON: ${e}\nNothing was submitted.`); process.exit(1); }
+  sub.orders ??= [];
   while (sub.orders.length < s.rules.orders.perTurn) sub.orders.push(null);
   sub.free ??= [];
+  // pre-validate against a projection of your own earlier orders (like the browser UI does)
+  const proj: GameState = structuredClone(s);
+  const problems: string[] = [];
+  sub.orders.forEach((o, i) => {
+    if (!o) return;
+    if ('fleet' in o && o.type !== 'build') { const f = proj.fleets.find(x => x.id === o.fleet); if (f) f.ordersThisTurn++; }
+    const err = validateOrder(proj, ME, o);
+    if (err) problems.push(`slot ${i + 1} (${o.type}): ${err}`);
+    if (o.type === 'move') { const f = proj.fleets.find(x => x.id === o.fleet); if (f) f.region = o.path[o.path.length - 1]; }
+    if (o.type === 'seize') { const f = proj.fleets.find(x => x.id === o.fleet); if (f) f.region = o.target; }
+  });
+  if (problems.length && !args.includes('--force')) { console.error('Orders rejected (add --force to submit anyway):\n  ' + problems.join('\n  ')); process.exit(1); }
   const subs: Record<number, Submission> = { 0: sub, 1: planTurn(s, 1), 2: planTurn(s, 2) };
   const n = resolveTurn(s, subs);
   save(n);

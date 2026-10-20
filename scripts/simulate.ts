@@ -19,7 +19,8 @@ function vpBucket(why: string): string {
   if (why.startsWith('Holding the Throne')) return 'throne';
   if (why.startsWith('Excavated')) return 'relics';
   if (why.startsWith('Edict')) return 'edicts';
-  if (why.startsWith('Battle honors') || why.startsWith('Destroyed the Warden')) return 'battles';
+  if (why.startsWith('Battle honors')) return 'battles';
+  if (why.startsWith('Destroyed the Warden')) return 'warden';
   if (why.startsWith('Captured')) return 'capitals';
   if (why.startsWith('Bounty')) return 'bounty';
   if (why.startsWith('Broke')) return 'pacts';
@@ -36,6 +37,7 @@ for (const lvStr of suite) {
   let turns = 0, battles = 0, captures = 0, shipsLost = 0, warden = 0, wardenKilled = 0, pacts = 0, betrayals = 0, influenceCaps = 0, earlyDecided = 0;
   const reasons: Record<string, number> = {};
   const vpSrc: Record<string, number> = {};
+  const vpSrcLvl: Record<string, Record<string, number>> = {};
   let relics = 0;
   const vpSpread: number[] = [];
   const t0 = Date.now();
@@ -70,7 +72,10 @@ for (const lvStr of suite) {
     if (s.wardenAwake) warden++;
     if (s.wardenDefeated) wardenKilled++;
     for (const p of s.players) {
-      for (const v of p.vpLog) { const k = vpBucket(v.why); vpSrc[k] = (vpSrc[k] ?? 0) + v.amount; }
+      for (const v of p.vpLog) {
+        const k = vpBucket(v.why); vpSrc[k] = (vpSrc[k] ?? 0) + v.amount;
+        const L = (vpSrcLvl[p.aiLevel] ??= {}); L[k] = (L[k] ?? 0) + v.amount;
+      }
       (vpByLevel[p.aiLevel] ??= []).push(p.vp);
     }
     relics += s.loreFound;
@@ -90,6 +95,8 @@ for (const lvStr of suite) {
   console.log('wins by seat :', seatWins, ' reasons:', reasons);
   console.log(`avg turns ${(turns / games).toFixed(1)} | battles/turn ${(battles / turns).toFixed(2)} | ships lost/game ${(shipsLost / games).toFixed(1)} | captures/game ${(captures / games).toFixed(1)} (influence ${(influenceCaps / games).toFixed(1)})`);
   console.log('VP sources/game:', Object.fromEntries(Object.entries(vpSrc).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, +(v / games).toFixed(1)])));
+  const seats = (l: string) => levels.filter(x => x === l).length * games;
+  console.log('VP src/player:', Object.fromEntries(Object.entries(vpSrcLvl).map(([l, m]) => [l, Object.entries(m).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}:${(n / seats(l)).toFixed(1)}`).join(' ')])));
   console.log('builds/game  :', Object.fromEntries(Object.entries(builds).map(([l, b]) => [l, Object.fromEntries(Object.entries(b).map(([c, n]) => [c, +(n / games).toFixed(1)]))])));
   console.log('orders (% by level):', Object.fromEntries(Object.entries(orderMix).map(([l, m]) => { const t = Object.values(m).reduce((a, b) => a + b, 0); return [l, Object.entries(m).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}:${Math.round(100 * n / t)}`).join(' ')]; })));
   console.log(`relics/game ${(relics / games).toFixed(1)} | warden woke ${warden}/${games} (killed ${wardenKilled}) | pacts ${pacts} | betrayals ${betrayals} | margin ${avg(vpSpread)} VP | decided-by-T6 ${earlyDecided}/${games}`);

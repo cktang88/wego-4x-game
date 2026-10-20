@@ -19,6 +19,7 @@ export function createGame(setup: GameSetup): GameState {
     players: [], loreFound: 0, battleCount: 0, winner: null, winReason: '', chronicle: [], scans: [],
     last: null, log: [],
     throne: { owner: null, streak: 0 },
+    crownHold: { owner: null, turns: 0 },
     edicts: [], edictDeck: [], wardenAwake: false, wardenDefeated: false,
     turnStats: { kills: [0, 0, 0], battlesWon: [0, 0, 0], crownBattlesWon: [0, 0, 0], captures: [0, 0, 0] },
   };
@@ -77,7 +78,7 @@ export function newShip(s: GameState, rng: Rng, cls: string): Ship {
   const d = s.rules.ships[cls];
   const used = new Set(s.fleets.flatMap(f => f.ships.map(x => x.name)));
   let name = rng.pick(SHIP_NAMES);
-  for (let i = 0; i < 8 && used.has(name); i++) name = rng.pick(SHIP_NAMES);
+  for (let i = 0; i < 40 && used.has(name); i++) name = rng.pick(SHIP_NAMES);
   if (used.has(name)) name = `${name} ${roman(2 + Math.floor(rng.next() * 4))}`;
   return {
     id: s.nextId++, name, cls, hp: d.hp, maxHp: d.hp,

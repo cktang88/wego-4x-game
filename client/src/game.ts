@@ -2,7 +2,7 @@
 // chronicle, scoreboard, chat. Works with either a local or remote GameSource.
 import { describeOrder, orderCost, validateOrder, costText, canAfford, ORDER_INFO } from '../../shared/sim/orders.ts';
 import { findPath, fleetSpeed, fleetPower } from '../../shared/sim/graph.ts';
-import { income, currentLeader, resolveTurn, emptySubmission } from '../../shared/sim/resolve.ts';
+import { income, currentLeader, resolveTurn, emptySubmission, flipThreshold } from '../../shared/sim/resolve.ts';
 import { TRAITS, RELICS, NEUTRAL_COLOR } from '../../shared/config/content.ts';
 import { EDICTS } from '../../shared/sim/edicts.ts';
 import type { Doctrine, Fleet, GameEvent, GameState, Order, Pt, Region, Submission, TurnResult } from '../../shared/sim/types.ts';
@@ -320,7 +320,7 @@ export class GameScreen {
       const c = o ? orderCost(st, o, this.you!) : {};
       return `<div class="slot ${o ? 'filled' : ''} ${this.nextSlot() === i && this.canPlan ? 'target' : ''} ${err ? 'invalid' : ''}" data-slot="${i}">
         <div class="num">${roman(i + 1)}</div>
-        <div class="desc">${o ? `${ORDER_INFO[o.type].icon} ${esc(describeOrder(st, o))}<small>${costText(c) || 'free'}${err ? ` · <span class="bad">${esc(err)}</span>` : ''}</small>` : `<span class="faint">— pulse ${roman(i + 1)}: empty —</span>`}</div>
+        <div class="desc">${o ? `${ORDER_INFO[o.type].icon} ${esc(describeOrder(st, o))}<small>${costText(c) || 'free'}${err ? ` · <span class="bad">${esc(err)}</span>` : ''}</small>${o.type === 'seize' && this.canPlan ? this.joinChips(o, i) : ''}` : `<span class="faint">— pulse ${roman(i + 1)}: empty —</span>`}</div>
         <div class="acts">${o && this.canPlan ? `<button data-up="${i}" title="earlier">▲</button><button data-down="${i}" title="later">▼</button><button data-del="${i}" title="remove">✕</button>` : ''}</div>
       </div>`;
     }).join('');
@@ -341,8 +341,29 @@ export class GameScreen {
       <div class="orderhelp">Click one of <b>your fleets</b> (chevrons) for Move / Seize / Fortify / Excavate and its doctrine. Click a <b>region</b> for Build / Develop, or Influence / Scan / Feint. Click a slot to place the next order into that pulse. <span class="kbd">Esc</span> cancels.</div>`;
   }
 
+  /** Toggle chips for fleets that can join a seize (combined assault). */
+  joinChips(o: Extract<Order, { type: 'seize' }>, slot: number): string {
+    const pos = this.projected(slot);
+    const t = this.st.regions[o.target];
+    const ok = this.st.fleets.filter(f => f.owner === this.you && f.id !== o.fleet && f.ships.length &&
+      (pos.get(f.id) === o.target || t.neighbors.includes(pos.get(f.id) ?? -1)));
+    if (!ok.length) return '';
+    return `<small>Join assault: ${ok.map(f => `<button class="small ${o.also?.includes(f.id) ? 'active' : ''}" data-join="${slot}:${f.id}" title="${f.ships.length} ships, power ${fleetPower(this.st, f)}. Uses one of this fleet's ${this.st.rules.orders.maxPerFleet} actions">${(o.also?.includes(f.id) ? '✓ ' : '+ ') + esc(f.name)}</button>`).join(' ')}</small>`;
+  }
+
   bindOrders() {
     const b = this.el.tabbody;
+    b.querySelectorAll<HTMLElement>('[data-join]').forEach(e => e.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const [slot, fid] = e.dataset.join!.split(':').map(Number);
+      const o = this.plan.orders[slot];
+      if (!o || o.type !== 'seize') return;
+      const set = new Set(o.also ?? []);
+      if (set.has(fid)) set.delete(fid); else set.add(fid);
+      o.also = [...set];
+      if (!o.also.length) delete o.also;
+      this.savePlan(); this.renderAll();
+    }));
     b.querySelectorAll<HTMLElement>('[data-slot]').forEach(e => e.addEventListener('click', ev => {
       if ((ev.target as HTMLElement).closest('button')) return;
       const i = Number(e.dataset.slot);
@@ -434,8 +455,9 @@ export class GameScreen {
     }).join('');
     const pacts = st.pacts.map(p => `<div class="entry">${esc(this.pname(p.a))} ⚭ ${esc(this.pname(p.b))} until turn ${p.until}</div>`).join('');
     return `<h2>Victory</h2>
-      <div class="orderhelp">First to <b>${V.vpTarget} VP</b> wins, or most VP after turn ${V.turnLimit}${V.holdAllCrownsWins ? ', or hold <b>all three Crowns</b> at the end of a turn' : ''}. VP comes from Crowns (${V.vpPerCrownPerTurn}/turn each, +${V.crownMajorityVp} for holding 2+), the Throne (1, 2, 3… VP for each consecutive turn held, max ${st.rules.throne.streakMaxVp}), relics (${V.vpPerRelic}), capturing capitals (${V.vpCapitalCapture}), battle honors, bounties for hitting the leader (+${st.rules.bounty.vpTakeFromLeader}), and Edicts.</div>
+      <div class="orderhelp">First to <b>${V.vpTarget} VP</b> wins, or most VP after turn ${V.turnLimit}${V.holdAllCrownsWins ? `, or hold <b>all three Crowns</b> at the end of ${st.rules.crowns.holdTurnsToWin} consecutive turns` : ''}. Crowns and the Throne only pay if you held them when the turn began. VP comes from Crowns (${V.vpPerCrownPerTurn}/turn each, +${V.crownMajorityVp} for holding 2+), the Throne (1, 2, 3… VP for each consecutive turn held, max ${st.rules.throne.streakMaxVp}), relics (${V.vpPerRelic}), capturing capitals (${V.vpCapitalCapture}), battle honors, bounties for hitting the leader (+${st.rules.bounty.vpTakeFromLeader}), and Edicts.</div>
       ${rows}
+      ${st.crownHold?.owner != null ? `<div class="edict"><b>${esc(this.pname(st.crownHold.owner))} holds all three Crowns</b> (${st.crownHold.turns}/${st.rules.crowns.holdTurnsToWin} turns). Break the hold or lose!</div>` : ''}
       <h3>The Hollow Throne</h3><div class="dim" style="font-size:13px">${st.throne.owner !== null ? `Held by <b style="color:${this.color(st.throne.owner)}">${esc(this.pname(st.throne.owner))}</b>, streak ${st.throne.streak}` : 'Unclaimed'}${st.wardenAwake ? (st.wardenDefeated ? ' · the Warden is destroyed' : ' · <b class="bad">THE WARDEN IS AWAKE</b>') : ` · Warden sleeps (${st.loreFound}/${st.rules.warden.wakeAtLore} fragments found)`}</div>
       <h3>Edicts</h3>${st.edicts.length ? st.edicts.map(e => `<div class="edict"><b>${esc(e.name)}</b> · ${e.vp} VP<br>${esc(e.desc)}<br><span class="faint">Judged at the end of turn ${e.scoresTurn}</span></div>`).join('') : `<div class="faint" style="font-size:13px">No edict active. The first is proclaimed after turn ${st.rules.edicts.firstReveal}.</div>`}
       ${pacts ? `<h3>Pacts</h3><div class="feed">${pacts}</div>` : ''}`;
@@ -504,7 +526,10 @@ export class GameScreen {
           return `<span title="${esc(p.desc)}">${esc(p.name)} ${lvl ? `<span class="faint">(lvl ${lvl})</span>` : ''} <span class="faint">${costText(p.cost)} · ${p.turns}t</span></span>
             <button data-a="develop" data-proj="${k}" ${err ? `disabled title="${esc(err)}"` : ''}>Start</button>`;
         }).join('');
-        actions = `<h3>Build ship ${yard ? '' : '(needs a shipyard)'}</h3><div class="buildlist">${builds}</div><h3>Develop</h3><div class="buildlist">${projects}</div>`;
+        const agents = st.players.filter(p => p.id !== you && (r.loyalty[p.id] ?? 0) > 0);
+        const purge = agents.length ? `<h3 class="bad">Rival agents</h3><div style="font-size:13px">${agents.map(p => `<span style="color:${p.color}">${esc(p.name)} ${r.loyalty[p.id]}/${flipThreshold(st, r.id)}</span>`).join(' · ')}</div>
+          <div class="actions"><button data-a="influence" title="Purge rival agents (−${st.rules.influenceLimits.purgeAmount} loyalty each)">✦ Purge agents (${costText(orderCost(st, { type: 'influence', target: r.id }, you!))})</button></div>` : '';
+        actions = `${purge}<h3>Build ship ${yard ? '' : '(needs a shipyard)'}</h3><div class="buildlist">${builds}</div><h3>Develop</h3><div class="buildlist">${projects}</div>`;
       } else {
         const inf = validateOrder(st, you!, { type: 'influence', target: r.id });
         actions = `<div class="actions">
@@ -513,7 +538,7 @@ export class GameScreen {
           <button data-a="feint" title="${esc(ORDER_INFO.feint.help)}">☍ Feint</button></div>`;
       }
     }
-    const loyal = r.owner === null && you !== null ? `<span>Loyalty</span><span>${st.players.map(p => `<span style="color:${p.color}">${r.loyalty[p.id] ?? 0}</span>`).join(' / ')} <span class="faint">(defects at ${st.rules.influence.flipThreshold})</span></span>` : '';
+    const loyal = r.owner !== you && you !== null && r.kind !== 'void' ? `<span>Loyalty</span><span>${st.players.map(p => `<span style="color:${p.color}">${r.loyalty[p.id] ?? 0}</span>`).join(' / ')} <span class="faint">(defects at ${flipThreshold(st, r.id)})</span></span>` : '';
     return `<div class="sel"><div class="row"><h2 class="grow" style="color:${this.color(r.owner)}">${esc(r.name)}</h2><button class="small" data-close>✕</button></div>
       <div class="dim" style="font-size:13px">${kindName}${r.feature !== 'none' ? ` · ${r.feature === 'nebula' ? 'Nebula (hides fleets, −hit)' : 'Asteroids (defender evasion)'}` : ''}</div>
       <div class="kv">

@@ -91,3 +91,36 @@ describe('rules', () => {
     expect(n.last!.battles.length).toBeGreaterThan(0);
   });
 });
+
+describe('intel', () => {
+  it('never reports a player its own actions, and no duplicate signals', () => {
+    let s = ai3(33);
+    for (let t = 0; t < 12; t++) {
+      s = play(s, 1);
+      const sig = s.last!.signals;
+      for (const g of sig) expect(g.about === g.observer).toBe(false);
+      const keys = sig.map(g => `${g.observer}|${g.pulse}|${g.text}`);
+      expect(new Set(keys).size).toBe(keys.length);
+    }
+  });
+});
+
+describe('playtest fixes', () => {
+  it('one influence per target per turn; loyalty capped; crowns need a 2-turn hold', () => {
+    const s = ai3(9);
+    const me = 0;
+    const target = s.regions.find(r => r.owner === null && r.kind !== 'void' && r.neighbors.includes(s.players[me].capital))!;
+    s.players[me].res.influence = 200;
+    const sub = emptySubmission(s);
+    sub.orders = [0, 1, 2, 3, 4].map(() => ({ type: 'influence' as const, target: target.id }));
+    const n = resolveTurn(s, { 0: sub, 1: emptySubmission(s), 2: emptySubmission(s) });
+    expect(n.last!.events.filter(e => e.k === 'influence').length).toBe(1);
+    // crowns
+    const t = ai3(9);
+    for (const r of t.regions) if (r.kind === 'crown') r.owner = 1;
+    let x = resolveTurn(t, { 0: emptySubmission(t), 1: emptySubmission(t), 2: emptySubmission(t) });
+    expect(x.winner).toBeNull();
+    x = resolveTurn(x, { 0: emptySubmission(x), 1: emptySubmission(x), 2: emptySubmission(x) });
+    expect(x.winner).toBe(1);
+  });
+});

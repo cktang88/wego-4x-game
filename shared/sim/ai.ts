@@ -14,7 +14,7 @@ import { EDICTS } from './edicts.ts';
 import { findPath, fleetPower, fleetSpeed, within } from './graph.ts';
 import { canAfford, orderCost, pay, validateOrder } from './orders.ts';
 import { Rng } from './rng.ts';
-import { emptySubmission, currentLeader } from './resolve.ts';
+import { emptySubmission, currentLeader, flipThreshold } from './resolve.ts';
 import type { Fleet, FreeAction, GameState, Order, PlayerId, Region, Submission } from './types.ts';
 import { coverage, seesFleetsIn } from './visibility.ts';
 
@@ -76,8 +76,9 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         // expert: hold the line at threatened key worlds, otherwise cut losses early
         retreatAt: expert ? (holding ? 0 : atHome ? 0.25 : 0.4) : 0.35,
         target: 'weakest',
-        // (guards auto-charge into invaded neighbours: experts keep the capital's defenders home and only let real fleets guard)
-        guard: expert ? atHome && here.id !== me.capital && f.ships.length >= 3 : atHome && enemyPowerNear(s, pid, f.region, 1) > fleetPower(s, f) * 0.6,
+        // guards auto-charge into invaded neighbours: experts keep the capital's defenders home and
+        // only guard when they would beat everything visible that could invade next door
+        guard: expert ? atHome && here.id !== me.capital && f.ships.length >= 2 && guardSafe(f) : atHome && enemyPowerNear(s, pid, f.region, 1) > fleetPower(s, f) * 0.6,
       };
       if (isScoutFleet(f) || (f.ships.length === 1 && (R.ships[f.ships[0].cls]?.hp ?? 9) <= 6)) { d.stance = 'evasive'; d.guard = false; }
       sub.free.push({ type: 'doctrine', fleet: f.id, doctrine: d });
@@ -107,6 +108,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
 
   // ====================================================================== helpers
   function me0() { return s.players[pid]; }
+  /** Am I (or would I soon be) the one the Warden hunts? */
+  function topVp() { return s.players.every(p => p.id === pid || p.eliminated || p.vp < me0().vp + 3); }
 
   function project(o: Order) {
     pay(me0().res, orderCost(s, o, pid));
@@ -116,6 +119,10 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       const f = s.fleets.find(x => x.id === o.fleet)!;
       f.region = o.target; f.fortified = false;
       usedTargets.add(`seize:${o.target}`); // optimistic: assume it falls (so we don't seize it twice)
+      for (const id of o.also ?? []) {
+        const g = s.fleets.find(x => x.id === id);
+        if (g) { g.region = o.target; g.fortified = false; fleetUses.set(id, (fleetUses.get(id) ?? 0) + 1); }
+      }
     }
     if (o.type === 'fortify') { const f = s.fleets.find(x => x.id === o.fleet)!; f.fortified = true; }
     if (o.type === 'develop') s.regions[o.region].project = { key: o.project, progress: 0, owner: pid };
@@ -144,7 +151,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     if (expert) {
       if (r.owner !== null && r.owner === leader && leader !== pid) v += 4;                 // bounty + slows the leader
       if (r.kind === 'crown') {
-        if (r.owner !== pid && myCrowns === 2) v += 40;                                       // the third crown wins outright
+        if (r.owner !== pid && myCrowns === 2) v += 25;                                       // the third crown starts the win countdown
+        if (r.owner !== null && r.owner !== pid && s.crownHold?.owner === r.owner) v += 40;   // they hold all three: break it NOW
         else if (r.owner !== pid && myCrowns === 1) v += 4;                                   // majority bonus
         const holder = r.owner;
         if (holder !== null && holder !== pid && crowns.filter(c => c.owner === holder).length >= 2) v += 10; // break their pair
@@ -160,7 +168,12 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         if (w) v = w.region === r.id ? -5 : v;                                                // the Warden judges whoever sits there
         else if (s.loreFound >= R.warden.wakeAtLore - 1 && !s.wardenAwake) v -= 3;            // it may wake soon
       }
-    } else if (r.kind === 'throne' && s.fleets.some(f => f.owner === -1)) v -= 6;
+    } else {
+      if (r.kind === 'throne' && s.fleets.some(f => f.owner === -1)) v -= 6;
+      // even a standard player sees a rival about to complete the set
+      if (!novice && r.kind === 'crown' && r.owner !== null && r.owner !== pid && crowns.filter(c => c.owner === r.owner).length >= 2) v += 8;
+      if (!novice && r.kind === 'crown' && r.owner !== null && r.owner !== pid && s.crownHold?.owner === r.owner) v += 20;
+    }
     return v;
   }
 
@@ -219,6 +232,12 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       const b = simBattle(s, rid, A, D, r.garrison, r.buildings.fortress ?? 0, 0.4);
       worst = Math.max(worst, b.p);
     }
+    // the hunting Warden marches on the leader one region per turn
+    const w = warden();
+    if (w && R.wardenHunt?.enabled && topVp() && (w.region === rid || s.regions[rid].neighbors.includes(w.region))) {
+      const D = [...s.fleets.filter(f => f.owner === pid && f.region === rid && f.ships.length).flatMap(f => unitsOf(s, f, true)), ...extra];
+      worst = Math.max(worst, simBattle(s, rid, unitsOf(s, w), D, r.garrison, r.buildings.fortress ?? 0, 0.4).p * 0.8);
+    }
     return worst;
   }
 
@@ -245,8 +264,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       // excavate
       if (here.relic === 'unclaimed' && here.owner === pid) {
         let v = 14 - fatiguePenalty;
-        // the 4th relic wakes the Warden: an expert sitting on the Throne would rather not
-        if (expert && s.loreFound === R.warden.wakeAtLore - 1 && s.throne.owner === pid) v -= 6;
+        // the last relic wakes the Warden, which hunts the VP leader: wake it on a rival, never on yourself
+        if (expert && s.loreFound === R.warden.wakeAtLore - 1 && !s.wardenAwake) v += topVp() ? -12 : 4;
         out.push({ o: { type: 'excavate', fleet: f.id }, v, tag: `ex:${here.id}` });
       }
 
@@ -258,10 +277,21 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         if (pact && !(expert && leader === t.owner)) continue;
         if (isScout && t.garrison > 2) continue;
         let v: number;
+        let also: number[] = [];
         if (expert) {
-          const sim = seizeOdds(units, t, ukey);
+          // combined assault: bring every idle fleet next to the target if one fleet alone isn't enough
+          let sim = seizeOdds(units, t, ukey);
+          if (sim.p < 0.9) {
+            const helpers = fleets.filter(g => g !== f && !isScoutFleet(g) && (fleetUses.get(g.id) ?? 0) < R.orders.maxPerFleet &&
+              (g.region === tid || s.regions[g.region].neighbors.includes(tid)) && !threatened.has(g.region));
+            if (helpers.length) {
+              const all = [...units, ...helpers.flatMap(g => unitsOf(s, g))];
+              const sim2 = seizeOdds(all, t, ukey + helpers.map(g => unitsKey(g)).join('+'));
+              if (sim2.p > sim.p + 0.1) { sim = sim2; also = helpers.slice(0, 3).map(g => g.id); }
+            }
+          }
           if (sim.p < 0.3) continue; // never throw a fleet at a wall
-          v = regionValue(t) * sim.p * aggr - sim.lost * 0.12 - (1 - sim.p) * unitsCost(units) * 0.05 - fatiguePenalty - leaveCost;
+          v = regionValue(t) * sim.p * aggr - sim.lost * 0.12 - (1 - sim.p) * unitsCost(units) * 0.05 - fatiguePenalty - leaveCost - also.length * 0.5;
           if (pact) v -= R.influence.pactBreakVp * 2;
           if (edictsNow.includes('crown_battle') && t.kind === 'crown' && s.fleets.some(x => x.region === tid && x.owner !== pid && x.ships.length)) v += 3;
         } else {
@@ -271,7 +301,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
           v = regionValue(t) * p * aggr - (1 - p) * pow * 0.08 - fatiguePenalty;
         }
         if (t.owner !== null && t.owner !== pid && t.owner >= 0) v += 1.5 * aggr; // conflict is the point
-        out.push({ o: { type: 'seize', fleet: f.id, target: tid }, v, tag: `seize:${tid}` });
+        out.push({ o: also.length ? { type: 'seize', fleet: f.id, target: tid, also } : { type: 'seize', fleet: f.id, target: tid }, v, tag: `seize:${tid}` });
       }
 
       // move: toward opportunities, home to defend, or (expert) to concentrate
@@ -357,11 +387,18 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
 
     // ------------- influence regions next door
     for (const r of s.regions) {
-      if (r.owner === pid || r.kind === 'void') continue;
+      if (r.kind === 'void') continue;
+      if (r.owner === pid) {
+        // expert counter-intelligence: purge rival agents before they turn one of our worlds
+        const worst = Math.max(...r.loyalty.filter((_, i) => i !== pid));
+        if (expert && worst > 0 && worst + R.influence.pushAmount + R.influence.adjacentBonus >= flipThreshold(s, r.id))
+          out.push({ o: { type: 'influence', target: r.id }, v: regionValue(r) * 0.8, tag: `inf:${r.id}` });
+        continue;
+      }
       if (r.owner !== null && (s.players[r.owner].capital === r.id || novice)) continue;
       const near = r.neighbors.some(n => s.regions[n].owner === pid);
       if (!near) continue;
-      const thr = r.owner === null ? R.influence.flipThreshold : R.influence.rivalFlipThreshold;
+      const thr = flipThreshold(s, r.id);
       const after = r.loyalty[pid] + R.influence.pushAmount + R.influence.adjacentBonus;
       let v = regionValue(r) * (after >= thr ? 1 : after / thr * 0.45) - (r.owner !== null ? 1 : 0);
       if (expert) {
@@ -375,10 +412,17 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     }
 
     if (expert) {
-      // pact with the weaker rival if someone is running away with it
+      // pacts: ally with the weaker rival against a runaway leader, and answer offers from anyone
+      // who isn't running away with it (offers stay visible on the offering player for a turn)
+      const inPact = (q: number) => s.pacts.some(x => (x.a === pid && x.b === q) || (x.b === pid && x.a === q));
       if (leader !== null && leader !== pid) {
         const other = s.players.find(p => p.id !== pid && p.id !== leader && !p.eliminated);
-        if (other && !s.pacts.some(x => (x.a === pid && x.b === other.id) || (x.b === pid && x.a === other.id))) out.push({ o: { type: 'pact', with: other.id }, v: 2.5, tag: 'pact' });
+        if (other && !inPact(other.id)) out.push({ o: { type: 'pact', with: other.id }, v: 2.5, tag: 'pact' });
+      }
+      for (const p of s.players) {
+        if (p.id === pid || p.eliminated || inPact(p.id) || !p.pactOffers?.includes(pid)) continue;
+        if (p.vp > me0().vp + 6) continue; // never prop up the leader
+        out.push({ o: { type: 'pact', with: p.id }, v: 3, tag: 'pact' });
       }
       // scan a nebula next to the capital when anything is lurking around
       const cap = s.regions[me0().capital];
@@ -451,6 +495,18 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       if (b.p > 0.5) v -= unitsCost(units) * 0.04 * b.p;
     }
     return v;
+  }
+
+  /** Expert: would f win against every visible hostile force within two jumps (the ones that could trigger its guard)? */
+  function guardSafe(f: Fleet): boolean {
+    const near = within(s, f.region, 2);
+    const foes = s.fleets.filter(x => x.ships.length && x.owner >= 0 && hostile(s, x.owner, pid) && near.has(x.region));
+    if (!foes.length) return f.ships.length >= 3;
+    for (const p of new Set(foes.map(x => x.owner))) {
+      const b = simBattle(s, f.region, unitsOf(s, f), foes.filter(x => x.owner === p).flatMap(x => unitsOf(s, x)), 0, 0, 0.35);
+      if (b.p < 0.7) return false;
+    }
+    return true;
   }
 
   /** Expert: threat to f's current region if f leaves it. */
@@ -555,6 +611,7 @@ function simBattle(s: GameState, rid: number, A: SimUnit[], D: SimUnit[], gar: n
   const d: U[] = D.map(u => ({ ...u, cur: u.hp, pend: 0 }));
   const garU: U = { hp: gar, atk: 0, shots: 0, sh: 0, siege: 0, eva: 0, cost: 0, cur: gar, pend: 0, gar: true };
   const armor = G.armor + fort * G.armorPerFortress;
+  const shieldCap = R.shieldsCap?.maxReduction ?? 1; // shields absorb at most this share of a hit
   const hp = (xs: U[]) => xs.reduce((t, x) => t + Math.max(0, x.cur), 0);
   const a0 = hp(a) || 1, d0 = hp(d) + gar || 1;
   const fire = (shooters: { atk: number; shots: number; siege: number; bonus: number }[], targets: U[]) => {
@@ -565,7 +622,7 @@ function simBattle(s: GameState, rid: number, A: SimUnit[], D: SimUnit[], gar: n
       if (i >= live.length) return;
       const t = live[i];
       const ph = Math.max(0.1, Math.min(0.95, C.baseHit + sh.bonus - t.eva - neb));
-      const dmg = t.gar ? Math.max(1, sh.atk - armor) + sh.siege : Math.max(1, sh.atk - t.sh);
+      const dmg = t.gar ? Math.max(1, sh.atk - armor) + sh.siege : Math.max(1, Math.ceil(sh.atk * (1 - shieldCap)), sh.atk - t.sh);
       t.pend += ph * dmg;
     }
   };

@@ -138,7 +138,7 @@ function tryGenerate(rules: Rules, seed: number): GeneratedMap | null {
       id: i, name, kind: s.kind, feature: s.feature, site: s.p, poly, centroid: centroid(poly), neighbors: neighbors[i],
       owner: null, homeOf: null, dev: s.kind === 'void' ? 0 : 1, buildings: {}, project: null, garrison,
       loyalty: [0, 0, 0], relic: s.relic ? 'unclaimed' : null, wreckage: 0, battles: 0, heldSince: 0,
-      memorials: [],
+      memorials: [], baseGarrison: garrison,
     } as Region;
   });
   const homes = [0, 1, 2].map(w => sites.findIndex(s => s.kind === 'home' && s.wedge === w));

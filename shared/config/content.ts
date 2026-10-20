@@ -18,8 +18,8 @@ export const SHIP_NAMES = [
   'Brass Lantern', 'Kindly Wolf', 'Sixpence', 'Ardent', 'Old Faithful', 'Gravecutter', 'Little Sister', 'Persistence',
   'Mercy', 'Hollow Bell', 'Quarrel', 'Patience', 'Saint Elmo', 'Blackwater', 'Copperhead', 'Wren', 'Long Odds',
   'Wildfire', 'Reckoning', 'Starling', 'Thunderchild', 'Requiem', 'Ninefingers', 'Dauntless', 'Heretic', 'Sunder',
-  'Small Mercies', 'Bad Penny', 'Lodestar', 'Morrow', 'Calamity Jane', 'Coalheart', 'Tin Saint', 'Warden', 'Ember',
-  'Second Chance', 'Bellow', 'Rook', 'Kite', 'Lantern Jaw', 'Hush', 'Fortune', 'Spite', 'Cinder', 'Halberd',
+  'Small Mercies', 'Bad Penny', 'Lodestar', 'Morrow', 'Calamity Jane', 'Coalheart', 'Tin Saint', 'Ember',
+  'Second Chance', 'Bellow', 'Rook', 'Kite', 'Lantern Jaw', 'Hush', 'Fortune', 'Spite', 'Cinder', 'Halberd', 'Gallant', 'Vesper', 'Nightjar', 'Iron Maiden', 'Whisper', 'Brimstone', 'Petrel', 'Kingfisher', 'Obstinate', 'Daybreak', 'Sorrow', 'Jackdaw',
 ];
 
 export const COMMANDER_FIRST = [

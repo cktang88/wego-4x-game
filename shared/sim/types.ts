@@ -30,6 +30,7 @@ export interface Region {
   battles: number;          // how many battles were fought here
   heldSince: number;        // turn current owner took it
   memorials: string[];      // fallen commanders & famous ships, forever
+  baseGarrison: number;     // starting neutral garrison (neutral garrisons regenerate toward it)
 }
 
 export interface Subsystems { engines: boolean; weapons: boolean; shields: boolean } // true = working
@@ -114,7 +115,7 @@ export interface Edict {
 // ------------------------------------------------------------------- orders
 export type Order =
   | { type: 'move'; fleet: FleetId; path: RegionId[]; overdrive?: boolean }
-  | { type: 'seize'; fleet: FleetId; target: RegionId }
+  | { type: 'seize'; fleet: FleetId; target: RegionId; also?: FleetId[] }   // `also`: extra fleets joining the assault
   | { type: 'build'; region: RegionId; cls: string; fleet: FleetId | null }
   | { type: 'develop'; region: RegionId; project: string }
   | { type: 'fortify'; fleet: FleetId }
@@ -211,6 +212,7 @@ export interface GameState {
   chronicle: ChronicleEntry[];
   scans: { owner: PlayerId; region: RegionId; until: number }[];
   throne: { owner: PlayerId | null; streak: number };
+  crownHold: { owner: PlayerId | null; turns: number };
   edicts: Edict[];           // active/upcoming public objectives
   edictDeck: string[];
   wardenAwake: boolean;

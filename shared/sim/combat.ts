@@ -70,14 +70,14 @@ export function runBattle(
   const report: BattleReport = {
     id: s.battleCount, name, turn: s.turn, pulse, region: rid, sides, rounds: [], winner: null, losses: {}, highlights: [],
   };
-  const hl = (t: string) => { if (report.highlights.length < 12) report.highlights.push(t); };
+  const hl = (t: string) => { if (report.highlights.length < 12 && !report.highlights.includes(t)) report.highlights.push(t); };
 
   // ---- rivalry bookkeeping (nemesis / vengeance)
   for (const a of fleets) for (const b of fleets) {
     if (a === b || !hostile(s, a.owner, b.owner)) continue;
     const rec = a.commander.rivals[b.commander.name] ?? (a.commander.rivals[b.commander.name] = { met: 0, lastWinner: null });
     rec.met++;
-    if (rec.met === 3) hl(`${a.commander.name} and ${b.commander.name} meet for the third time. This is personal now.`);
+    if (rec.met === 3 && a.commander.name < b.commander.name) hl(`${a.commander.name} and ${b.commander.name} meet for the third time. This is personal now.`);
   }
   const hullCount = (o: Owner) => fleets.filter(f => f.owner === o).reduce((a, f) => a + f.ships.length, 0);
   const startHulls = new Map(owners.map(o => [o, hullCount(o)]));
@@ -182,11 +182,14 @@ export function runBattle(
         if (!rng.chance(hitChance(sh, tg))) { shots.push({ from: sh.uid, to: tg.uid, dmg: 0, miss: true }); continue; }
         let dmg: number;
         if (!tg.ship) dmg = Math.max(1, atk - (R.garrison.armor + (region.buildings.fortress ?? 0) * R.garrison.armorPerFortress)) + siege;
-        else dmg = Math.max(1, atk - (tg.ship.sys.shields ? R.ships[tg.ship.cls].shields : 0));
+        else {
+          const sh = tg.ship.sys.shields ? R.ships[tg.ship.cls].shields : 0;
+          dmg = Math.max(1, Math.ceil(atk * (1 - R.shieldsCap.maxReduction)), atk - sh);
+        }
         tg.pending += dmg;
         const rec: ShotRec = { from: sh.uid, to: tg.uid, dmg };
         if (tg.ship && tg.ship.hp - tg.pending > 0 && rng.chance(R.combat.critChance)) {
-          const working = (['engines', 'weapons', 'shields'] as (keyof Subsystems)[]).filter(k => tg.ship!.sys[k]);
+          const working = (['engines', 'weapons', 'shields'] as (keyof Subsystems)[]).filter(k => tg.ship!.sys[k] && (k !== 'shields' || R.ships[tg.ship!.cls].shields > 0));
           if (working.length) rec.crit = rng.pick(working);
         }
         if (tg.ship && tg.ship.hp - tg.pending <= 0 && !killedBy.has(tg.uid)) { rec.kill = true; killedBy.set(tg.uid, sh.fleet); }

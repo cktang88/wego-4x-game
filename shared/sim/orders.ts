@@ -6,11 +6,11 @@ import type { GameState, Order, PlayerId } from './types.ts';
 
 export const ORDER_INFO: Record<Order['type'], { name: string; icon: string; help: string }> = {
   move:      { name: 'Move',      icon: '➤', help: 'Move a fleet up to its speed in regions. Overdrive: +1 range, but the fleet is fatigued next turn (weaker attacks).' },
-  seize:     { name: 'Seize',     icon: '⚔', help: 'Move into an adjacent (or current) region and take it by force: defeat its garrison and any defenders.' },
+  seize:     { name: 'Seize',     icon: '⚔', help: 'Move into an adjacent (or current) region and take it by force: defeat its garrison and any defenders. Other fleets adjacent to the target can JOIN the assault (they each use one of their own per-fleet actions).' },
   build:     { name: 'Build',     icon: '⚙', help: 'Build a ship at a region you own that has a shipyard. It joins a fleet there or forms a new one.' },
   develop:   { name: 'Develop',   icon: '▲', help: 'Start a project at a region you own. Projects finish on their own over the next turns.' },
   fortify:   { name: 'Fortify',   icon: '⛨', help: 'Dig a fleet in: it hits harder and is harder to hit until it moves.' },
-  influence: { name: 'Influence', icon: '✦', help: 'Push a region\'s loyalty toward you. Neutral regions defect at 100. Rival regions (not capitals) at 150.' },
+  influence: { name: 'Influence', icon: '✦', help: 'Push a region\'s loyalty toward you; it defects when loyalty reaches its threshold (higher for rival regions and fortresses; capitals never). One per region per turn. On your OWN region it purges rival agents.' },
   scan:      { name: 'Scan',      icon: '◎', help: 'Reveal a region and its neighbours this turn and next, including fleets in nebulae. Exposes feints there.' },
   feint:     { name: 'Feint',     icon: '☍', help: 'Broadcast fake fleet-movement signals toward a region. Rivals who scan it see through it.' },
   conceal:   { name: 'Conceal',   icon: '☾', help: 'Hide all your signals this turn. Rivals only see a jamming signal from your capital.' },
@@ -29,7 +29,7 @@ export function orderCost(s: GameState, o: Order, p: PlayerId): Partial<Res> {
     case 'develop': return { ...s.rules.projects[o.project]?.cost };
     case 'influence': {
       const r = s.regions[o.target];
-      return { influence: r && r.owner !== null && r.owner !== p ? I.rivalSubvertCost : I.orderCost };
+      return { influence: r && r.owner !== null && r.owner !== p ? I.rivalSubvertCost : r && r.owner === p ? Math.ceil(I.orderCost / 2) : I.orderCost };
     }
     case 'scan': return { influence: I.scanCost };
     case 'feint': return { influence: I.feintCost };
@@ -59,7 +59,7 @@ export function describeOrder(s: GameState, o: Order): string {
   const fn = (id: number) => s.fleets.find(f => f.id === id)?.name ?? `fleet #${id}`;
   switch (o.type) {
     case 'move': return `${fn(o.fleet)} → ${o.path.map(rn).join(' → ')}${o.overdrive ? ' (overdrive)' : ''}`;
-    case 'seize': return `${fn(o.fleet)} seizes ${rn(o.target)}`;
+    case 'seize': return `${fn(o.fleet)}${o.also?.length ? ` + ${o.also.map(fn).join(' + ')}` : ''} seize${o.also?.length ? '' : 's'} ${rn(o.target)}`;
     case 'build': return `Build ${s.rules.ships[o.cls]?.name ?? o.cls} at ${rn(o.region)}`;
     case 'develop': return `${s.rules.projects[o.project]?.name ?? o.project} at ${rn(o.region)}`;
     case 'fortify': return `${fn(o.fleet)} fortifies`;
@@ -104,6 +104,11 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       if (!t) return 'no such region';
       if (t.owner === p) return 'already yours';
       if (fleet!.region !== o.target && !s.regions[fleet!.region].neighbors.includes(o.target)) return 'target must be adjacent';
+      for (const id of o.also ?? []) {
+        const g = s.fleets.find(x => x.id === id);
+        if (!g || g.owner !== p || !g.ships.length) return 'a joining fleet is not yours';
+        if (g.region !== o.target && !s.regions[g.region].neighbors.includes(o.target)) return `${g.name} is not adjacent to the target`;
+      }
       return null;
     }
     case 'build': {
@@ -134,7 +139,7 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
     case 'influence': {
       const r = s.regions[o.target];
       if (!r) return 'no such region';
-      if (r.owner === p) return 'already yours';
+      if (r.owner === p) return r.loyalty.some((x, i) => i !== p && x > 0) ? null : 'no rival agents to purge here';
       if (r.kind === 'void') return 'nobody lives there';
       if (r.owner !== null && s.players[r.owner].capital === r.id) return 'capitals cannot be subverted';
       const near = r.neighbors.some(n => s.regions[n].owner === p) || s.fleets.some(f => f.owner === p && f.region === r.id && f.ships.length);

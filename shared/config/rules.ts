@@ -70,11 +70,12 @@ export const DEFAULT_RULES = {
   economy: {
     // base yield per dev level, by region kind
     yields: {
-      home:     { industry: 6, credits: 5, influence: 2 },
-      colony:   { industry: 3, credits: 3, influence: 1 },
-      crown:    { industry: 3, credits: 4, influence: 3 },
-      throne:   { industry: 4, credits: 6, influence: 4 },
-      relic:    { industry: 2, credits: 2, influence: 2 },
+      // influence is flat per region (not x dev); colonies give none, so Influence is a scarce choice
+      home:     { industry: 6, credits: 4, influence: 2 },
+      colony:   { industry: 3, credits: 2, influence: 0 },
+      crown:    { industry: 3, credits: 3, influence: 2 },
+      throne:   { industry: 4, credits: 5, influence: 3 },
+      relic:    { industry: 2, credits: 2, influence: 1 },
       void:     { industry: 1, credits: 1, influence: 0 },
     } as Record<string, Res>,
     maxDev: 5,
@@ -87,9 +88,9 @@ export const DEFAULT_RULES = {
 
   // ---------------------------------------------------------------- projects
   projects: {
-    develop:  { name: 'Develop',  cost: { industry: 30, credits: 10 }, turns: 2, max: 5, desc: '+1 development: more yield of every kind.' },
-    shipyard: { name: 'Shipyard', cost: { industry: 40 },              turns: 2, max: 3, desc: 'Build bigger ships here; repairs ships faster.' },
-    fortress: { name: 'Fortress', cost: { industry: 35, credits: 5 },  turns: 2, max: 3, desc: '+garrison and garrison firepower.' },
+    develop:  { name: 'Develop',  cost: { industry: 30, credits: 20 }, turns: 2, max: 5, desc: '+1 development: more yield of every kind.' },
+    shipyard: { name: 'Shipyard', cost: { industry: 40, credits: 15 }, turns: 2, max: 3, desc: 'Build bigger ships here; repairs ships faster.' },
+    fortress: { name: 'Fortress', cost: { industry: 30, credits: 15 }, turns: 2, max: 3, desc: '+garrison and garrison firepower.' },
     mine:     { name: 'Mine',     cost: { industry: 25 },              turns: 1, max: 3, desc: '+industry per turn.' },
     tradehub: { name: 'Trade Hub',cost: { industry: 25 },              turns: 1, max: 3, desc: '+credits per turn.' },
     sensor:   { name: 'Sensor Array', cost: { industry: 20, influence: 2 }, turns: 1, max: 2, desc: '+1 sensor range from this region.' },
@@ -124,10 +125,10 @@ export const DEFAULT_RULES = {
     // are "order-efficient" while small hulls are "resource-efficient".
     scout:    { name: 'Scout',    role: 'Fast eyes. Fragile.', hp: 5,  attack: 1, shots: 1, shields: 0, speed: 3, siege: 0, sensor: 1, evasion: 0.15, cost: { industry: 10 },               needsShipyard: 1, upkeep: 1, glyph: 'dart' },
     corvette: { name: 'Corvette', role: 'Cheap, quick raider.', hp: 8,  attack: 3, shots: 1, shields: 0, speed: 3, siege: 0, sensor: 0, evasion: 0.15, cost: { industry: 12, credits: 4 },  needsShipyard: 1, upkeep: 1, glyph: 'arrow' },
-    frigate:  { name: 'Frigate',  role: 'Line workhorse.',     hp: 14, attack: 3, shots: 2, shields: 1, speed: 2, siege: 1, sensor: 0, evasion: 0.05, cost: { industry: 26, credits: 10 },  needsShipyard: 1, upkeep: 2, glyph: 'wedge' },
-    bombard:  { name: 'Bombard',  role: 'Cracks planets.',     hp: 18, attack: 1, shots: 2, shields: 2, speed: 1, siege: 6, sensor: 0, evasion: 0.00, cost: { industry: 34, credits: 16 },  needsShipyard: 2, upkeep: 2, glyph: 'block' },
-    cruiser:  { name: 'Cruiser',  role: 'Shielded brawler.',   hp: 28, attack: 4, shots: 3, shields: 2, speed: 2, siege: 2, sensor: 0, evasion: 0.00, cost: { industry: 44, credits: 24 },  needsShipyard: 2, upkeep: 3, glyph: 'long' },
-    dread:    { name: 'Dreadnought', role: 'Slow apocalypse.', hp: 56, attack: 8, shots: 3, shields: 3, speed: 1, siege: 4, sensor: 0, evasion: 0.00, cost: { industry: 80, credits: 45 }, needsShipyard: 3, upkeep: 5, glyph: 'dread' },
+    frigate:  { name: 'Frigate',  role: 'Line workhorse.',     hp: 14, attack: 3, shots: 2, shields: 1, speed: 2, siege: 1, sensor: 0, evasion: 0.05, cost: { industry: 26, credits: 12 },  needsShipyard: 1, upkeep: 2, glyph: 'wedge' },
+    bombard:  { name: 'Bombard',  role: 'Cracks planets.',     hp: 18, attack: 1, shots: 2, shields: 2, speed: 1, siege: 6, sensor: 0, evasion: 0.00, cost: { industry: 34, credits: 20 },  needsShipyard: 2, upkeep: 2, glyph: 'block' },
+    cruiser:  { name: 'Cruiser',  role: 'Shielded brawler.',   hp: 28, attack: 4, shots: 3, shields: 2, speed: 2, siege: 2, sensor: 0, evasion: 0.00, cost: { industry: 44, credits: 32 },  needsShipyard: 2, upkeep: 4, glyph: 'long' },
+    dread:    { name: 'Dreadnought', role: 'Slow apocalypse.', hp: 56, attack: 8, shots: 3, shields: 3, speed: 1, siege: 4, sensor: 0, evasion: 0.00, cost: { industry: 80, credits: 60 }, needsShipyard: 3, upkeep: 7, glyph: 'dread' },
   } as Record<string, ShipClassDef>,
   maxShipsPerFleet: 8,
   maxFleets: 6,
@@ -212,8 +213,8 @@ export const DEFAULT_RULES = {
   },
 };
 
-export type Rules = typeof DEFAULT_RULES & typeof EXTRA_DEFAULTS;
-export function defaultRules(): Rules { return structuredClone({ ...DEFAULT_RULES, ...EXTRA_DEFAULTS }); }
+export type Rules = typeof DEFAULT_RULES & typeof EXTRA_DEFAULTS & typeof PLAYTEST_DEFAULTS;
+export function defaultRules(): Rules { return structuredClone({ ...DEFAULT_RULES, ...EXTRA_DEFAULTS, ...PLAYTEST_DEFAULTS }); }
 
 export function isObj(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -237,7 +238,7 @@ export const EXTRA_DEFAULTS = {
     holderVisible: true,       // fleets in the Throne are visible to everyone
   },
   bounty: {
-    vpTakeFromLeader: 2,       // capture a region from the VP leader
+    vpTakeFromLeader: 1,       // capture a region from the VP leader
     leaderMinLead: 3,          // must lead by at least this much to count as "the leader"
     battleHonorMinKills: 2,    // win a battle destroying >= N ships: +1 VP
     battleHonorVp: 1,
@@ -249,7 +250,7 @@ export const EXTRA_DEFAULTS = {
     every: 2,                  // ...and every N turns after; it scores at the end of the following turn
   },
   warden: {
-    wakeAtLore: 5,             // the Warden wakes in the Throne when this many relics are excavated
+    wakeAtLore: 6,             // the Warden wakes in the Throne when this many relics are excavated
     ships: ['dread', 'cruiser', 'cruiser', 'frigate', 'frigate', 'frigate'],
     defeatVp: 5,
   },
@@ -268,5 +269,38 @@ export const EXTRA_DEFAULTS = {
   },
   steward: {
     mode: 'ai' as 'ai' | 'standing', // what a player who misses the deadline does
+  },
+};
+
+// Knobs added after the first playtest round (engine-level counterplay rules).
+export const PLAYTEST_DEFAULTS = {
+  crowns: {
+    holdTurnsToWin: 2,          // must hold all three Crowns at the end of this many consecutive turns
+    mustHoldAtTurnStart: true,  // Crown/Throne VP only if you held it when the turn began (no pulse-5 snipes)
+    capturedGarrisonBonus: { crown: 12, throne: 16 } as Record<string, number>, // extra garrison left after taking one
+    crownKeyFlatVp: 1,          // Crown Key relic: +this VP/turn while holding any Crown
+  },
+  neutral: {
+    garrisonRegen: 3,           // neutral garrisons slowly recover toward their starting strength
+  },
+  influenceLimits: {
+    onePerTargetPerTurn: true,
+    capAtThreshold: true,       // loyalty can't exceed the flip threshold
+    purgeAmount: 45,            // Influence on your OWN region removes this much rival loyalty
+    perFortress: 15,            // each fortress level adds this to the rival flip threshold
+  },
+  bountyCap: {
+    maxPerTurn: 3,              // total bounty + honors VP a player can earn per turn
+  },
+  shieldsCap: {
+    maxReduction: 0.5,          // shields can at most halve a hit
+  },
+  wardenHunt: {
+    enabled: true,              // once awake, the Warden marches toward the VP leader
+    stepsPerTurn: 1,
+    razes: true,                // a leader region whose garrison it destroys becomes neutral
+  },
+  intel: {
+    ghostEchoChance: 0.35,      // chance per unclaimed relic per turn of a fake "unidentified movement"
   },
 };
