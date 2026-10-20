@@ -16,7 +16,7 @@ npm run server     # game server (REST + WebSocket) on :8787
 npm run dev        # client with hot reload on :5173 (proxies /api and /ws to :8787)
 ```
 
-Open http://localhost:5173.
+Open http://localhost:5173. A short interactive tour runs the first time you play (replay it from ☰ Menu → Quick tour). Hover, or tap on phone, any dotted number or ⓘ to see how it's computed.
 
 - **Play vs AI** runs entirely in the browser; no server needed. The rival dropdowns can also be set to *Human (hotseat)*.
 - **Watch AIs** runs three AIs on a fully revealed map.
@@ -87,6 +87,8 @@ node scripts/mp-e2e.mjs                   # 3 isolated browsers create/join/seal
 node scripts/review-e2e.mjs               # long soak: Watch AIs on auto, replays, battles, listener leaks
 node scripts/mp-test.mjs                  # REST + WebSocket protocol smoke test against :8787
 node scripts/live-e2e.mjs <outdir> [base] [phone]  # LIVE blitz game: bank orders, travel, ticks
+node scripts/ux-shots.mjs <outdir> [base] [wego|live|...]  # walks the first-run tour, screenshots each step
+node scripts/fx-shots.mjs <outdir> [phone]  # animation screenshots + frame-time measurements (NOSHOT=1 to only measure)
 node scripts/phone.mjs <outdir>           # iPhone 15 Pro emulation (393x852 @3x, touch) screenshots of the phone layout
 ```
 

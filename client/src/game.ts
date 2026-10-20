@@ -523,7 +523,7 @@ export class GameScreen {
     } else if (this.replay || this.you === null || this.st.winner !== null) {
       d.innerHTML = `<button class="dockbtn grow" data-d="sheet">${this.sheetOpen ? 'Hide panel ▾' : 'Intel · Chronicle · Score ▴'}</button>`;
     } else {
-      const pills = this.plan.orders.map((o, i) => `<button class="pill ${o ? 'filled' : ''} ${this.nextSlot() === i && this.canPlan ? 'target' : ''}" data-pill="${i}" aria-label="Pulse ${roman(i + 1)}${o ? ': ' + esc(describeOrder(this.st, o)) : ' (empty): tap a fleet or region to fill it'}"><small>${roman(i + 1)}</small>${o ? ORDER_INFO[o.type].icon : ''}</button>`).join('');
+      const pills = this.plan.orders.map((o, i) => `<button class="pill ${o ? 'filled' : ''} ${this.nextSlot() === i && this.canPlan ? 'target' : ''}" data-pill="${i}"${o ? ` data-pop="dock:${i}:${o.type}:${'fleet' in o ? o.fleet : ''}"` : ''} aria-label="Pulse ${roman(i + 1)}${o ? ': ' + esc(describeOrder(this.st, o)) : ' (empty): tap a fleet or region to fill it'}"><small>${roman(i + 1)}</small>${o ? ORDER_INFO[o.type].icon : ''}</button>`).join('');
       const used = this.plan.orders.filter(Boolean).length;
       const seal = this.submitted
         ? `<button class="dockbtn" data-d="unseal" title="Your orders are sealed. Tap to change them.">✎ Sealed</button>`
@@ -561,7 +561,7 @@ export class GameScreen {
       const ms = meta.deadline - Date.now();
       phase += ms > 0 ? ` · ${Math.floor(ms / 3600000)}h${String(Math.floor(ms / 60000) % 60).padStart(2, '0')} left` : ' · deadline passed';
     }
-    if (this.live && st.winner === null) this.el.phase.innerHTML = `Next tick in <b data-countdown="${nextTickAt(st)}">${fmtDur(nextTickAt(st) - Date.now())}</b>${this.you !== null ? ` · <span class="bankmini">${this.bank} order${this.bank === 1 ? '' : 's'}</span>` : ''}`;
+    if (this.live && st.winner === null) this.el.phase.innerHTML = `Next tick in <b data-countdown="${nextTickAt(st)}">${fmtDur(nextTickAt(st) - Date.now())}</b>${this.you !== null ? ` · <span class="bankmini"><span data-num="bank">${this.bank}</span> order${this.bank === 1 ? '' : 's'}</span>` : ''}`;
     else this.el.phase.textContent = phase;
     if (this.you !== null) {
       const p = st.players[this.you];
@@ -573,8 +573,9 @@ export class GameScreen {
       const mines = owned.reduce((a, r) => a + (r.buildings.mine ?? 0) * st.rules.economy.mineBonus, 0);
       const hubs = owned.reduce((a, r) => a + (r.buildings.tradehub ?? 0) * st.rules.economy.tradeHubBonus, 0);
       const cell = (icon: string, v: number, spend: number, inc: number, why: string) => {
+        const key = icon === '⚙' ? 'industry' : icon === '¢' ? 'credits' : 'influence';
         const t = `${why}\nNow: ${v}${spend ? `, planned spend −${spend} → ${v - spend} left` : ''}${v - spend < 0 ? ' (SHORT: some orders will fail)' : ''}\nNet ${plus(inc)} per ${per}`;
-        return `<div class="r"${tip(t)}><span>${icon} <span class="${v - spend < 0 ? 'bad' : ''}">${v - spend}</span>${spend ? `<small style="display:inline"> /${v}</small>` : ''}</span><small>${plus(inc)}/${per}</small></div>`;
+        return `<div class="r"${tip(t)}><span>${icon} <span class="${v - spend < 0 ? 'bad' : ''}" data-num="res-${key}">${v - spend}</span>${spend ? `<small style="display:inline"> /${v}</small>` : ''}</span><small>${plus(inc)}/${per}</small></div>`;
       };
       this.el.res.innerHTML = cell('⚙', p.res.industry, sp.industry, inc.industry, `Industry ⚙: builds ships and projects.\nIncome: +${inc.industry - mines} from ${owned.length} region${owned.length === 1 ? '' : 's'} (more with Develop)${mines ? `, +${mines} from mines` : ''}.`) +
         cell('¢', p.res.credits, sp.credits, inc.credits - upkeep, `Credits ¢: upkeep, projects, and a fleet's 2nd order (+${st.rules.orders.repeatFleetCredits}¢). Spare credits cover an industry shortfall at ${st.rules.economy.creditsPerIndustry}¢ per ⚙.\nIncome: +${inc.credits - hubs} from regions${hubs ? `, +${hubs} from trade hubs` : ''}, −${upkeep} ship upkeep.`) +
@@ -591,7 +592,7 @@ export class GameScreen {
       return `<div class="pchip ${p.id === this.you ? 'you' : ''}" style="border-color:${esc(p.color)};color:${esc(p.color)}"${tip(t)}>
         <span class="dot ${s?.online ? 'on' : ''}"></span>
         <span style="color:var(--text)${p.eliminated ? ';text-decoration:line-through' : ''}">${esc(p.name)}</span>
-        <span class="vp">${shownVp}${leader === p.id && !this.replay ? ' ♛' : ''}</span>
+        <span class="vp" data-num="vp-${p.id}">${shownVp}${leader === p.id && !this.replay ? ' ♛' : ''}</span>
         ${this.live ? '' : s?.submitted ? '<span>✓</span>' : '<span class="faint">…</span>'}
       </div>`;
     }).join('');
@@ -640,7 +641,7 @@ export class GameScreen {
       if (o && o.type === 'seize') for (const id of o.also ?? []) if (this.plan.orders.slice(0, i).some(x => x && 'fleet' in x && x.type !== 'build' && x.fleet === id)) { c.credits = (c.credits ?? 0) + st.rules.orders.repeatFleetCredits; repeat = true; }
       const target = this.nextSlot() === i && this.canPlan;
       const costTip = `${ORDER_INFO[o?.type ?? 'move'].help}${repeat ? `\nIncludes +${st.rules.orders.repeatFleetCredits}¢: this fleet already has an earlier order this turn.` : ''}`;
-      return `<div class="slot ${o ? 'filled' : 'empty'} ${target ? 'target' : ''} ${err ? 'invalid' : ''}" data-slot="${i}" title="${o ? '' : target ? 'The next order goes into this pulse' : 'Click to put the next order into this pulse'}">
+      return `<div class="slot ${o ? 'filled' : 'empty'} ${target ? 'target' : ''} ${err ? 'invalid' : ''}" data-slot="${i}"${o ? ` data-pop="slots:${i}:${esc(JSON.stringify(o))}"` : ''} title="${o ? '' : target ? 'The next order goes into this pulse' : 'Click to put the next order into this pulse'}">
         <div class="num">${roman(i + 1)}</div>
         <div class="desc">${o ? `${ORDER_INFO[o.type].icon} ${esc(describeOrder(st, o))}<small><span${tip(costTip)}>${costText(c) || 'free'}</span>${err ? ` · <span class="bad">${esc(err)}</span>` : ''}</small>${o.type === 'seize' && this.canPlan ? this.oddsHtml(o, i) + this.joinChips(o, i) : ''}` : target ? `${verb} a fleet or region to give an order` : 'empty'}</div>
         <div class="acts">${o && this.canPlan ? `<button data-up="${i}" title="Move to an earlier pulse" ${i === 0 ? 'disabled' : ''}>▲</button><button data-down="${i}" title="Move to a later pulse" ${i === n - 1 ? 'disabled' : ''}>▼</button><button data-del="${i}" title="Remove this order">✕</button>` : ''}</div>
@@ -677,7 +678,7 @@ export class GameScreen {
     const verb = this.phone ? 'Tap' : 'Click';
     const pips = Array.from({ length: cap }, (_, i) => `<span class="pip ${i < this.bank ? 'on' : ''}"></span>`).join('');
     const nextOrder = L.nextOrderAt[this.you] ?? 0;
-    const queue = this.queue.map((o, i) => `<div class="slot filled live-q"><div class="num">⏳</div><div class="desc">${ORDER_INFO[o.type].icon} ${esc(describeOrder(st, o))}<small>at the next tick · ${costText(orderCost(st, o, this.you!)) || 'no resource cost'}</small></div>
+    const queue = this.queue.map((o, i) => `<div class="slot filled live-q" data-pop="liveq:${i}:${esc(JSON.stringify(o))}"><div class="num">⏳</div><div class="desc">${ORDER_INFO[o.type].icon} ${esc(describeOrder(st, o))}<small>at the next tick · ${costText(orderCost(st, o, this.you!)) || 'no resource cost'}</small></div>
       <div class="acts"><button data-cancel="${i}" title="Take it back (refunds the order)">✕</button></div></div>`).join('');
     const moving = st.fleets.filter(f => f.owner === this.you && f.route).map(f => {
       const eta = etaTicks(st, f.id);
@@ -1737,7 +1738,7 @@ export class GameScreen {
 
   select(s: { kind: 'region' | 'fleet'; id: number }) {
     if (this.phone) this.sheetOpen = false; this.sel = s; this.mode = null; this.renderLeft(); }
-  focus(p: Pt) { this.map.cam.x = p.x; this.map.cam.y = p.y; }
+  focus(p: Pt) { this.map.flyTo(p); }
 
   tooltip(e: PointerEvent) {
     const t = this.el.tooltip;
