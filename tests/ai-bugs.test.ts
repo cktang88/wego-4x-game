@@ -129,7 +129,7 @@ describe('AI: battle predictor matches combat.ts', () => {
     const base = predictAssault(s, 0, [f.id], target).p;
     const a = structuredClone(s); a.players[0].techs = ['railguns', 'cruisers', 'alpha'];
     const v = structuredClone(s); v.players[0].laws = ['vanguard'];
-    expect(predictAssault(a, 0, [f.id], target).p).toBeGreaterThan(base + 0.2);
+    expect(predictAssault(a, 0, [f.id], target).p).toBeGreaterThan(base);
     expect(predictAssault(v, 0, [f.id], target).p).toBeGreaterThan(base);
   });
 

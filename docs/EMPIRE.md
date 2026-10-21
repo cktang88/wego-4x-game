@@ -46,6 +46,8 @@ supply they don't repair, and after a turn they start to wear down.
 
 ## Balance (measured with the AI; `npm run sim`, `npx tsx scripts/research-value.ts`)
 Each AI seat plays one of four styles (warlord, turtle, trader, raider: different research
-priorities, laws and modules). In expert-vs-expert mirrors over 120 games every style wins
-27-38% of its seats (fair share 33%). An expert barred from researching wins far less often
-than its researching rivals, so investment pays, but no single path is mandatory.
+priorities, laws and modules). In expert-vs-expert mirrors (180 games, two seed sets) the styles
+win 27-37% of their seats (fair share 33%): turtle 33%, trader 37%, warlord 36%, raider 27%.
+An expert barred from researching wins far less often than its researching rivals, so
+investment pays, but no single path is mandatory. Experts still beat standard and novice AIs
+about 80% of the time.

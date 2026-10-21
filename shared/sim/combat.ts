@@ -183,6 +183,7 @@ export function fightRounds(
       if (lastStand.has(f.id)) h += R.lastStand.hitBonus;
       if (s.players[f.owner]?.relics.includes('lens')) h += 0.04;
       if (region.owner !== f.owner && hasLaw(s, f.owner, 'vanguard')) h += R.empire.vanguardHit;
+      if (hasTech(s, f.owner, 'scanners')) h += R.empire.scannersHit;
       if (sh.ship && sh.ship.battles >= R.combat.veteranBattles) h += R.combat.veteranHitBonus;
       if (tg.fleet) {
         const rec = f.commander.rivals[tg.fleet.commander.name];
@@ -248,7 +249,7 @@ export function fightRounds(
       if (sh.ship) {
         const d = shipStats(s, sh.ship, sh.owner);
         if (!sh.ship.sys.weapons) continue;
-        const alpha = volleyMult === 1 && E.rounds === 1 && hasTech(s, sh.owner, 'alpha') ? 2 : 1;
+        const alpha = volleyMult === 1 && E.rounds === 1 && hasTech(s, sh.owner, 'alpha') ? R.empire.alphaMult : 1;
         n = Math.max(1, Math.round(d.shots * volleyMult * alpha));
         atk = d.attack;
         siege = d.siege + traitVal(sh.fleet, 'garrisonDmg');

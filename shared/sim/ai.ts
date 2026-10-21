@@ -752,15 +752,15 @@ function simBattle(s: GameState, rid: number, A: SimUnit[], D: SimUnit[], gar: n
   const shieldCap = R.shieldsCap?.maxReduction ?? 1; // shields absorb at most this share of a hit
   const hp = (xs: U[]) => xs.reduce((t, x) => t + Math.max(0, x.cur), 0);
   const a0 = hp(a) || 1, d0 = hp(d) + gar || 1;
-  // combat.ts: Vanguard ships hit harder away from home; Alpha Strike doubles every ship's first-round volley.
+  // combat.ts: Vanguard ships hit harder away from home; Alpha Strike multiplies every ship's first-round volley (rules.empire.alphaMult).
   // A sim round fires every ship's every shot; a real round fires only the frontline (frontageBase +
   // frontagePerShip x armed ships) at `lethality`. So the one doubled real round is worth
   // lethality x frontline/armed extra sim volleys, not a whole doubled sim round.
-  const bonusOf = (u: SimUnit) => (u.hit ?? 0) + (u.own !== undefined && u.own >= 0 && reg.owner !== u.own && hasLaw(s, u.own, 'vanguard') ? R.empire.vanguardHit : 0);
+  const bonusOf = (u: SimUnit) => (u.hit ?? 0) + (u.own !== undefined && u.own >= 0 && reg.owner !== u.own && hasLaw(s, u.own, 'vanguard') ? R.empire.vanguardHit : 0) + (u.own !== undefined && u.own >= 0 && hasTech(s, u.own, 'scanners') ? R.empire.scannersHit : 0);
   const alphaMult = (side: SimUnit[]) => {
     const armed = side.filter(u => u.atk > 0 && u.shots > 0).length || 1;
     const width = Math.min(C.frontage ?? armed, (C.frontageBase ?? armed) + Math.floor(armed * (C.frontagePerShip ?? 0)));
-    return 1 + Math.max(0, Math.min(1, C.lethality ?? 1)) * Math.min(1, width / armed);
+    return 1 + (R.empire.alphaMult - 1) * Math.max(0, Math.min(1, C.lethality ?? 1)) * Math.min(1, width / armed);
   };
   const alphaA = alphaMult(A), alphaD = alphaMult(D);
   const volley = (u: SimUnit, round: number, m: number) => (u.atk > 0 ? u.shots : 0) * (round === 1 && u.own !== undefined && u.own >= 0 && hasTech(s, u.own, 'alpha') ? m : 1);

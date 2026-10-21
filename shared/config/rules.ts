@@ -374,17 +374,19 @@ export const PLAYTEST_DEFAULTS = {
     pactCredits: 4,
     subversionCostMult: 0.6,
     subversionPushMult: 1.5,
-    marketsCreditsMult: 1.2,
+    marketsCreditsMult: 1.15,
     citadelGarrisonMult: 1.5,
     regenRepair: 3,
+    alphaMult: 1.5,              // Alpha Strike: first-round volley multiplier
+    scannersHit: 0.06,           // Deep Scanners: fire-control bonus
     depotIndustry: 3,
-    depotUpkeepCut: 0.25,
+    depotUpkeepCut: 0.4,
     citadelCrownVp: 1,
     // laws
     bastionGarrisonMult: 1.3,
     lawRegenBonus: 3,
     vanguardHit: 0.08,
-    mercantileMult: 1.25,
+    mercantileMult: 1.2,
     mercantileHubBonus: 2,
     industrialMult: 1.2,
     industrialShipDiscount: 0.1,

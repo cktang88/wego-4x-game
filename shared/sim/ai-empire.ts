@@ -65,7 +65,7 @@ function chooseTech(s: GameState, pid: PlayerId, style: Style, lvl: string, rng:
   const pri = PRIORITY[style];
   const score = (id: string) => {
     const t = TECH[id];
-    let v = 10 - pri.indexOf(t.branch) * 2.2 - t.tier * 0.8;
+    let v = 10 - pri.indexOf(t.branch) * 2.2 - t.tier * 1.8;   // breadth first: tier I techs pay off early
     if (t.tier === 4) v += 4;                              // ★ technologies are a race
     // tier-III forks: pick the one that fits the situation
     if (id === 'pshield' || id === 'gates') v += hasVein(s, pid, 'crystal', conn) ? 1.5 : -6;
@@ -156,7 +156,7 @@ function chooseLaw(s: GameState, pid: PlayerId, style: Style, myRegions: Region[
   const want: Record<number, string> = {
     0: style === 'turtle' || style === 'trader' ? 'bastion' : 'vanguard',
     1: style === 'trader' || creditsTight ? 'mercantile' : 'industrial',
-    2: myRegions.length <= 6 && style !== 'raider' ? 'central' : 'federal',
+    2: myRegions.length <= 6 ? 'central' : 'federal',
     3: agents ? 'martial' : 'open',
   };
   const order: Record<Style, number[]> = { warlord: [1, 0, 2, 3], turtle: [0, 1, 3, 2], trader: [1, 3, 2, 0], raider: [0, 1, 2, 3] };
