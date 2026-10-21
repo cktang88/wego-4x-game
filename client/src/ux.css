@@ -3,13 +3,13 @@
 
 /* ------------------------------------------------------------ interactive states */
 button { transition: background 0.12s, border-color 0.12s, box-shadow 0.15s, transform 0.06s, color 0.12s; }
-button:hover:not(:disabled) { box-shadow: 0 0 0 1px rgba(183, 139, 255, 0.35), 0 0 14px rgba(150, 110, 255, 0.28); }
+button:hover:not(:disabled) { box-shadow: 0 0 0 1px rgba(217, 178, 106, 0.35), 0 0 14px rgba(214, 173, 98, 0.28); }
 button:active:not(:disabled) { transform: translateY(1px) scale(0.98); box-shadow: none; }
 button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible, .slot:focus-visible, .entry.click:focus-visible {
   outline: 2px solid var(--gold); outline-offset: 2px;
 }
 button:disabled { filter: grayscale(0.7); }
-button.primary { box-shadow: 0 2px 14px rgba(139, 92, 255, 0.35); }
+button.primary { box-shadow: 0 2px 14px rgba(200, 150, 74, 0.35); }
 button.primary:disabled { box-shadow: none; }
 select:hover, input:hover:not([readonly]) { border-color: var(--line-strong); }
 .entry.click { transition: background 0.12s, border-color 0.12s; }
@@ -24,10 +24,10 @@ select:hover, input:hover:not([readonly]) { border-color: var(--line-strong); }
   display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 50%;
   border: 1px solid var(--line-strong); font-size: 10px; font-style: normal; font-weight: 700; color: var(--dim); vertical-align: 1px; margin-left: 3px;
 }
-.ip:hover { color: var(--text); border-color: var(--accent); background: rgba(150, 110, 255, 0.2); }
+.ip:hover { color: var(--text); border-color: var(--accent); background: rgba(214, 173, 98, 0.2); }
 .uxtip {
   position: fixed; z-index: 58; pointer-events: none; max-width: 290px; padding: 7px 10px; border-radius: 8px; font-size: 13px; line-height: 1.35;
-  background: rgba(10, 6, 22, 0.97); border: 1px solid var(--line-strong); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6); white-space: pre-line;
+  background: rgba(16, 17, 22, 0.97); border: 1px solid var(--line-strong); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6); white-space: pre-line;
 }
 
 /* collapsible secondary sections */
@@ -39,7 +39,7 @@ details.sec > summary {
 details.sec > summary::-webkit-details-marker { display: none; }
 details.sec > summary::before { content: '▸'; color: var(--accent); transition: transform 0.15s; display: inline-block; }
 details.sec[open] > summary::before { transform: rotate(90deg); }
-details.sec > summary:hover { color: var(--text); background: rgba(150, 110, 255, 0.08); }
+details.sec > summary:hover { color: var(--text); background: rgba(214, 173, 98, 0.08); }
 details.sec > summary .sum {
   margin-left: auto; font-family: var(--font); font-size: 12px; letter-spacing: 0; text-transform: none; color: var(--faint);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;

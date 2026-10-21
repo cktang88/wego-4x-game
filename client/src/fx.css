@@ -11,7 +11,7 @@
 /* ------------------------------------------------------------ buttons: tactile press */
 button:active:not(:disabled) { transform: translateY(1px) scale(0.97); filter: brightness(1.18); }
 button.primary:not(:disabled) { background-size: 100% 100%; }
-button.primary:hover:not(:disabled) { box-shadow: 0 0 14px rgba(160, 120, 255, 0.45); }
+button.primary:hover:not(:disabled) { box-shadow: 0 0 14px rgba(205, 165, 100, 0.45); }
 
 /* ------------------------------------------------------------ toasts: drop in, fade up and away */
 .toast { animation: toast-in 0.32s var(--ease-spring) both; }
@@ -23,11 +23,11 @@ button.primary:hover:not(:disabled) { box-shadow: 0 0 14px rgba(160, 120, 255, 0
 .overlay { animation: ov-in 0.2s ease-out both; }
 .overlay > .dialog { animation: dlg-in 0.3s var(--ease-spring) both; }
 .overlay.curtain, .overlay.curtain > .dialog { animation: none; }
-@keyframes ov-in { from { opacity: 0; backdrop-filter: blur(0); } }
+@keyframes ov-in { from { opacity: 0; } }
 @keyframes dlg-in { from { opacity: 0; transform: translateY(10px) scale(0.95); } }
 .overlay-ghost {
   position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 49; padding: 16px;
-  background: rgba(4, 2, 10, 0.78); pointer-events: none; animation: ov-out 0.2s ease-in forwards;
+  background: rgba(6, 6, 8, 0.78); pointer-events: none; animation: ov-out 0.2s ease-in forwards;
 }
 .overlay-ghost > .dialog { animation: dlg-out 0.2s ease-in forwards; }
 @keyframes ov-out { to { opacity: 0; } }
@@ -38,8 +38,8 @@ button.primary:hover:not(:disabled) { box-shadow: 0 0 14px rgba(160, 120, 255, 0
 /* ------------------------------------------------------------ list items that just appeared (data-pop) */
 .fx-pop { animation: fx-pop 0.42s var(--ease-spring); }
 @keyframes fx-pop {
-  0% { transform: scale(0.86); box-shadow: 0 0 0 0 rgba(183, 139, 255, 0.7); filter: brightness(1.6); }
-  60% { box-shadow: 0 0 0 6px rgba(183, 139, 255, 0); }
+  0% { transform: scale(0.86); box-shadow: 0 0 0 0 rgba(217, 178, 106, 0.7); filter: brightness(1.6); }
+  60% { box-shadow: 0 0 0 6px rgba(217, 178, 106, 0); }
   100% { transform: none; filter: none; }
 }
 
@@ -70,7 +70,7 @@ button.primary:hover:not(:disabled) { box-shadow: 0 0 14px rgba(160, 120, 255, 0
 @keyframes banner-line { 0% { width: 0; opacity: 0; } 30% { opacity: 1; } 100% { width: 130%; opacity: 0.55; } }
 
 /* ------------------------------------------------------------ victory */
-.overlay.victory { overflow: hidden; background: radial-gradient(ellipse at 50% 45%, color-mix(in srgb, var(--win, #b78bff) 22%, rgba(4, 2, 10, 0.8)), rgba(4, 2, 10, 0.9) 70%); }
+.overlay.victory { overflow: hidden; background: radial-gradient(ellipse at 50% 45%, color-mix(in srgb, var(--win, #d9b26a) 22%, rgba(6, 6, 8, 0.8)), rgba(6, 6, 8, 0.9) 70%); }
 .vic-rays, .vic-sparks { position: absolute; inset: 0; pointer-events: none; }
 .vic-rays {
   inset: -50%;
@@ -86,7 +86,7 @@ button.primary:hover:not(:disabled) { box-shadow: 0 0 14px rgba(160, 120, 255, 0
   transform: scale(var(--s)); animation: vic-ember 3.2s linear var(--d) infinite; opacity: 0;
 }
 @keyframes vic-ember { 0% { opacity: 0; transform: translateY(0) scale(var(--s)); } 15% { opacity: 1; } 100% { opacity: 0; transform: translate(14px, -92vh) scale(var(--s)); } }
-.vic-card { position: relative; animation: vic-card 0.7s var(--ease-spring) both !important; border-color: color-mix(in srgb, var(--win, #b78bff) 70%, transparent); box-shadow: 0 0 60px color-mix(in srgb, var(--win, #b78bff) 35%, transparent), 0 20px 80px rgba(0, 0, 0, 0.7); }
+.vic-card { position: relative; animation: vic-card 0.7s var(--ease-spring) both !important; border-color: color-mix(in srgb, var(--win, #d9b26a) 70%, transparent); box-shadow: 0 0 60px color-mix(in srgb, var(--win, #d9b26a) 35%, transparent), 0 20px 80px rgba(0, 0, 0, 0.7); }
 @keyframes vic-card { from { opacity: 0; transform: scale(0.82) translateY(16px); } }
 .vic-crown { font-size: 44px; line-height: 1; color: var(--gold); text-shadow: 0 0 18px rgba(255, 216, 107, 0.8); animation: vic-crown 0.9s var(--ease-spring) 0.25s both, vic-glow 2.4s ease-in-out 1.2s infinite; }
 @keyframes vic-crown { from { opacity: 0; transform: translateY(-40px) rotate(-14deg) scale(1.6); } }

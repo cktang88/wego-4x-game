@@ -12,7 +12,7 @@ page.on('pageerror', e => errors.push(e.message));
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 await page.goto(base);
 // the first-run tour is exercised by scripts/ux-shots.mjs; skip it here
-await page.evaluate(() => { localStorage.clear(); localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); });
+await page.evaluate(() => { localStorage.clear(); localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); localStorage.setItem('tc.herald.auto', 'off'); });
 await page.click('[data-l=start]');
 await page.waitForTimeout(800);
 // helper: screen coordinates of a fleet / region
@@ -54,6 +54,10 @@ for (let turn = 0; turn < Number(process.argv[4] ?? 3); turn++) {
   await page.waitForTimeout(200);
   const b = await page.$('[data-a=build][data-cls=frigate]');
   if (b) await b.click();
+  // building into a new fleet raises a banner: the founding sheet (found with its defaults)
+  await page.waitForTimeout(200);
+  const go = await page.$('[data-found] [data-f=go]');
+  if (go) { await page.screenshot({ path: `${out}/e2e-founding-${turn}.png` }); if ((await go.getAttribute('aria-disabled')) === 'true') await page.click('[data-f=cancel]'); else await go.click(); }
   await page.screenshot({ path: `${out}/e2e-plan-${turn}.png` });
   await page.click('[data-submit]');
   await page.waitForTimeout(300);

@@ -32,7 +32,7 @@ async function run(tag, phone) {
   const regionXY = id => page.evaluate(id => { const s = window.tc.screen; const p = s.map.toScreen(s.st.regions[id].site); return [p.x, p.y]; }, id);
   const start = async (opts = {}) => {
     await page.goto(base);
-    await page.evaluate(o => { localStorage.clear(); if (o.noteach) { localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); } }, opts);
+    await page.evaluate(o => { localStorage.clear(); localStorage.setItem('tc.herald.auto', 'off'); if (o.noteach) { localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); } }, opts);
     await page.goto(base);
     if (opts.mode) await page.selectOption('[data-l=mode]', opts.mode);
     await page.fill('[data-l=seed]', opts.seed ?? '4242');

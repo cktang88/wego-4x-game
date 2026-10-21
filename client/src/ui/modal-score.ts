@@ -68,12 +68,25 @@ export function scoreBody(c: Ctx): string {
       ${hold}
       <div class="pc-leg">${legend || '<span class="dim">no VP yet</span>'}</div>
       <div class="pc-stats"><span>Crowns <b>${crowns}</b></span><span>Worlds <b>${worlds}</b></span></div>
+      ${oathHtml(c, p)}
       <div class="pc-sub"><span class="lbl">Laws</span><span class="pc-laws">${laws}</span></div>
       <div class="pc-sub"><span class="lbl">Tech</span><span class="pc-tech">${tech}</span></div>
       ${diplo(c, p)}
     </article>`;
   }).join('');
   return `<div class="sco"><div class="sco-cols" style="--n:${st.players.length}">${cols}</div><div class="sco-row">${edictsHtml(c)}${intelHtml(c)}</div></div>${ui.chatOpen ? chatHtml(c) : ''}`;
+}
+
+/** Broken sworn pacts: the Oathbreaker brand, with the words that were broken. */
+function oathHtml(c: Ctx, p: Player): string {
+  const ob = p.oathbreaker ?? [];
+  const debts = (c.g.st.soul?.debts ?? []).filter(d => !d.cleared && d.debtor === p.id);
+  const vend = (p.vendettas ?? []).filter(v => v.until >= c.g.st.turn);
+  if (!ob.length && !debts.length && !vend.length) return '';
+  const T = c.g.live ? 'C' : 'T';
+  return `<div class="pc-oath">${ob.map(o => `<div class="brand-row"><span class="brand">OATHBREAKER</span><small>${T}${o.turn} · vs <b style="color:${esc(c.g.color(o.victim))}">${esc(c.g.pname(o.victim))}</b></small>${o.words ? `<q>${esc(o.words)}</q>` : ''}</div>`).join('')}
+    ${debts.map(d => `<div class="debt-row" title="Blood-debt: ${esc(c.g.pname(d.creditor))} hits harder against them"><i>✠</i>Owes <b style="color:${esc(c.g.color(d.creditor))}">${esc(c.g.pname(d.creditor).split(' ').slice(-1)[0])}</b> for ${esc(d.victim)}</div>`).join('')}
+    ${vend.map(v => `<div class="debt-row" title="Vengeance for a razed world"><i>♨</i>Vendetta vs <b style="color:${esc(c.g.color(v.vs))}">${esc(c.g.pname(v.vs).split(' ').slice(-1)[0])}</b> · ${T}${v.until}</div>`).join('')}</div>`;
 }
 
 function diplo(c: Ctx, p: Player): string {
@@ -85,7 +98,7 @@ function diplo(c: Ctx, p: Player): string {
   }).join('');
   if (you === null || p.id === you) return others ? `<div class="pc-dip">${others}</div>` : '';
   const withYou = theirPacts.find(x => x.a === you || x.b === you);
-  if (withYou) return `<div class="pc-dip"><span class="pact on">⚭ Pact · until ${g.live ? 'C' : 'T'}${withYou.until}</span>${others}</div>`;
+  if (withYou) return `<div class="pc-dip"><span class="pact on">⚭ Pact · until ${g.live ? 'C' : 'T'}${withYou.until}</span>${(withYou.words ?? []).map(w => `<q class="sworn" title="Sworn by ${esc(g.pname(w.by))}">${esc(w.text)}</q>`).join('')}${others}</div>`;
   if (p.eliminated) return '';
   const offered = (p.prevPactOffers ?? []).includes(you) || (p.pactOffers ?? []).includes(you);
   const k = pendingOrder(g, o => o.type === 'pact' && o.with === p.id);
@@ -94,9 +107,12 @@ function diplo(c: Ctx, p: Player): string {
   if (k !== null) act = `<span class="lw-tag gold">⚭ Offer ${g.live ? 'next tick' : `queued · ${ROMAN[k + 1]}`}</span>${g.canPlan ? '<button class="mbtn m-ghost sm" data-a="unpact" data-id="' + p.id + '">↶ Undo</button>' : ''}`;
   else if (g.canPlan) {
     const short = leftover(g, you).influence < cost;
-    act = `<button class="mbtn go ${offered ? 'hot' : ''}" data-a="pact" data-id="${p.id}"${short ? ' disabled title="Not enough influence"' : ''}>${offered ? 'Accept pact' : 'Offer pact'} <span class="cost ${short ? 'neg' : ''}">✦${cost} · 1 order</span></button>`;
+    act = `<input class="pact-words" data-pact-words="${p.id}" data-keep="pw-${p.id}" maxlength="${st.rules.soul?.pactWordsMax ?? 120}" placeholder="Sworn words (optional)" value="${esc(ui.pactWords[p.id] ?? '')}" title="Break a sworn pact and you are branded Oathbreaker">
+      <button class="mbtn go ${offered ? 'hot' : ''}" data-a="pact" data-id="${p.id}"${short ? ' disabled title="Not enough influence"' : ''}>${offered ? 'Accept pact' : 'Offer pact'} <span class="cost ${short ? 'neg' : ''}">✦${cost} · 1 order</span></button>`;
   } else act = `<span class="m-why dim">${esc(lockWhy(g))}</span>`;
-  return `<div class="pc-dip">${offered && k === null ? '<span class="pact hot">⚭ Offers you a pact</span>' : ''}${act}${others}</div>`;
+  const theirWords = (p.pactWords ?? {})[you];
+  const myWords = (() => { const o = k !== null ? (g.live ? g.st.live?.queue[you]?.[k] : g.plan.orders[k]) : null; return o && o.type === 'pact' ? o.words : undefined; })();
+  return `<div class="pc-dip">${offered && k === null ? `<span class="pact hot">⚭ Offers you a pact</span>${theirWords ? `<q class="sworn">${esc(theirWords)}</q>` : ''}` : ''}${myWords ? `<q class="sworn mine">${esc(myWords)}</q>` : ''}${act}${others}</div>`;
 }
 
 function edictsHtml(c: Ctx): string {
@@ -135,7 +151,15 @@ function chatHtml(c: Ctx): string {
 export function scoreAct(c: Ctx, a: string, el: HTMLElement): boolean {
   const g = c.g, id = el.dataset.id ?? '';
   switch (a) {
-    case 'pact': if (g.canPlan) { g.addOrder({ type: 'pact', with: Number(id) }); c.acted(); } return true;
+    case 'pact': {
+      if (!g.canPlan) return true;
+      const pid = Number(id);
+      const words = (ui.pactWords[pid] ?? '').trim().replace(/\s+/g, ' ').slice(0, g.st.rules.soul?.pactWordsMax ?? 120);
+      g.addOrder(words ? { type: 'pact', with: pid, words } : { type: 'pact', with: pid });
+      ui.pactWords[pid] = '';
+      c.acted();
+      return true;
+    }
     case 'unpact': {
       const k = pendingOrder(g, o => o.type === 'pact' && o.with === Number(id));
       if (k !== null && g.canPlan) { dropOrder(g, k); c.acted(); }

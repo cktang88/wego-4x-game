@@ -153,7 +153,7 @@ export function stamp(g: CanvasRenderingContext2D, text: string, x: number, y: n
   g.save();
   g.translate(x, y); g.rotate(-0.12); g.scale(slam, slam);
   g.globalAlpha *= a;
-  g.font = `800 ${px}px "Orbitron","Rajdhani",system-ui,sans-serif`;
+  g.font = `900 ${px}px "Cinzel","Rajdhani",Georgia,serif`;
   const w = g.measureText(text).width + px * 1.1, h = px * 1.7;
   g.strokeStyle = col; g.lineWidth = px * 0.14;
   g.strokeRect(-w / 2, -h / 2, w, h);

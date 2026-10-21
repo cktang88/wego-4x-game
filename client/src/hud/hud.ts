@@ -162,8 +162,9 @@ export class Hud {
       const vp = rt !== null ? p.vp - p.vpLog.filter(v => v.turn === rt).reduce((a, v) => a + v.amount, 0) : p.vp;
       const frac = Math.max(0, Math.min(1, vp / Math.max(1, target)));
       const sealed = !g.live && s?.submitted && st.winner === null;
-      return `<div class="pcrest ${p.id === g.you ? 'you' : ''} ${p.eliminated ? 'out' : ''}" style="--pc:${esc(p.color)}" data-crest="${p.id}"${tip(`${p.name} · ${p.vp}/${target} ♛`)}>
-        <span class="cb"><b class="vp" data-num="vp-${p.id}">${vp}</b></span>${leader === p.id ? '<i class="lead">♛</i>' : ''}${sealed ? '<i class="sealed">✓</i>' : ''}
+      const oath = (p.oathbreaker ?? []).length;
+      return `<div class="pcrest ${p.id === g.you ? 'you' : ''} ${p.eliminated ? 'out' : ''} ${oath ? 'oath' : ''}" style="--pc:${esc(p.color)}" data-crest="${p.id}"${tip(`${p.name} · ${p.vp}/${target} ♛${oath ? ' · Oathbreaker' : ''}`)}>
+        <span class="cb"><b class="vp" data-num="vp-${p.id}">${vp}</b>${oath ? '<i class="crack" aria-label="Oathbreaker"></i>' : ''}</span>${leader === p.id ? '<i class="lead">♛</i>' : ''}${sealed ? '<i class="sealed">✓</i>' : ''}
         <span class="nm">${s?.online && g.src.kind === 'remote' ? '<i class="on"></i>' : ''}${esc(shortName(p.name, 1))}</span><i class="vpbar"><i style="width:${(frac * 100).toFixed(1)}%"></i></i></div>`;
     }).join('');
     g.setHtml(this.h.crests, `<button class="crests" aria-label="Score">${html}</button>`);

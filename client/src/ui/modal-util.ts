@@ -33,6 +33,8 @@ export interface Host {
   focus?(p: { x: number; y: number }): void;
   restartTips?(): void;
   restartTour?(): void;
+  openHerald?(turn?: number): void;
+  openSaga?(): void;
   orderWhy?(o: Order): string | null;
   readonly submitted?: boolean;
 }
@@ -45,6 +47,7 @@ export const ui = {
   chatDraft: '',
   chatTo: '',
   chatSeen: 0,
+  pactWords: {} as Record<number, string>,  // sworn words drafted for a pact offer, per partner
   chatEnter: false,                         // play the drawer's slide-in once
   chronFilter: 'all' as 'all' | 'battles' | 'mine',
   chronOpen: new Set<string>(),              // expanded chronicle entries

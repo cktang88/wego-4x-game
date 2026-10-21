@@ -15,7 +15,7 @@ page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 await page.goto(base);
 await page.evaluate(() => localStorage.clear());
 // the first-run tour is exercised by scripts/ux-shots.mjs; skip it here
-await page.evaluate(() => { localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); });
+await page.evaluate(() => { localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); localStorage.setItem('tc.herald.auto', 'off'); });
 await page.goto(base);
 await page.selectOption('[data-l=mode]', 'live-blitz');
 await page.click('[data-l=start]');

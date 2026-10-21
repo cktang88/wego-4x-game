@@ -2,7 +2,9 @@
 // (strategic / operational / detail), one object per idea (region banner, fleet token per owner per region,
 // battle roundel), lenses, order and drag arrows, plus replay animation overlays and effects.
 import type { GameState, Region, Fleet, Pt, Signal, Order, Engagement } from '../../../shared/sim/types.ts';
-import { NEUTRAL_COLOR, SIGILS } from '../../../shared/config/content.ts';
+import { NEUTRAL_COLOR, SIGILS, CALLINGS } from '../../../shared/config/content.ts';
+import { tenureTier } from '../../../shared/sim/soul.ts';
+import { drawSigil, goldPaint } from '../art/sigils.ts';
 import { drawShip, drawPlumes, gunPoints } from '../art/ships.ts';
 import { scheme } from '../art/palette.ts';
 import { CLASS_RANK, classLen } from '../art/palette.ts';
@@ -48,7 +50,7 @@ export interface Fx {
 }
 export type DragVerb = 'move' | 'od' | 'seize' | 'join' | 'merge' | 'split' | 'invalid';
 /** The live arrow while a fleet token (or ship chip) is being dragged. `to` should already be snapped to a region site. */
-export interface DragArrow { from: Pt; to: Pt; verb: DragVerb; color: string }
+export interface DragArrow { from: Pt; to: Pt; verb: DragVerb; color: string; path?: Pt[]; ghost?: Pt | null }
 export interface PlannedArrow {
   from: Pt; to: Pt;
   /** roman slot ("II") → badge at the midpoint; anything else (LIVE ETA "3h") → label at the head */
@@ -250,6 +252,15 @@ export class MapRenderer {
       // phones: start zoomed in on your capital (about half the map visible); pan/pinch for the rest
       const zp = Math.max(z * 1.35, Math.min(0.32, this.w / 1400));
       this.cam = { x: focus ? focus.x * 0.6 : (minX + maxX) / 2, y: focus ? focus.y * 0.6 : (minY + maxY) / 2, z: zp };
+      // never open on empty space: keep the map's edges at (or past) the screen's edges, below the top bar
+      const top = 64, bottom = 150;
+      const hy = this.h / 2 / zp, hx = this.w / 2 / zp;
+      if (maxY - minY + 80 > (this.h - top - bottom) / zp) {
+        const lo = minY - 30 + (this.h / 2 - top) / zp, hi = maxY + 30 - (this.h / 2 - bottom) / zp;
+        this.cam.y = Math.max(lo, Math.min(hi, this.cam.y));
+      } else this.cam.y = (minY + maxY) / 2 + (bottom - top) / 2 / zp;
+      if (maxX - minX + 40 > this.w / zp) this.cam.x = Math.max(minX - 10 + hx, Math.min(maxX + 10 - hx, this.cam.x));
+      void hy;
     }
     this.fitted = true;
   }
@@ -465,7 +476,15 @@ export class MapRenderer {
     for (const p of st.players) { str(p.color); str(p.name); }
     for (const e of st.engagements ?? []) { mix(e.region); mix(e.garrisonStart); }
     for (const f of st.fleets) if (f.siege !== null && f.siege !== undefined) { mix(f.siege); mix(f.region); }
-    if (I.you !== null && st.rules.empire?.enabled !== false) for (const f of st.fleets) if (f.owner === I.you) { mix(f.region); }
+    // every token's parking slot (name plates step aside for them), and your own fleets (supply)
+    for (const f of st.fleets) if (f.ships.length) { mix(f.region); mix(f.owner); }
+    // the Soul layer's world marks: calling (+ dormant), tenure tier, deeds
+    for (const r of st.regions) {
+      const so = r.story;
+      if (!so) continue;
+      str(so.calling?.id); mix((so.calling?.dormantUntil ?? 0) > st.turn ? 1 : 0); mix(so.calling ? tenureTier(st, r) : 0);
+      for (const d of so.deeds) { str(d.id); mix(d.engraved ? 1 : 0); }
+    }
     mix(st.rules.empire?.enabled === false ? 1 : 0);
     return h;
   }
@@ -717,11 +736,33 @@ export class MapRenderer {
     this.relaxPlates(I, order);
     // planets and garrison numbers first: they are obstacles for names, and never hidden
     for (const r of order) this.drawSiteAndCap(r, I, this.bannerTier(r, I));
+    this.tokenObstacles(I);
     for (const r of order) this.drawBannerExtras(r, I, this.bannerTier(r, I));
     if (lens === 'economy') for (const r of order) this.drawEconomyIcons(r, I);
     ctx.restore();
     // the table: lamp pool and vignette over the board (screen space, static)
     if (this.lamp) ctx.drawImage(this.lamp, 0, 0, this.w, this.h);
+  }
+
+  /** Fleet tokens park at fixed slots around their world: name plates (placed after) must not sit under them, or a
+   *  miniature ends up standing on a neighbouring world's name. Their boxes join the label obstacles. */
+  private tokenObstacles(I: DrawInput) {
+    if (this.tier === 'strategic' && !I.peek) return;
+    const st = I.state, S = this.px(1), k = this.slotK(), tier = this.tier;
+    const seen = new Set<string>();
+    for (const f of st.fleets) {
+      if (!f.ships.length) continue;
+      const r = st.regions[f.region];
+      if (!r || (I.you !== null && f.owner !== I.you && !I.visible.has(r.id))) continue;
+      const key = `${f.owner}:${f.region}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const a = anchorOf(r, f.owner, tier, S, k);
+      const side = slotFor(tier, f.owner).side;
+      const rb = tier === 'detail' ? 22 * Math.pow(this.artK(), 0.75) : 18;
+      const l = a.x - rb * S - (side < 0 ? 44 * S : 0), rr = a.x + rb * S + (side > 0 ? 44 * S : 0);
+      this.labelBoxes.push({ x: l, y: a.y - 42 * S, w: rr - l, h: 50 * S });
+    }
   }
 
   /** Strategic plates whose sites sit close together are nudged apart (≤ 16px) so numbers never overprint. */
@@ -779,9 +820,13 @@ export class MapRenderer {
   private garrisonText(r: Region, I: DrawInput): { txt: string; fog: boolean } {
     const fog = I.you !== null && !I.visible.has(r.id) && r.owner !== I.you;
     if (r.garrison >= 0 && !fog) return { txt: String(r.garrison), fog };
+    // fogged: a neutral garrison you have a number for shows it plainly (it barely changes); a rival's is a stale
+    // estimate ("~N"); never seen at all is "?"
     const lk = this.lastKnown.get(r.id);
-    if (r.garrison >= 0) return { txt: `~${r.garrison}`, fog };
-    return { txt: lk !== undefined ? `~${lk}` : '?', fog };
+    const known = r.garrison >= 0 ? r.garrison : lk;
+    if (known === undefined) return { txt: '?', fog };
+    const neutral = (I.owners[r.id] ?? null) === null || (I.owners[r.id] ?? -1) < 0;
+    return { txt: neutral ? String(known) : `~${known}`, fog };
   }
 
   private sieged(r: Region, st: GameState): Engagement | true | null {
@@ -929,6 +974,7 @@ export class MapRenderer {
     const g = this.capGeom(r, bt, txt);
     const cx = p.x, cy = p.y + g.cy * S;
     this.drawCap(r, I, bt, txt, fog);
+    this.drawSoulMarks(r, I, cx, cy, g.w, g.h);
     let bot = g.cy + g.h / 2;
     // ---- defence tab under the cap: literal towers / guns / dome, with a level number when > 1
     if (defs.length) {
@@ -956,6 +1002,54 @@ export class MapRenderer {
     const hw = g.w / 2, top = g.cy - g.h / 2;
     this.labelBoxes.push({ x: cx - hw * S, y: p.y + top * S, w: hw * 2 * S, h: (g.cy + g.h / 2 - top) * S });
     this.bannerHits.push({ rid: r.id, x: p.x, y: p.y, l: -hw - 4, t: top, r: hw + 4, b: bot });
+  }
+
+  /** Soul layer on a world's banner: the calling medallion on the cap's left shoulder, ringed by tenure segments
+   *  (dormant: grey, dashed), and deed pips over the cap (an engraved deed has a gold rim). */
+  private drawSoulMarks(r: Region, I: DrawInput, cx: number, cy: number, w: number, h: number) {
+    const so = r.story, st = I.state;
+    if (!so || (I.lens ?? 'political') === 'economy') return;
+    const { ctx } = this;
+    const S = this.px(1);
+    const owner = I.owners[r.id];
+    if (so.calling && owner !== null && owner !== undefined && owner >= 0) {
+      const c = CALLINGS[so.calling.id];
+      const dorm = (so.calling.dormantUntil ?? -1) > st.turn;
+      const tier = dorm ? 0 : tenureTier(st, r);
+      const R = 8.5 * S;
+      const mx = cx - (w / 2 + 6) * S, my = cy - (h / 2 - 5) * S;
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 3 * S; ctx.shadowOffsetY = 1 * S;
+      ctx.beginPath(); ctx.arc(mx, my, R, 0, TAU);
+      ctx.fillStyle = '#000'; ctx.fill(); ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+      gunmetal(ctx, my - R, my + R, dorm ? 'rgba(140,140,150,0.6)' : '#c9a35c', 1.1 * S);
+      // tenure: three arcs around the medallion, lit as the calling grows (3, 6, 10 turns)
+      ctx.lineCap = 'butt';
+      for (let i = 0; i < 3; i++) {
+        const a0 = -Math.PI / 2 + (i * TAU) / 3 + 0.22, a1 = a0 + TAU / 3 - 0.44;
+        ctx.beginPath(); ctx.arc(mx, my, R + 2.6 * S, a0, a1);
+        ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.lineWidth = 3.4 * S; ctx.stroke();
+        ctx.beginPath(); ctx.arc(mx, my, R + 2.6 * S, a0, a1);
+        ctx.strokeStyle = i < tier ? '#ffd86b' : dorm ? 'rgba(150,150,160,0.35)' : 'rgba(200,180,140,0.32)'; ctx.lineWidth = 2 * S; ctx.stroke();
+      }
+      ctx.font = numFont(11 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = dorm ? '#9a98a6' : '#ffe2a0';
+      ctx.fillText(c?.icon ?? '◇', mx, my + 0.5 * S);
+      ctx.textBaseline = 'alphabetic';
+      ctx.restore();
+      this.labelBoxes.push({ x: mx - R - 4 * S, y: my - R - 4 * S, w: (R + 4 * S) * 2, h: (R + 4 * S) * 2 });
+    }
+    if (so.deeds.length) {
+      const n = Math.min(2, so.deeds.length);
+      const y = cy - (h / 2 + 4) * S;
+      for (let i = 0; i < n; i++) {
+        const d = so.deeds[i];
+        const x = cx + (i - (n - 1) / 2) * 9 * S;
+        diamondPath(ctx, x, y, 3.4 * S, 4.2 * S);
+        ctx.fillStyle = d.engraved ? '#ffd86b' : '#d8dbe6'; ctx.fill();
+        ctx.strokeStyle = d.engraved ? '#6a420c' : 'rgba(10,10,18,0.9)'; ctx.lineWidth = 1 * S; ctx.stroke();
+      }
+    }
   }
 
   /** Shield cap in the owner colour holding the garrison number (gold edge for Crowns and the Throne). */
@@ -1267,6 +1361,9 @@ export class MapRenderer {
       ctx.setLineDash([]); ctx.lineDashOffset = 0; ctx.lineCap = 'butt';
     }
 
+    // ---------------------------------------------------------------- blood-debts: a small drop of blood where the debt was made
+    this.drawDebts(I);
+
     // ---------------------------------------------------------------- fleets, battles
     this.drawTokens(I);
 
@@ -1280,21 +1377,75 @@ export class MapRenderer {
     this.drawParticles(I.now);
   }
 
-  /** Targeting: reachable regions brighten, everything else dims (invalid targets never light up). */
+  /** Uncleared blood-debts: a dark drop of blood by the world where the commander fell, rimmed in the creditor's
+   *  colour (subtle: operational and detail zoom only). */
+  private drawDebts(I: DrawInput) {
+    const st = I.state;
+    const debts = st.soul?.debts;
+    if (!debts?.length || this.tier === 'strategic') return;
+    const { ctx } = this;
+    const S = this.px(1);
+    const at = new Map<number, number[]>();
+    for (const d of debts) {
+      if (d.cleared || !st.regions[d.region]) continue;
+      if (I.you !== null && !I.visible.has(d.region) && d.creditor !== I.you && d.debtor !== I.you) continue;
+      (at.get(d.region) ?? at.set(d.region, []).get(d.region)!).push(d.creditor);
+    }
+    for (const [rid, cs] of at) {
+      const r = st.regions[rid];
+      const R = this.worldR(r, I);
+      cs.slice(0, 3).forEach((c, i) => {
+        const x = r.site.x - R - (7 + i * 9) * S, y = r.site.y - R * 0.2;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.beginPath(); ctx.moveTo(0, -6 * S); ctx.bezierCurveTo(3.5 * S, -1.5 * S, 4.2 * S, 1 * S, 4.2 * S, 2.4 * S); ctx.arc(0, 2.4 * S, 4.2 * S, 0, Math.PI); ctx.bezierCurveTo(-4.2 * S, 1 * S, -3.5 * S, -1.5 * S, 0, -6 * S); ctx.closePath();
+        const gr = ctx.createLinearGradient(-3 * S, -5 * S, 3 * S, 6 * S); gr.addColorStop(0, '#ff6a6a'); gr.addColorStop(0.5, '#a3121c'); gr.addColorStop(1, '#3a0408');
+        ctx.globalAlpha = 0.85; ctx.fillStyle = gr; ctx.fill();
+        ctx.strokeStyle = hexA(this.colorOf(st, c), 0.9); ctx.lineWidth = 1.1 * S; ctx.stroke();
+        ctx.restore();
+      });
+    }
+  }
+
+  /** Targeting: valid drops get a light outline and a soft glow, strongest near the pointer's path; nothing is
+   *  painted over, so the board stays readable while dragging (invalid targets never light up). */
   private drawTargeting(I: DrawInput) {
     const { ctx } = this;
     const st = I.state;
     if (!I.highlight.size) return;
-    const a = 0.12 + 0.05 * Math.sin(I.now / 250);
+    const S = this.px(1);
+    const D = I.drag;
+    const ptr = D ? (D.ghost ?? D.to) : null;
+    const reach = 240 * S;
+    const near = (p: Pt): number => {
+      if (!D || !ptr) return 0.55;
+      // distance to the segment from the fleet to the pointer
+      const ax = D.from.x, ay = D.from.y, bx = ptr.x - ax, by = ptr.y - ay;
+      const L2 = bx * bx + by * by || 1;
+      const t = clamp01(((p.x - ax) * bx + (p.y - ay) * by) / L2);
+      const d = Math.min(Math.hypot(p.x - (ax + bx * t), p.y - (ay + by * t)) * 1.4, Math.hypot(p.x - ptr.x, p.y - ptr.y));
+      return clamp01(1 - d / reach);
+    };
+    const pulse = 0.85 + 0.15 * Math.sin(I.now / 260);
     for (const r of st.regions) {
       const col = I.highlight.get(r.id);
+      if (!col) continue;
+      const k = near(r.site);
       if (r.poly.length < 3) {
-        if (col) { ctx.beginPath(); ctx.arc(r.site.x, r.site.y, this.px(6), 0, TAU); ctx.fillStyle = hexA(col, 0.9); ctx.fill(); }
+        ctx.beginPath(); ctx.arc(r.site.x, r.site.y, this.px(5), 0, TAU); ctx.fillStyle = hexA(col, 0.35 + 0.5 * k); ctx.fill();
         continue;
       }
+      if (k <= 0.02) {
+        // far from the pointer: just a faint dotted rim so the reach still reads
+        path(ctx, r.poly); ctx.save(); ctx.setLineDash([2 * S, 6 * S]); ctx.strokeStyle = hexA(col, 0.22); ctx.lineWidth = 1.2 * S; ctx.stroke(); ctx.restore();
+        continue;
+      }
+      const R = (30 + 16 * k) * S;
+      const g = ctx.createRadialGradient(r.site.x, r.site.y, R * 0.2, r.site.x, r.site.y, R * 1.6);
+      g.addColorStop(0, hexA(col, 0.22 * k * pulse)); g.addColorStop(1, hexA(col, 0));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(r.site.x, r.site.y, R * 1.6, 0, TAU); ctx.fill();
       path(ctx, r.poly);
-      if (col) { ctx.fillStyle = hexA(col, a); ctx.fill(); ctx.strokeStyle = hexA(col, 0.55); ctx.lineWidth = this.px(1.5); ctx.stroke(); }
-      else { ctx.fillStyle = 'rgba(4,2,10,0.38)'; ctx.fill(); }
+      ctx.strokeStyle = hexA(col, (0.25 + 0.55 * k) * pulse); ctx.lineWidth = (1.2 + 1.2 * k) * S; ctx.stroke();
     }
   }
 
@@ -1649,21 +1800,63 @@ export class MapRenderer {
         shadow: { dx: st * 0.3, dy: st * 0.95, alpha: 0.42 }, engine: eng, bank: d.bank ?? 0,
       });
     }
-    // pennant on the lead ship (detail): the fleet's banner in the owner colour
-    if (tier === 'detail' && t.fleets.length === 1) {
-      const sf = this.fleetById(I.state, t.fleets[0].id);
-      const sig = sf?.banner?.sigil ? SIGILS.find(x => x.id === sf.banner!.sigil)?.glyph : null;
-      if (sig) {
-        const q = pos[0];
-        const bx = q.x * S, by = q.y * BASE_SQUASH * S - (G.stand + 2) * S - len0 * 0.2 * S;
-        const top = by - 20 * S;
-        ctx.strokeStyle = 'rgba(10,10,16,0.9)'; ctx.lineWidth = 2.4 * S; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx, top); ctx.stroke();
-        ctx.strokeStyle = '#d8c48a'; ctx.lineWidth = 1.1 * S; ctx.stroke();
-        const wv = reduced ? 0 : Math.sin(now / 260 + q.x) * 1.5 * S;
-        ctx.beginPath(); ctx.moveTo(bx, top); ctx.lineTo(bx + 18 * S, top + 2 * S + wv); ctx.lineTo(bx + 13 * S, top + 6 * S + wv * 0.6); ctx.lineTo(bx + 18 * S, top + 11 * S + wv * 0.3); ctx.lineTo(bx, top + 11 * S); ctx.closePath();
-        enamel(ctx, fill, top, top + 11 * S, 'iron', 0.8 * S);
-        ctx.font = numFont(9 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = inkOn(fill);
-        ctx.fillText(sig, bx + 7 * S, top + 5.5 * S + wv * 0.5);
+    // the fleet's banner: a pennant on a pole at the base's outer rim (operational + detail), with its sigil, rank
+    // chevrons down the pole, scar notches cut into the cloth, an Oathbreaker crack; a limping fleet's pennant droops
+    // and it trails smoke
+    if (tier !== 'strategic' && owner >= 0) {
+      const sfs = t.fleets.map(f => this.fleetById(I.state, f.id)).filter((x): x is Fleet => !!x && !!x.banner && x.ships.length > 0);
+      const lead = sfs.sort((a, b) => b.commander.rank - a.commander.rank)[0];
+      const limp = t.fleets.map(f => this.fleetById(I.state, f.id)).find(x => x?.limping);
+      if (limp && !reduced) {
+        for (let i = 0; i < 4; i++) {
+          const k = ((now / 1400) + i / 4) % 1;
+          smoke(ctx, (-t.side * 4 + Math.sin(i * 2.3 + k * 4) * 5) * S, (-G.stand * 0.6 - k * 34) * S, (5 + k * 12) * S, 0.42 * (1 - k));
+        }
+      }
+      if (lead?.banner) {
+        const pk = tier === 'detail' ? Math.pow(this.artK(), 0.4) : 1;
+        const dir = -t.side;
+        const bx = dir * rb * 0.78 * S, by = ry * 0.2 * S;
+        const top = by - (G.stand * 0.9 + len0 * 0.5 + 10) * S;
+        ctx.strokeStyle = 'rgba(8,8,14,0.9)'; ctx.lineWidth = 2.6 * S; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx, top - 2 * S); ctx.stroke();
+        const pg = ctx.createLinearGradient(bx - 1.2 * S, 0, bx + 1.2 * S, 0); pg.addColorStop(0, '#fff0c0'); pg.addColorStop(1, '#8a6420');
+        ctx.strokeStyle = pg; ctx.lineWidth = 1.2 * S; ctx.stroke();
+        ctx.fillStyle = '#ffe08a'; ctx.beginPath(); ctx.arc(bx, top - 2.5 * S, 1.8 * S, 0, TAU); ctx.fill();
+        const fw = 22 * S * pk, fh = 15 * S * pk;
+        const wv = reduced || lead.limping ? 0 : Math.sin(now / 300 + lead.id) * 1.4 * S;
+        ctx.save();
+        ctx.translate(bx, top);
+        if (lead.limping) ctx.rotate(dir * 1.2);
+        ctx.beginPath(); ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(dir * fw * 0.5, wv, dir * fw, 1.5 * S + wv * 0.7);
+        ctx.lineTo(dir * fw * 0.74, fh * 0.52 + wv * 0.4);
+        ctx.lineTo(dir * fw, fh + wv * 0.3);
+        ctx.quadraticCurveTo(dir * fw * 0.5, fh + wv * 0.6, 0, fh);
+        ctx.closePath();
+        ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 3 * S; ctx.shadowOffsetY = 1.5 * S; ctx.fillStyle = '#000'; ctx.fill(); ctx.restore();
+        enamel(ctx, lead.limping ? desat(fill, 0.45) : fill, 0, fh, lead.commander.rank >= 4 ? 'gold' : 'iron', 0.9 * S);
+        // scar notches: bites out of the cloth's lower edge
+        const sc = Math.min(3, lead.scars?.length ?? 0);
+        for (let i = 0; i < sc; i++) {
+          const x = dir * fw * (0.2 + i * 0.18);
+          ctx.beginPath(); ctx.moveTo(x - 2.2 * S, fh + 0.5 * S); ctx.lineTo(x, fh - 3.6 * S); ctx.lineTo(x + 2.2 * S, fh + 0.5 * S); ctx.closePath();
+          ctx.fillStyle = 'rgba(12,6,8,0.95)'; ctx.fill();
+        }
+        drawSigil(ctx, lead.banner.sigil, dir * fw * 0.4, fh * 0.48 + wv * 0.5, 10.5 * S * pk, goldPaint(ctx, 0, fh), true);
+        if (lead.oathbreaker) {
+          ctx.strokeStyle = '#ff4a3a'; ctx.lineWidth = 1.3 * S; ctx.beginPath();
+          ctx.moveTo(dir * fw * 0.62, 0.5 * S); ctx.lineTo(dir * fw * 0.48, fh * 0.4); ctx.lineTo(dir * fw * 0.6, fh * 0.6); ctx.lineTo(dir * fw * 0.44, fh); ctx.stroke();
+        }
+        ctx.restore();
+        // rank chevrons down the pole (Legend: a star)
+        const rank = lead.commander.rank;
+        const cy0 = top + fh + 5 * S;
+        if (rank >= 5) starGlyph(ctx, { x: bx, y: cy0 + 1 * S }, 4.5 * S, 5, GOLD);
+        else for (let i = 0; i < Math.min(4, rank - 1); i++) {
+          const yy = cy0 + i * 3.6 * S;
+          ctx.strokeStyle = 'rgba(8,6,2,0.9)'; ctx.lineWidth = 2.6 * S; ctx.beginPath(); ctx.moveTo(bx - 3.6 * S, yy); ctx.lineTo(bx, yy - 2.6 * S); ctx.lineTo(bx + 3.6 * S, yy); ctx.stroke();
+          ctx.strokeStyle = GOLD; ctx.lineWidth = 1.3 * S; ctx.stroke();
+        }
       }
     }
     // power number (+ ship count) on a gunmetal plate beside the base
@@ -1686,6 +1879,21 @@ export class MapRenderer {
     if (sub) {
       ctx.font = numFont(Z.sf * S, 600); ctx.fillStyle = 'rgba(214,210,236,0.9)';
       ctx.fillText(sub, px0 + 5 * S + w1 + 2 * S, py0 + ph / 2 + 3 * S);
+    }
+    // a limping fleet: where it is limping to, and when it gets there
+    if (tier !== 'strategic') {
+      const lf = t.fleets.map(f => this.fleetById(I.state, f.id)).find(x => x?.limping);
+      if (lf?.limping) {
+        let eta = 0;
+        try { eta = lf.route?.path.length ? Math.max(1, Math.ceil(lf.route.path.length / Math.max(1, fleetSpeed(I.state, lf)))) : 0; } catch { eta = 0; }
+        const lt = eta ? `⌂ ${eta}${I.state.mode === 'live' ? '' : 'T'}` : '⌂';
+        ctx.font = numFont(11 * S, 700);
+        const lw = ctx.measureText(lt).width + 8 * S, lh = 14 * S;
+        const lx = px0 + (t.side > 0 ? 0 : pw2 - lw), ly = py0 + ph + 2 * S;
+        roundRect(ctx, lx, ly, lw, lh, 3 * S); ctx.fillStyle = 'rgba(40,22,10,0.95)'; ctx.fill();
+        ctx.strokeStyle = 'rgba(255,170,110,0.8)'; ctx.lineWidth = 1 * S; ctx.stroke();
+        ctx.fillStyle = '#ffcf9e'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(lt, lx + 4 * S, ly + lh / 2 + 0.5 * S);
+      }
     }
     // status badges at the base's inner shoulder: ⚠ out of supply, Zz idle (can take orders)
     const badge = t.oos ? '⚠' : t.idle && !sel ? 'Zz' : '';
@@ -2288,6 +2496,8 @@ export class MapRenderer {
     const dx = b.x - a.x, dy = b.y - a.y;
     const L = Math.hypot(dx, dy);
     if (L < 6 * s) return;
+    // a route through lane waypoints: the arrow follows the hyperlane, not the crow's flight
+    if (D.path && D.path.length > 2 && D.verb !== 'invalid') { this.drawDragRoute(D, now); return; }
     const invalid = D.verb === 'invalid', od = D.verb === 'od', hollow = D.verb === 'join';
     const col = invalid ? 'rgba(200,198,215,0.85)' : od ? '#ffb347' : D.color;
     const nx = -dy / L, ny = dx / L;
@@ -2337,6 +2547,45 @@ export class MapRenderer {
       else if (D.verb === 'merge') { ctx.beginPath(); ctx.moveTo(H.x - 7 * s, H.y); ctx.lineTo(H.x + 7 * s, H.y); ctx.moveTo(H.x, H.y - 7 * s); ctx.lineTo(H.x, H.y + 7 * s); ctx.stroke(); }
       else if (D.verb === 'split') { ctx.beginPath(); ctx.moveTo(H.x, H.y + 7 * s); ctx.lineTo(H.x, H.y); ctx.lineTo(H.x - 6 * s, H.y - 6 * s); ctx.moveTo(H.x, H.y); ctx.lineTo(H.x + 6 * s, H.y - 6 * s); ctx.stroke(); }
       else { ctx.beginPath(); ctx.moveTo(H.x - 6 * s, H.y - 6 * s); ctx.lineTo(H.x + 6 * s, H.y + 6 * s); ctx.moveTo(H.x + 6 * s, H.y - 6 * s); ctx.lineTo(H.x - 6 * s, H.y + 6 * s); ctx.stroke(); }
+    }
+    ctx.restore();
+  }
+
+  /** The drag arrow along a multi-step route: a polyline through the waypoints to the (eased) head. */
+  private drawDragRoute(D: DragArrow, now: number) {
+    const { ctx } = this;
+    const s = this.px(1);
+    const pts = [D.from, ...D.path!.slice(1, -1), this.dragHead ?? D.to];
+    const end = pts[pts.length - 1], prev = pts[pts.length - 2];
+    const L = Math.hypot(end.x - prev.x, end.y - prev.y) || 1;
+    const back = Math.min(L * 0.6, 14 * s);
+    const tipP = { x: end.x - ((end.x - prev.x) / L) * back, y: end.y - ((end.y - prev.y) / L) * back };
+    const ang = Math.atan2(end.y - prev.y, end.x - prev.x);
+    const od = D.verb === 'od', hollow = D.verb === 'join';
+    const col = od ? '#ffb347' : D.color;
+    const trace = () => { ctx.beginPath(); pts.slice(0, -1).forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.lineTo(tipP.x, tipP.y); };
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    trace(); ctx.strokeStyle = 'rgba(5,3,12,0.6)'; ctx.lineWidth = 8 * s; ctx.stroke();
+    trace(); ctx.strokeStyle = hexA0(col.startsWith('#') ? col : '#ffffff', hollow ? 0.9 : 0.45); ctx.lineWidth = (hollow ? 5 : 4.5) * s; ctx.stroke();
+    ctx.setLineDash([10 * s, 8 * s]); ctx.lineDashOffset = reducedMotion() ? 0 : -(now / 28) * s;
+    trace(); ctx.strokeStyle = hollow ? 'rgba(5,3,12,0.95)' : '#ffffff'; ctx.lineWidth = (hollow ? 2 : 2.4) * s; ctx.stroke();
+    ctx.setLineDash([]);
+    // waypoint beads
+    ctx.fillStyle = '#ffffff';
+    for (const p of pts.slice(1, -1)) { ctx.beginPath(); ctx.arc(p.x, p.y, 2.6 * s, 0, TAU); ctx.fill(); }
+    const H = end;
+    if (D.verb === 'move' || od) {
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.moveTo(H.x + Math.cos(ang) * 4 * s, H.y + Math.sin(ang) * 4 * s);
+      ctx.lineTo(H.x + Math.cos(ang + 2.55) * 16 * s, H.y + Math.sin(ang + 2.55) * 16 * s);
+      ctx.lineTo(H.x - Math.cos(ang) * 6 * s, H.y - Math.sin(ang) * 6 * s);
+      ctx.lineTo(H.x + Math.cos(ang - 2.55) * 16 * s, H.y + Math.sin(ang - 2.55) * 16 * s); ctx.closePath();
+      ctx.fill(); ctx.strokeStyle = 'rgba(5,3,12,0.9)'; ctx.lineWidth = 1.5 * s; ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.arc(H.x, H.y, 14 * s, 0, TAU); ctx.fillStyle = 'rgba(5,3,12,0.94)'; ctx.fill();
+      ctx.strokeStyle = col; ctx.lineWidth = 2.5 * s; if (hollow) ctx.setLineDash([3 * s, 2.5 * s]); ctx.stroke(); ctx.setLineDash([]);
+      swords(ctx, H.x, H.y, 8.5 * s, '#ffffff', 2 * s);
     }
     ctx.restore();
   }

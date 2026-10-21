@@ -16,6 +16,8 @@ import { etaTicks, tickMs } from '../../../shared/sim/live.ts';
 import { esc } from '../ui/dom.ts';
 import { intentFor, commitIntent, type Intent } from './verbs.ts';
 import { shipSvg, shortWhy, tip, fmtDur } from './util.ts';
+import { fleetBadge, fleetSubline, fleetSoulRows, honourChoice, sagaChips, fleetSoulActs, vowPicker, shipTraitBits, worldEpi, worldSoulRows, soulAction, openFounding, bannersLeft } from './soul.ts';
+import { bannerSvg } from '../art/sigils.ts';
 
 const PROJ_ICON: Record<string, string> = { develop: '▲', shipyard: '⚒', fortress: '⛨', mine: '⚙', tradehub: '¢', sensor: '◎', academy: '✺', extractor: '⚛', battery: '⚔', pshield: '⛨', depot: '➤', gate: '◎' };
 const MOD_COLOR: Record<string, string> = { armor: '#c9c3e6', railgun: '#ff9b6b', deflector: '#6fd0ff', ion: '#9dff8a' };
@@ -60,8 +62,8 @@ function place(g: GameScreen, el: HTMLElement) {
 const ib = (a: string, icon: string, label: string, why: string | null, extra = '', tipText = '') =>
   `<button class="ib" data-a="${a}" ${extra}${why ? ` aria-disabled="true"${tip(`⊘ ${shortWhy(why)}`)}` : tipText ? tip(tipText) : ''}><i>${icon}</i><span>${label}</span></button>`;
 const pips = (n: number, max: number) => `<span class="dpips">${Array.from({ length: max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</span>`;
-function head(g: GameScreen, name: string, color: string, stats: string, extra = '') {
-  return `<div class="ch" style="--pc:${esc(color)}"><span class="crestdot"></span><b class="nm">${esc(name)}</b>${extra}<button class="cx" data-a="close" aria-label="Close">×</button></div><div class="cs">${stats}</div>`;
+function head(g: GameScreen, name: string, color: string, stats: string, extra = '', badge = '', sub = '') {
+  return `<div class="ch" style="--pc:${esc(color)}">${badge || '<span class="crestdot"></span>'}<span class="nmw"><b class="nm">${esc(name)}</b>${sub}</span>${extra}<button class="cx" data-a="close" aria-label="Close">×</button></div><div class="cs">${stats}</div>`;
 }
 const stat = (icon: string, v: string, t: string, cls = '') => `<span class="st ${cls}"${tip(t)}><i>${icon}</i><b>${v}</b></span>`;
 
@@ -85,7 +87,7 @@ function ownFleet(g: GameScreen, f: Fleet): string {
   if (f.fatigued) status.push('<span class="warn">⚠ Fatigued</span>');
   if (f.fortified) status.push('<span>⛨ Dug in</span>');
   if (st.rules.empire?.enabled !== false && f.ships.length && ((f.oos ?? 0) > 0 || !supplied(st, f.owner).has(f.region))) status.push('<span class="warn">⚠ No supply</span>');
-  if (f.route && (f.route.path.length || f.route.seize !== null)) {
+  if (f.route && !f.limping && (f.route.path.length || f.route.seize !== null)) {
     const dest = f.route.seize ?? f.route.path[f.route.path.length - 1] ?? f.region;
     const left = Math.max(1, f.route.path.length);
     const eta = g.live ? fmtDur((etaTicks(st, f.id) ?? 0) * tickMs(st)) : `${Math.max(1, Math.ceil(left / Math.max(1, speed)))}t`;
@@ -100,7 +102,8 @@ function ownFleet(g: GameScreen, f: Fleet): string {
     const bp = blueprintFor(bpState, f.owner, s.cls);
     const old = bp && s.mod && bp !== s.mod;
     const sys = !s.sys.engines || !s.sys.weapons || !s.sys.shields;
-    return `<button class="sc ${lifted.has(s.id) ? 'up' : ''}" data-ship="${s.id}"${tip(`${s.name} · ${def?.name ?? s.cls}${s.title ? ` ${s.title}` : ''}`)}>${shipSvg(s.cls, g.color(f.owner), 30)}<i class="hb"><i style="width:${(pct * 100).toFixed(0)}%;background:${pct < 0.4 ? 'var(--bad)' : 'var(--good)'}"></i></i>${s.mod ? `<i class="md ${old ? 'old' : ''}" style="background:${MOD_COLOR[s.mod] ?? '#ccc'}"></i>` : ''}${sys ? '<i class="sx">!</i>' : ''}</button>`;
+    const tr = shipTraitBits(s.traits);
+    return `<button class="sc ${lifted.has(s.id) ? 'up' : ''}" data-ship="${s.id}"${tip(`${s.name} · ${def?.name ?? s.cls}${s.title ? ` ${s.title}` : ''}${tr.tip}`)}>${tr.icons}${shipSvg(s.cls, g.color(f.owner), 30)}<i class="hb"><i style="width:${(pct * 100).toFixed(0)}%;background:${pct < 0.4 ? 'var(--bad)' : 'var(--good)'}"></i></i>${s.mod ? `<i class="md ${old ? 'old' : ''}" style="background:${MOD_COLOR[s.mod] ?? '#ccc'}"></i>` : ''}${sys ? '<i class="sx">!</i>' : ''}</button>`;
   }).join('');
   const nLift = [...lifted].filter(id => f.ships.some(s => s.id === id)).length;
   // actions
@@ -113,6 +116,7 @@ function ownFleet(g: GameScreen, f: Fleet): string {
     if (here.owner === g.you && (here.buildings.shipyard ?? 0) > 0 && f.ships.some(s => s.mod !== blueprintFor(bpState, g.you!, s.cls) || s.hp < s.maxHp)) acts += ib('refit', '⚒', 'Refit', why({ type: 'refit', fleet: f.id }), '', 'Repair and upgrade');
     if (here.relic === 'unclaimed') acts += ib('excavate', '✧', 'Excavate', here.owner === g.you ? why({ type: 'excavate', fleet: f.id }) : 'you must own the region', '', 'Dig up the relic');
     if (f.ships.length > 1) acts += ib('split', '✂', nLift ? `Split ${nLift}` : 'Split ½', g.fleetUses(f.id) > 0 ? 'has orders' : null, '', 'Free: forms a new fleet');
+    acts += fleetSoulActs(g, f, ib);
     const d = g.doctrineOf(f);
     acts += `<span class="seg" role="group" aria-label="Doctrine">${STANCES.map(x => `<button class="${d.stance === x.id ? 'on' : ''}" data-a="stance" data-s="${x.id}"${tip(x.tip)}><i>${x.icon}</i><span>${x.label}</span></button>`).join('')}</span>`;
   }
@@ -122,11 +126,12 @@ function ownFleet(g: GameScreen, f: Fleet): string {
       ${c.traits.length ? `<div class="r">${c.traits.map(t => `<span class="trait"${tip(CMD_TRAITS[t]?.desc ?? '')}>${esc(CMD_TRAITS[t]?.name ?? t)}</span>`).join('')}</div>` : ''}
       ${g.canPlan ? `<div class="r"><input data-rename value="${esc(g.pendingName(f))}" maxlength="40" aria-label="Fleet name"></div>` : ''}
       ${f.history.length ? `<div class="hist">${f.history.slice(-4).reverse().map(x => `<div>${esc(x)}</div>`).join('')}</div>` : ''}</div>` : '';
-  return `${head(g, f.name, g.color(f.owner), stats, `${sib}<button class="cx more-btn ${moreOpen ? 'on' : ''}" data-a="more" aria-label="More"${tip('Commander & record')}>⋯</button>`)}
+  return `${head(g, f.name, g.color(f.owner), stats, `${sib}<button class="cx more-btn ${moreOpen ? 'on' : ''}" data-a="more" aria-label="More"${tip('Commander & record')}>⋯</button>`, fleetBadge(g, f), fleetSubline(g, f))}
     ${status.length ? `<div class="cst">${status.join('')}</div>` : ''}
+    ${honourChoice(g, f)}${fleetSoulRows(g, f)}
     <div class="fan" data-fleet="${f.id}">${fan}</div>
-    ${acts ? `<div class="acts">${acts}</div>` : ''}
-    ${hint}${more}`;
+    ${acts ? `<div class="acts">${acts}</div>` : ''}${vowPicker(g, f)}
+    ${sagaChips(g, f)}${hint}${more}`;
 }
 
 function foeFleet(g: GameScreen, f: Fleet): string {
@@ -137,7 +142,7 @@ function foeFleet(g: GameScreen, f: Fleet): string {
   const trait = f.commander.traits[f.commander.traits.length - 1];
   const stats = stat('⚔', String(fleetPower(st, f)), 'Power') + stat('⛭', String(f.ships.length), 'Ships') +
     `<span class="cmd">${esc(shortOwner(g, f.owner))}${trait ? ` · <em>${esc(CMD_TRAITS[trait]?.name ?? trait)}</em>` : ''}</span>`;
-  return `${head(g, f.name, g.color(f.owner), stats)}<div class="fan foe">${ships}</div>`;
+  return `${head(g, f.name, g.color(f.owner), stats, '', fleetBadge(g, f), fleetSubline(g, f))}${fleetSoulRows(g, f)}<div class="fan foe">${ships}</div>${sagaChips(g, f)}`;
 }
 const shortOwner = (g: GameScreen, o: number | null) => g.pname(o).split(' ')[0];
 
@@ -192,7 +197,7 @@ function ownPlanet(g: GameScreen, r: Region): string {
         const m = R.empire?.enabled !== false ? MODULE[blueprintFor(ps, you, k) ?? 'armor'] : null;
         return `<button class="tile ${why ? 'locked' : ''} ${short ? 'short' : ''}" data-a="build" data-cls="${k}"${why ? ` aria-disabled="true"${tip(`⊘ ${shortWhy(why)}`)}` : tip(`${d.name}: ⚔${d.attack * d.shots} ❤${d.hp} ➤${d.speed}${m ? ` · ${m.name}` : ''}`)}>${shipSvg(k, why ? '#6f6796' : g.color(you), 34)}<span class="tname">${esc(d.name)}</span><span class="tcost">${costText(cost)}</span></button>`;
       }).join('');
-      trays += `<div class="tray" data-tray="build"><div class="trh">⚒ Build</div><div class="tiles">${tiles}</div></div>`;
+      trays += `<div class="tray" data-tray="build"><div class="trh">⚒ Build</div>${intoRow(g, r)}<div class="tiles">${tiles}</div></div>`;
     }
     const projects = Object.entries(R.projects).filter(([, p]) => !(p.vein && !r.vein)).map(([k, p]) => {
       const lvl = k === 'develop' ? r.dev : (r.buildings[k] ?? 0);
@@ -212,7 +217,28 @@ function ownPlanet(g: GameScreen, r: Region): string {
     trays += `<div class="acts">${agents ? ib('influence', '✦', 'Purge', g.orderWhy({ type: 'influence', target: r.id }), '', 'Remove rival agents') : ''}${ib('scan', '◎', 'Scan', g.orderWhy({ type: 'scan', target: r.id }), '', 'Reveal this area')}</div>`;
   }
   const cap = st.players[you]?.capital === r.id ? ' <small class="tag">capital</small>' : '';
-  return `${head(g, r.name, g.color(r.owner), regionStats(g, r), cap)}${regionStatus(g, r)}${trays}`;
+  return `${head(g, r.name, g.color(r.owner), regionStats(g, r), cap, '', worldEpi(g, r))}${regionStatus(g, r)}${worldSoulRows(g, r)}${trays}`;
+}
+
+/** Which fleet a build at r goes into: a fleet already here, or a new banner (the founding sheet). Per region. */
+const intoChoice = new Map<number, number | 'new'>();
+function joinable(g: GameScreen, r: Region) {
+  const pos = g.projected(g.nextSlot() ?? 0);
+  return g.st.fleets.filter(x => x.owner === g.you && pos.get(x.id) === r.id && x.ships.length && x.ships.length < g.st.rules.maxShipsPerFleet && x.bornTurn !== g.st.turn);
+}
+function intoOf(g: GameScreen, r: Region): number | 'new' {
+  const js = joinable(g, r);
+  const c = intoChoice.get(r.id);
+  if (c === 'new') return 'new';
+  if (c !== undefined && js.some(f => f.id === c)) return c;
+  return js.find(f => f.banner)?.id ?? js[0]?.id ?? 'new';
+}
+function intoRow(g: GameScreen, r: Region): string {
+  const js = joinable(g, r);
+  const cur = intoOf(g, r);
+  const left = bannersLeft(g, r.id);
+  const chips = js.map(f => `<button class="into ${cur === f.id ? 'on' : ''}" data-a="into" data-id="${f.id}"${tip(`Build into ${f.name}`)}>${f.banner ? bannerSvg(f.banner.sigil, g.color(f.owner), 18) : '<i>◇</i>'}<span>${esc(f.name.replace(/^The /, '').split(' ').slice(0, 2).join(' '))}</span><small>${f.ships.length}</small></button>`).join('');
+  return `<div class="intos">${chips}<button class="into new ${cur === 'new' ? 'on' : ''}" data-a="into" data-id="new"${tip('Found a new fleet: a new banner')}><i>⚑</i><span>New banner</span><small class="${left.free <= 0 ? 'bad' : ''}">${Math.max(0, left.free)}/${left.limit}</small></button></div>`;
 }
 
 /** Your fleets that could seize this region right now, best odds first. */
@@ -246,7 +272,7 @@ function foreignPlanet(g: GameScreen, r: Region): string {
   }
   const foes = st.fleets.filter(f => f.region === r.id && f.owner !== g.you && f.ships.length);
   const fl = foes.length ? `<div class="fan foe">${foes.map(f => `<button class="cls" data-a="fleet" data-id="${f.id}"${tip(f.name)}>${shipSvg(f.ships[0]?.cls ?? 'frigate', g.color(f.owner), 26)}<b>⚔${fleetPower(st, f)}</b></button>`).join('')}</div>` : '';
-  return `${head(g, r.name, g.color(owner), regionStats(g, r), extra)}${regionStatus(g, r)}${fl}${body}`;
+  return `${head(g, r.name, g.color(owner), regionStats(g, r), extra, '', worldEpi(g, r))}${regionStatus(g, r)}${worldSoulRows(g, r)}${fl}${body}`;
 }
 
 // ---------------------------------------------------------------- events (bound once)
@@ -309,6 +335,9 @@ export function cardAction(g: GameScreen, a: string, data: DOMStringMap, shift =
   if (a === 'close') { g.deselect(); return; }
   if (a === 'more') { moreOpen = !moreOpen; g.renderAll(); return; }
   if (!sel) return;
+  if (a === 'record' && soulAction(g, a, data)) return;
+  if (a === 'into' && sel.kind === 'region') { intoChoice.set(sel.id, data.id === 'new' ? 'new' : Number(data.id)); g.renderAll(); return; }
+  if (g.canPlan && soulAction(g, a, data)) return;
   if (a === 'fleet') { g.select({ kind: 'fleet', id: Number(data.id) }); return; }
   if (a === 'sib' && sel.kind === 'fleet') {
     const f = g.fleet(sel.id); if (!f) return;
@@ -353,9 +382,14 @@ export function cardAction(g: GameScreen, a: string, data: DOMStringMap, shift =
   const r = g.st.regions[sel.id];
   switch (a) {
     case 'build': {
-      const pos = g.projected(g.nextSlot() ?? 0);
-      const join = g.st.fleets.find(x => x.owner === g.you && pos.get(x.id) === r.id && x.ships.length < g.st.rules.maxShipsPerFleet && x.bornTurn !== g.st.turn);
-      g.addOrder({ type: 'build', region: r.id, cls: data.cls!, fleet: join ? join.id : null });
+      const into = intoOf(g, r);
+      const cls = data.cls!;
+      if (into !== 'new') { g.addOrder({ type: 'build', region: r.id, cls, fleet: into }); break; }
+      // a scout alone forms a picket (no banner); anything else raises a banner: the founding ritual (Shift: quick)
+      if (cls === 'scout' || g.st.rules.soul?.enabled === false) { g.addOrder({ type: 'build', region: r.id, cls, fleet: null }); break; }
+      const block = g.orderWhy({ type: 'build', region: r.id, cls, fleet: null });
+      if (block && !/banner/i.test(block)) { g.addOrder({ type: 'build', region: r.id, cls, fleet: null }); break; }
+      openFounding(g, { region: r.id, cls }, shift);
       break;
     }
     case 'develop': g.addOrder({ type: 'develop', region: r.id, project: data.proj! }); break;

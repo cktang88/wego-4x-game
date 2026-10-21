@@ -67,7 +67,7 @@ function techInfo(g: GameScreen, pid: number, t: TechDef): TInfo {
   if (st.players[pid].techs?.includes(t.id)) return { s: 'own', why: 'Researched.' };
   const mine = pid === g.you;
   const pend = mine ? pendingResearch(g) : null;
-  if (pend === t.id) return { s: 'pending', why: g.live ? 'Queued: bought at the next tick.' : 'Queued: bought when the turn resolves, before pulse I. Remove it to pick another.' };
+  if (pend === t.id) return { s: 'pending', why: g.live ? 'Queued: bought at the next tick.' : 'Queued: bought when the turn resolves, before any orders. Remove it to pick another.' };
   const b = researchBlock(st, pid, t.id);
   if (b?.startsWith('you chose')) return { s: 'other', why: `${capFirst(b)} Tier III is a fork: one of two, forever.` };
   if (t.tier === 4) { const o = starOwner(st, t.id); if (o !== null && o !== pid) return { s: 'rival', why: `${st.players[o].name} owns it. A ★ technology has one owner per game.`, owner: o }; }
@@ -179,7 +179,7 @@ function lawCard(g: GameScreen, pid: number, editable: boolean, id: string): Law
   const opp = opposite(id);
   const switching = !!opp && !!cs.players[pid].laws?.includes(opp);
   if (pl.laws?.includes(id)) {
-    if (pid === g.you && pendingRevoke(g, id)) return { state: 'revoking', why: null, note: g.live ? 'Revoked at the next tick.' : 'Revoked when the turn resolves (before pulse I).', cost };
+    if (pid === g.you && pendingRevoke(g, id)) return { state: 'revoking', why: null, note: g.live ? 'Revoked at the next tick.' : 'Revoked when the turn resolves, before any orders.', cost };
     return { state: 'on', why: null, note: 'In force. Revoking is free and opens the slot.', cost };
   }
   const k = pid === g.you ? pendingLaw(g, id) : null;

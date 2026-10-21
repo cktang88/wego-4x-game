@@ -25,7 +25,7 @@ await page.addInitScript(() => {
   window.__rafs = () => rafs;
 });
 await page.goto(base);
-await page.evaluate(() => { localStorage.clear(); localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); });
+await page.evaluate(() => { localStorage.clear(); localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); localStorage.setItem('tc.herald.auto', 'off'); });
 await page.reload();
 await page.waitForTimeout(300);
 

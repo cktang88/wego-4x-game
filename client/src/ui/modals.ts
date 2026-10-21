@@ -95,7 +95,11 @@ function build(g: Host, name: ModalName) {
   cur = o;
   root.addEventListener('click', onClick);
   root.addEventListener('submit', e => { e.preventDefault(); if (cur) sendChat(ctx(cur)); });
-  root.addEventListener('input', e => { const t = e.target as HTMLInputElement; if (t.matches('[data-chat-msg]')) ui.chatDraft = t.value; });
+  root.addEventListener('input', e => {
+    const t = e.target as HTMLInputElement;
+    if (t.matches('[data-chat-msg]')) ui.chatDraft = t.value;
+    if (t.matches('[data-pact-words]')) ui.pactWords[Number(t.dataset.pactWords)] = t.value;
+  });
   window.addEventListener('keydown', onKey, true);
   window.addEventListener('resize', onResize);
   bindSwipe(o);

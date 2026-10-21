@@ -19,6 +19,8 @@ export interface BattleViewerCtx {
   playerColor: (owner: number) => string;
   regionName: (id: number) => string;
   you: number | null;
+  /** LIVE game: the report's `pulse` is the tick within the cycle (WEGO turns have no pulses). */
+  live?: boolean;
 }
 
 // ------------------------------------------------------------------ timing
@@ -423,12 +425,13 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   const mvp = shipUnits.slice().sort((a, b) => (b.kills * 100 + b.dmg) - (a.kills * 100 + a.dmg))[0];
 
   // ---------------------------------------------------------------- DOM
+  const when = ctx.live ? `Cycle ${report.turn} · Tick ${report.pulse}` : `Turn ${report.turn}${(report.day ?? 1) > 1 ? ` · Day ${report.day}` : ''}`;
   const overlay = el('div', 'bv-overlay');
   const panel = el('div', 'bv-panel');
   overlay.appendChild(panel);
   const head = el('div', 'bv-head');
   const title = el('div', 'bv-title',
-    `<b>${esc(report.name)}</b><span>${esc(ctx.regionName(report.region))} · Turn ${report.turn} · Pulse ${report.pulse} · ${report.sides.length} sides</span>`);
+    `<b>${esc(report.name)}</b><span>${esc(ctx.regionName(report.region))} · ${when} · ${report.sides.length} sides</span>`);
   const xBtn = el('button', 'bv-x', '×');
   xBtn.title = 'Close (Esc)';
   head.append(title, xBtn);
@@ -464,7 +467,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     });
     intro.innerHTML = `<div class="bv-card-in"><div class="bv-kicker">Engagement detected</div>
       <div class="bv-big">${esc(report.name)}</div>
-      <div class="bv-sub">${esc(ctx.regionName(report.region))} · Turn ${report.turn} · Pulse ${report.pulse}</div>
+      <div class="bv-sub">${esc(ctx.regionName(report.region))} · ${when}</div>
       <div class="bv-rule"></div><div class="bv-sides">${parts.join('')}</div>
       <div class="bv-hint">Tap to skip</div></div>`;
   }
@@ -484,7 +487,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       else if (inBattle) { head = 'Defeat'; col = '#ff5d73'; }
       else head = `${ctx.playerName(w)} prevails`;
     }
-    const sub = report.ongoing ? `Day ${report.day ?? 1} · ${report.totalRounds ?? report.rounds.length} rounds so far · it continues next pulse. Reinforcements can still turn it.`
+    const sub = report.ongoing ? `Day ${report.day ?? 1} · ${report.totalRounds ?? report.rounds.length} rounds so far · it continues next ${ctx.live ? 'tick' : 'turn'}. Reinforcements can still turn it.`
       : w === null ? 'The field remains contested'
       : `<span style="color:${esc(ctx.playerColor(w))}">${esc(ctx.playerName(w))}${ctx.you === w ? ' (You)' : ''}</span> holds the field`;
     const rows = sides.map((sd, i) => {
@@ -1020,6 +1023,17 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   function drawTexts(tt: number) {
     g.save();
     g.textAlign = 'center'; g.textBaseline = 'middle';
+    // status callouts (DESTROYED / WEAPONS OFFLINE / SHIELDS DOWN...) never overprint: each takes the first free
+    // row above its ship, stepping up until it clears the ones already placed this frame
+    const placed: { l: number; r: number; t: number; b: number }[] = [];
+    const slot = (x: number, y: number, w: number, h: number): number => {
+      for (let i = 0; i < 6; i++) {
+        const yy = y - i * (h + 3);
+        const box = { l: x - w / 2 - 4, r: x + w / 2 + 4, t: yy - h / 2, b: yy + h / 2 };
+        if (!placed.some(p => box.l < p.r && box.r > p.l && box.t < p.b && box.b > p.t)) { placed.push(box); return yy; }
+      }
+      return y;
+    };
     for (const sh of shots) {
       if (sh.rec.miss || tt < sh.t1 || tt > sh.t1 + 1.8) continue;
       const e = tt - sh.t1;
@@ -1042,7 +1056,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         const txt = sh.rec.kill ? 'DESTROYED' : CRIT_TEXT[sh.rec.crit!] ?? 'CRITICAL';
         g.font = `700 ${Math.round(11 * pop)}px ${FONT}`;
         setLs(g, '0.2em');
-        const y = top - 18 - k * 14;
+        const y = slot(tp.x, top - 18 - k * 14, g.measureText(txt).width, 14);
         g.lineWidth = 3; g.strokeStyle = 'rgba(8,2,20,.9)';
         g.strokeText(txt, tp.x, y);
         g.shadowColor = sh.rec.kill ? '#ff3355' : '#ff9f1a'; g.shadowBlur = 10;
@@ -1060,7 +1074,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       g.globalAlpha = 1 - clamp((e - 1.6) / 0.6);
       g.font = `700 14px ${FONT}`; setLs(g, '0.3em');
       g.fillStyle = '#ff8095'; g.shadowColor = '#ff3355'; g.shadowBlur = 12;
-      g.fillText('GARRISON FALLS', u.hx, u.hy - u.s * 1.7 - 8);
+      g.fillText('GARRISON FALLS', u.hx, slot(u.hx, u.hy - u.s * 1.7 - 8, g.measureText('GARRISON FALLS').width, 16));
       g.shadowBlur = 0; setLs(g, '0px');
     }
     // retreat callouts
@@ -1074,7 +1088,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       g.font = `700 12px ${FONT}`; setLs(g, '0.28em');
       g.fillStyle = '#e8e0ff'; g.shadowColor = sd.color; g.shadowBlur = 10;
       const fn = (fleetName.get(r.fleet)?.name ?? 'Fleet').toUpperCase();
-      g.fillText(`${fn} RETREATS`, clamp(fu.hx, 90, W - 90), clamp(fu.hy - 40, 60, H - 60));
+      { const rx = clamp(fu.hx, 90, W - 90); g.fillText(`${fn} RETREATS`, rx, slot(rx, clamp(fu.hy - 40, 60, H - 60), g.measureText(`${fn} RETREATS`).width, 15)); }
       g.shadowBlur = 0; setLs(g, '0px');
     }
     g.restore();

@@ -16,7 +16,7 @@ page.on('pageerror', e => errors.push(e.message));
 const shot = async n => page.screenshot({ path: `${out}/ph-${n}.png` });
 await page.goto(base);
 // the first-run tour is exercised by scripts/ux-shots.mjs; skip it here
-await page.evaluate(() => { localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); });
+await page.evaluate(() => { localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); localStorage.setItem('tc.herald.auto', 'off'); });
 await page.waitForTimeout(800);
 await shot('1-lobby');
 await page.tap('[data-l=start]');

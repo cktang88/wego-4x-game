@@ -35,7 +35,7 @@
 .tn small { font-size: 10px; line-height: 1.05; color: var(--faint); white-space: nowrap; }
 .tn.t4 { border-radius: 14px; }
 .tn.t4 .ti { font-size: 17px; }
-.tn:hover:not(:disabled) { background: rgba(150, 110, 255, 0.16); }
+.tn:hover:not(:disabled) { background: rgba(214, 173, 98, 0.16); }
 .tn.focus { outline: 2px solid var(--gold); outline-offset: 1px; }
 /* owned: lit in the branch colour */
 .tn.own {
@@ -62,7 +62,7 @@
 .tn.rival small { color: var(--rc); overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .tn .x, .lc .x {
   position: absolute; top: 1px; right: 2px; width: 18px; height: 18px; line-height: 16px; border-radius: 50%; font-style: normal; font-size: 13px;
-  color: var(--text); background: rgba(10, 6, 22, 0.85); border: 1px solid var(--line-strong); cursor: pointer; text-align: center;
+  color: var(--text); background: rgba(16, 17, 22, 0.85); border: 1px solid var(--line-strong); cursor: pointer; text-align: center;
 }
 .tn .x:hover, .lc .x:hover { border-color: var(--bad); color: var(--bad); }
 /* rivals who own it too */
@@ -113,7 +113,7 @@
 
 /* ------------------------------------------------------------ ship designs */
 .bps { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 4px; }
-.bp { display: grid; grid-template-columns: 1fr auto; grid-template-areas: 'c m' 'b m'; gap: 0 6px; align-items: center; font-size: 13px; padding: 3px 0; border-bottom: 1px dashed rgba(160, 130, 255, 0.12); }
+.bp { display: grid; grid-template-columns: 1fr auto; grid-template-areas: 'c m' 'b m'; gap: 0 6px; align-items: center; font-size: 13px; padding: 3px 0; border-bottom: 1px dashed rgba(200, 168, 110, 0.12); }
 .bp .bpc { grid-area: c; color: var(--text); }
 .bp .bpc .g { display: inline-block; width: 16px; color: var(--accent); }
 .bp .bpm { grid-area: b; font-size: 12px; color: var(--dim); padding-left: 16px; }

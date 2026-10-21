@@ -8,7 +8,7 @@ for (const [tag, ctxOpts] of [['d', { viewport: { width: 1440, height: 900 } }],
   const page = await ctx.newPage();
   await page.routeWebSocket(/\?token=/, () => {});
   await page.goto('http://localhost:5173/');
-  await page.evaluate(() => { localStorage.clear(); localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); });
+  await page.evaluate(() => { localStorage.clear(); localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); localStorage.setItem('tc.herald.auto', 'off'); });
   await page.goto('http://localhost:5173/');
   await page.screenshot({ path: `${out}/${tag}-lobby.png` });
   await page.click('[data-l=start]'); await page.waitForTimeout(1200);

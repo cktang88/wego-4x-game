@@ -18,7 +18,7 @@ page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 const tag = phone ? 'ph' : 'dt';
 const shot = n => page.screenshot({ path: `${out}/${tag}-${n}.png` });
 await page.goto(base);
-await page.evaluate(() => { localStorage.clear(); localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); });
+await page.evaluate(() => { localStorage.clear(); localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); localStorage.setItem('tc.herald.auto', 'off'); });
 await page.reload();
 await page.waitForTimeout(700);
 await shot('00-lobby');

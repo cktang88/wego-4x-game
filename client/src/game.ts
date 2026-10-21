@@ -27,6 +27,12 @@ import { Gestures } from './hud/gestures.ts';
 import { Teach } from './hud/onboarding.ts';
 import { fmtDur, shortWhy, typing } from './hud/util.ts';
 import { intentFor, commitIntent, type Intent } from './hud/verbs.ts';
+import { applyFoundingVows } from './hud/soul.ts';
+import { maybeHerald, openHerald, heraldOpen, closeHerald } from './ui/herald.ts';
+import { openSaga, sagaOpen, closeSaga } from './ui/saga.ts';
+// the chrome theme and the Soul layer's styles load after every other sheet (shell.css, modals.css)
+import './theme.css';
+import './soul.css';
 
 export { fmtDur };
 
@@ -597,6 +603,7 @@ export class GameScreen {
       this.savePlan();
     } else this.loadPlan();
     if (this.planKey() !== this.lastPlanKey) { this.lastPlanKey = this.planKey(); this.undoStack = []; this.replacing = null; this.lifted.clear(); }
+    if (this.canPlan) applyFoundingVows(this);
     if (this.sel?.kind === 'fleet' && !this.fleet(this.sel.id)) this.sel = null;
     if (this.sel?.kind === 'region' && !this.st.regions[this.sel.id]) this.sel = null;
     if (this.targetSlot !== null && this.targetSlot >= this.plan.orders.length) this.targetSlot = null;
@@ -637,6 +644,7 @@ export class GameScreen {
     }
     this.renderAll();
     this.maybeShowVictory();
+    if (this.st.winner === null) this.later(() => this.heraldCheck(), 60);
   }
   lastSeenKey = '';
   /** Your seat even once the game is over (its view is then the revealed, seatless one). */
@@ -687,6 +695,7 @@ export class GameScreen {
     // numbers that count between values would flash the previous player's resources
     resetUiFx();
     document.querySelectorAll('.overlay:not(.curtain), .bv-overlay').forEach(x => x.remove());
+    closeHerald(); closeSaga();
     this.curtain?.remove();
     const o = overlay(`<div class="dialog" style="text-align:center"><h1 style="color:${this.color(seat)}">${esc(name)}</h1>
       <p>Hotseat: pass the device to <b>${esc(name)}</b>. Other players look away!</p><button class="primary" data-x>I am ${esc(name)}</button></div>`, false);
@@ -698,6 +707,7 @@ export class GameScreen {
       if (this.replay) { this.replay.playing = true; this.replay.last = performance.now(); }
       this.renderAll();
       this.maybeShowVictory();
+      this.heraldCheck();
     });
   }
 
@@ -831,6 +841,8 @@ export class GameScreen {
       else if (e.k === 'capture' || e.k === 'excavate' || e.k === 'destroyed') push(650, e);
       else if (e.k === 'build' || e.k === 'project' || e.k === 'betrayal' || e.k === 'pact' || e.k === 'refit') push(450, e);
       else if (e.k === 'tech' || e.k === 'law') push(e.k === 'tech' && TECH[e.tech]?.tier === 4 ? 1100 : 600, e);
+      else if (e.k === 'rout') push(800, e);
+      else if (e.k === 'soul') { if (SOUL_STAMP[e.kind] && e.region !== undefined) push(SOUL_STAMP[e.kind][2] ? 1000 : 750, e); }
       else if (e.k === 'fail' || e.k === 'note' || e.k === 'blocked' || e.k === 'influence' || e.k === 'fortify' || e.k === 'scan') push(e.k === 'fail' ? 500 : 350, e);
     }
     if (!beats.length) return;
@@ -906,6 +918,20 @@ export class GameScreen {
         case 'tech': case 'law': this.empireFx(e, now); break;
         case 'refit': if (st.regions[e.region]) this.fx.push({ kind: 'build', pos: st.regions[e.region].site, color: this.color(e.owner), t0: now, dur: 700 }); break;
         case 'blocked': this.fx.push({ kind: 'text', pos: st.regions[e.at].site, color: '#ffd86b', t0: now, dur: 900, text: 'blocked' }); break;
+        case 'rout': {
+          const f = R.fleets.get(e.fleet);
+          if (f) { f.region = e.to; R.moving.add(e.fleet); }
+          if (st.regions[e.from]) this.fx.push({ kind: 'stamp', pos: st.regions[e.from].site, color: '#ff9a62', t0: now, dur: 1500, text: 'ROUTED' });
+          focus ??= st.regions[e.from]?.site ?? null;
+          break;
+        }
+        case 'soul': {
+          const k = SOUL_STAMP[e.kind];
+          const r = e.region !== undefined ? st.regions[e.region] : undefined;
+          if (k && r) { this.fx.push({ kind: 'stamp', pos: r.site, color: k[1], t0: now, dur: 1600, text: k[0] }); focus ??= r.site; }
+          if (k?.[2]) this.banner(k[2]);
+          break;
+        }
       }
     }
     // battles inside this turn: sync ship counts from the battle report for fleets involved
@@ -936,6 +962,7 @@ export class GameScreen {
     void res;
     this.renderAll();
     this.maybeShowVictory();
+    if (!wasPreview && this.st.winner === null) this.heraldCheck();
     if (this.autoPlay && this.src instanceof LocalSource && this.st.winner === null) this.later(() => { if (this.autoPlay && !this.replay) (this.src as LocalSource).advance(); }, 900);
   }
 
@@ -987,7 +1014,7 @@ export class GameScreen {
     if (!rep) { toast('Battle report not available.'); return; }
     if (this.replay?.playing) this.togglePause();
     openBattleViewer(rep, {
-      rules: this.st.rules, you: this.you,
+      rules: this.st.rules, you: this.you, live: this.live,
       playerName: o => o === -1 ? (rep.sides.some(x => x.owner === -1 && x.fleets.length) ? 'The Warden' : 'Neutral garrison') : this.pname(o), playerColor: o => this.color(o), regionName: id => this.st.regions[id]?.name ?? '?',
     });
   }
@@ -1227,7 +1254,16 @@ export class GameScreen {
     if (!this.map.fitted && this.map.w > 0) this.map.fit(this.st, this.you !== null ? this.st.regions[this.st.players[this.you]?.capital]?.site : undefined);
   };
   /** A modal, dialog, battle viewer or curtain is up: the board's shortcuts stay quiet. */
-  covered(): boolean { return !!this.curtain || !!document.querySelector('.bv-overlay, .overlay') || this.hud.modalOpen(); }
+  covered(): boolean { return !!this.curtain || !!document.querySelector('.bv-overlay, .overlay') || this.hud.modalOpen() || heraldOpen() || sagaOpen(); }
+  /** The Herald's front page (newest edition, or turn `turn`'s). */
+  openHerald(turn?: number) { openHerald(this, turn); }
+  /** The end-of-game Saga page (works mid-game too: the story so far). */
+  openSaga() { openSaga(this); }
+  /** Open the Herald if a new edition is waiting and nothing else is on screen (start of a turn / cycle). */
+  heraldCheck() {
+    if (this.destroyed || this.curtain || this.blockingReplay || this.hud.modalOpen() || document.querySelector('.overlay, .bv-overlay')) return;
+    maybeHerald(this);
+  }
   onKey = (e: KeyboardEvent) => {
     if (this.destroyed || e.defaultPrevented) return;
     if (typing(e.target)) return;
@@ -1392,7 +1428,7 @@ export class GameScreen {
     const sparks = reducedMotion() ? '' : Array.from({ length: 18 }, (_, i) => `<i style="--x:${(i * 37) % 100}%;--d:${(i * 0.23) % 2.4}s;--s:${0.6 + ((i * 7) % 5) / 5}"></i>`).join('');
     const o = overlay(`<div class="vic-rays" aria-hidden="true"></div><div class="vic-sparks" aria-hidden="true">${sparks}</div><div class="dialog vic-card" data-victory style="text-align:center"><div class="vic-crown" aria-hidden="true">♛</div><h1 class="vic-name" style="color:${w.color};font-size:30px">${esc(w.name)}</h1><h2>${w.id === this.mySeat() ? 'Victory' : 'has won'}</h2>
       <p class="dim">${esc(st.winReason)}</p>${ranks.map((p, i) => `<div class="vic-rank" style="color:${p.color};--i:${i}">${esc(p.name)}: ${p.vp} VP</div>`).join('')}
-      <p class="dim" style="margin-top:12px">The whole map is now revealed. Browse the Chronicle to relive it.</p><div class="row" style="justify-content:center"><button data-x>Look around</button><button class="primary" data-l>Lobby</button></div></div>`);
+      <p class="dim" style="margin-top:12px">The whole map is now revealed. Browse the Chronicle to relive it.</p><div class="row" style="justify-content:center"><button data-x>Look around</button>${this.st.soul ? '<button class="primary" data-saga>⚜ The Saga</button>' : ''}<button ${this.st.soul ? '' : 'class="primary" '}data-l>Lobby</button></div></div>`);
     o.classList.add('victory');
     o.style.setProperty('--win', w.color);
     // the winner's banner goes up over every region they hold, rippling out from their capital
@@ -1400,6 +1436,7 @@ export class GameScreen {
     const cap = st.regions[w.capital]?.site ?? st.regions[0].site;
     for (const r of st.regions) if (r.owner === w.id) this.fx.push({ kind: 'capture', pos: r.site, color: w.color, t0: now + Math.hypot(r.site.x - cap.x, r.site.y - cap.y) * 0.6, dur: 1100 });
     o.querySelector('[data-x]')!.addEventListener('click', () => o.remove());
+    o.querySelector('[data-saga]')?.addEventListener('click', () => { o.remove(); this.openSaga(); });
     o.querySelector('[data-l]')!.addEventListener('click', () => { o.remove(); this.onExit(); });
   }
 }
@@ -1449,8 +1486,17 @@ export function eventText(st: GameState, e: GameEvent, you: number | null): stri
     case 'tech': { const t = TECH[e.tech]; return e.stolen ? `${pn(e.owner)} steals <b>${esc(t?.name ?? e.tech)}</b> from a captured Academy` : `${pn(e.owner)} researched ${t?.icon ?? ''} <b>${esc(t?.name ?? e.tech)}</b>${t?.tier === 4 ? ' <span class="gold">★</span>' : ''}`; }
     case 'law': { const l = LAW[e.law]; return `${pn(e.owner)} ${e.revoked ? 'revokes' : 'enacts'} ${l?.icon ?? ''} <b>${esc(l?.name ?? e.law)}</b>`; }
     case 'refit': return `${pn(e.owner)} ${fn(e.fleet)} refits at ${rn(e.region)}`;
+    case 'rout': return `${pn(e.owner)} ${fn(e.fleet)} routs from ${rn(e.from)}, limping home`;
+    case 'soul': return esc(e.text);
     default: return '';
   }
 }
 
 export { EDICTS };
+
+/** Soul-layer story beats worth a stamp in the replay: [stamp text, ink, banner (big moments)]. */
+const SOUL_STAMP: Record<string, [string, string, string?]> = {
+  broken: ['BROKEN', '#ff7a6a'], debt: ['BLOOD-DEBT', '#ff4f5e'], vengeance: ['VENGEANCE', '#ffb84d'], vow_kept: ['VOW KEPT', '#ffd86b'],
+  vow_broken: ['OATHBREAKER', '#ff4f5e'], liberated: ['LIBERATED', '#9de8ff'], razed: ['RAZED', '#ff8a3c'], coronation: ['CROWNED', '#ffd86b', '♛ A NEW REIGN'],
+  retired: ['RETIRED', '#e8d6a0'],
+};

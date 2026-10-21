@@ -6,7 +6,7 @@ import type { Pt } from '../../../shared/sim/types.ts';
 export const TAU = Math.PI * 2;
 export const numFont = (px: number, w = 700) => `${w} ${px}px "Rajdhani", system-ui, sans-serif`;
 export const nameFont = (px: number) => `600 ${px}px "Rajdhani", system-ui, sans-serif`;
-export const displayFont = (px: number) => `700 ${px}px "Orbitron", "Rajdhani", system-ui, sans-serif`;
+export const displayFont = (px: number) => `700 ${px}px "Cinzel", "Rajdhani", Georgia, serif`;
 export const PLATE = 'rgba(9,6,20,0.88)';
 export const INK = '#0b0716';
 

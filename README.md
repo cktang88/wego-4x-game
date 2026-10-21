@@ -29,7 +29,7 @@ npm run server     # game server (REST + WebSocket) on :8787
 npm run dev        # client with hot reload on :5173 (proxies /api and /ws to :8787)
 ```
 
-Open http://localhost:5173. A short interactive tour runs the first time you play (replay it from ☰ Menu → Quick tour). Hover, or tap on phone, any dotted number or ⓘ to see how it's computed.
+Open http://localhost:5173. The first turns teach by doing: gold callouts point at what to try (Drag to seize, Seal when ready…); Menu → Teach again restarts them. Hover (or long-press on a phone) any icon or number for a short explanation.
 
 - **Play vs AI** runs entirely in the browser; no server needed. The rival dropdowns can also be set to *Human (hotseat)*.
 - **Watch AIs** runs three AIs on a fully revealed map.
@@ -56,13 +56,14 @@ The engine lives in `shared/sim/live.ts` and reuses the same resolver as WEGO.
 
 ## On a phone
 
-Works in iPhone/Android browsers. On narrow screens the layout changes:
-- the map fills the screen;
-- a thumb dock at the bottom holds your 5 orders and **Seal**;
-- one bottom sheet opens at a time: the tapped fleet or region, or the Orders / Intel / Chronicle / Score / Chat tabs;
-- Replay, Intel and Help are under ☰.
+Works in iPhone/Android browsers with the same board as on desktop:
+- the map fills the screen; the top row shows the turn, resources and the three crests;
+- the plan strip (5 order slots) and the primary button sit in the bottom thumb zone;
+- tapping a fleet or world opens its card as a bottom sheet (swipe down to dismiss);
+- drag a fleet to order it: the drop point rides above your finger and a loupe shows what's under it;
+- Empire, Score and Chronicle fold into ≡; notifications fold into one badge.
 
-Pinch to zoom, drag to pan, tap to select. Overdrive is a toggle while targeting. Safe areas (notch, home indicator) are respected, and "Add to Home Screen" gives a full-screen app.
+Pinch to zoom, drag empty space to pan, long-press for the action ring. Safe areas (notch, home indicator) are respected, and "Add to Home Screen" gives a full-screen app.
 
 ## Fiddling (this is a prototype: everything is a knob)
 
@@ -100,9 +101,10 @@ node scripts/mp-e2e.mjs                   # 3 isolated browsers create/join/seal
 node scripts/review-e2e.mjs               # long soak: Watch AIs on auto, replays, battles, listener leaks
 node scripts/mp-test.mjs                  # REST + WebSocket protocol smoke test against :8787
 node scripts/live-e2e.mjs <outdir> [base] [phone]  # LIVE blitz game: bank orders, travel, ticks
-node scripts/ux-shots.mjs <outdir> [base] [wego|live|...]  # walks the first-run tour, screenshots each step
+node scripts/ux-shots.mjs <outdir> [base] [wego|live|...]  # walks the teach-by-doing callouts, screenshots each step
 node scripts/fx-shots.mjs <outdir> [phone]  # animation screenshots + frame-time measurements (NOSHOT=1 to only measure)
 node scripts/phone.mjs <outdir>           # iPhone 15 Pro emulation (393x852 @3x, touch) screenshots of the phone layout
+node scripts/soul-e2e.mjs [outdir]        # Soul layer UI: founding, honours, callings, vows, Herald dispatch, retire, raze, the Saga
 ```
 
 `sim` prints win rates by AI level (does skill matter?), game length, battles per turn, VP sources, Warden wake rate, and more.
@@ -111,12 +113,16 @@ In the browser console, `tc.state` / `tc.rules` / `tc.screen` give you the live 
 
 ## How a turn works
 
-1. **Plan** (secret): up to 5 orders in slots I–V, plus free doctrine changes, fleet splits, merges and renames. **Preview** simulates your plan against idle rivals.
-2. **Resolve** (once all 3 seal their orders): all orders resolve together in one step, in a fixed order: Prepare (fortify/scan/feint/conceal/pact/laws/refits) → Economy (build/develop/excavate) → Influence → Movement (clashes, blocking, guard reactions) → Sieges → Combat (each battle fights 5 rounds; finished sieges capture). A fleet gets one move or seize per turn; a Seize can march through clear space first. Then everyone gets 5 fresh orders.
-3. **Then**: the Warden acts, then income/upkeep/repairs/projects, then pacts. Then scoring, which uses the final state only.
-4. **Replay**: every client animates what *they* could see. Battles open in the battle viewer.
+1. **Plan** (secret): drag your fleets onto worlds (the target picks the verb: Move, Seize, Merge), tap your worlds to Build and Develop, and fill up to 5 order slots in the strip. Long moves follow the hyperlanes and become routes that keep going on later turns. Free actions cost no order: doctrine, splits, merges, research, vows, honours, callings, a Herald dispatch. The primary button walks you through idle fleets and research, then **Seal**. 👁 Preview simulates your plan against idle rivals.
+2. **Resolve** (once all 3 have sealed): every order of every player resolves together in **one step**, in a fixed order: Prepare (fortify/scan/feint/conceal/pact/laws/refits) → Economy (build/develop/excavate) → Influence → Movement (clashes, blocking, guard reactions) → Sieges → Combat (each battle fights its rounds for the turn and carries on next turn; finished sieges capture).
+3. **Then**: the Warden acts, then income/upkeep/repairs/projects, then pacts, the Soul layer's bookkeeping (vows, limping fleets, callings, deeds) and the Herald's new edition. Scoring uses the final state only.
+4. **Replay**: every client animates what *they* could see, on the board. Battles leave a result chip that opens the battle viewer. Then the Herald's front page.
 
 Victory: first to the VP target, most VP at the turn limit, or hold all three Crowns for 3 consecutive turns.
+
+### The Soul layer
+
+Fleets fly **banners** (founded with a sigil, a name and point-bought boons and banes), swear **vows**, earn ranks, honours and epithets, **rout** and limp home instead of vanishing, and carry their scars. Worlds keep a ledger, earn an epithet, take a **Calling** that grows with tenure, and collect deeds; a fresh conquest can be **razed**. The **Herald** prints a front page each turn (plant one dispatch: a boast, a threat, a lie), sworn pacts brand their breakers **Oathbreaker**, killing a commander leaves a **blood-debt**, and at the end the **Saga** tells the whole game (copy text, save image). Design: [docs/SOUL.md](docs/SOUL.md).
 
 ## Architecture
 
@@ -126,7 +132,7 @@ shared/   deterministic simulation (no DOM, no Node APIs), used by server, clien
   sim/    mapgen, setup, orders, resolve, combat, ai, visibility (fog), view (per-player filtering), edicts
   protocol.ts  client/server message types
 server/   Node http + ws: lobby REST, game channel, persistence, deadlines/stewards
-client/   Vite + TypeScript, Canvas 2D map & battle viewer, DOM panels; LocalSource (in-browser) / RemoteSource (WS)
+client/   Vite + TypeScript, Canvas 2D map (painted miniatures) & battle viewer, a DOM HUD and full-screen modals; LocalSource (in-browser) / RemoteSource (WS)
 scripts/  simulate.ts (balance), cli.ts (text play), debug.ts, e2e/screenshot helpers
 tests/    vitest
 ```

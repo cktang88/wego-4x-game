@@ -29,7 +29,7 @@ async function start(ctxOpts, tag, mode = 'wego') {
   page.on('response', r => { if (r.status() >= 400 && !new URL(r.url()).pathname.startsWith('/api/')) errors.push(`[${tag}] ${r.status()} ${r.url()}`); });
   page.on('dialog', d => d.accept());
   await page.goto(base);
-  await page.evaluate(() => { localStorage.clear(); for (const k of ['wego', 'live', 'v2']) localStorage.setItem(`tc.tutorial.${k}`, 'done'); });
+  await page.evaluate(() => { localStorage.clear(); for (const k of ['wego', 'live', 'v2']) localStorage.setItem(`tc.tutorial.${k}`, 'done'); localStorage.setItem('tc.herald.auto', 'off'); });
   await page.reload();
   await wait(page, 600);
   await page.fill('[data-l=seed]', '4242');
@@ -267,7 +267,7 @@ const shot = (page, name) => page.screenshot({ path: `${out}/${name}.png` });
   await page.routeWebSocket(/\?token=/, () => {});
   page.on('pageerror', e => errors.push(`[spectator] ${e.message}`));
   await page.goto(base);
-  await page.evaluate(() => { localStorage.clear(); for (const k of ['wego', 'live', 'v2']) localStorage.setItem(`tc.tutorial.${k}`, 'done'); });
+  await page.evaluate(() => { localStorage.clear(); for (const k of ['wego', 'live', 'v2']) localStorage.setItem(`tc.tutorial.${k}`, 'done'); localStorage.setItem('tc.herald.auto', 'off'); });
   await page.reload(); await wait(page, 600);
   await page.click('[data-l=watch]'); await wait(page, 1500);
   await page.evaluate(async () => { window.__m = await import('/src/ui/modals.ts'); });

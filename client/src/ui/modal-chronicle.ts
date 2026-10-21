@@ -44,7 +44,9 @@ function battlesOf(c: Ctx, turn: number): BattleReport[] | null {
 export const CHRON_FILTERS: [string, string][] = [['all', 'All'], ['battles', '⚔ Battles'], ['mine', 'My empire']];
 
 export function chronicleHead(c: Ctx): string {
-  return `<div class="mh-seg" role="tablist">${CHRON_FILTERS.map(([id, n], i) => `<button class="m-seg ${ui.chronFilter === id ? 'on' : ''}" data-a="chron-f" data-id="${id}" role="tab" aria-selected="${ui.chronFilter === id}"><kbd>${i + 1}</kbd>${n}</button>`).join('')}</div>`;
+  const soul = !!c.g.st.soul;
+  const extra = soul ? `<button class="mbtn m-ghost sm herald-b" data-a="herald" title="The Herald: front pages">✒ Herald</button><button class="mbtn m-ghost sm saga-b" data-a="saga" title="The Saga so far">⚜ Saga</button>` : '';
+  return `${extra}<div class="mh-seg" role="tablist">${CHRON_FILTERS.map(([id, n], i) => `<button class="m-seg ${ui.chronFilter === id ? 'on' : ''}" data-a="chron-f" data-id="${id}" role="tab" aria-selected="${ui.chronFilter === id}"><kbd>${i + 1}</kbd>${n}</button>`).join('')}</div>`;
 }
 
 export function chronicleBody(c: Ctx): string {
@@ -82,6 +84,8 @@ export function chronicleBody(c: Ctx): string {
 export function chronicleAct(c: Ctx, a: string, el: HTMLElement): boolean {
   const g = c.g, id = el.dataset.id ?? '';
   switch (a) {
+    case 'herald': c.close(); g.openHerald?.(); return true;
+    case 'saga': c.close(); g.openSaga?.(); return true;
     case 'chron-f': ui.chronFilter = id as typeof ui.chronFilter; c.rerender(); return true;
     case 'chron-x': if (el.hasAttribute('data-static')) return true; if (ui.chronOpen.has(id)) ui.chronOpen.delete(id); else ui.chronOpen.add(id); c.rerender(); return true;
     case 'replay': c.close(); g.replayTurn?.(Number(id)); return true;
@@ -93,7 +97,7 @@ export function chronicleAct(c: Ctx, a: string, el: HTMLElement): boolean {
       const rep = h && h !== 'loading' ? h.battles.find(b => b.id === bid) : st.last?.battles.find(b => b.id === bid);
       if (!rep) return true;
       openBattleViewer(rep, {
-        rules: st.rules, you: g.you, regionName: r => st.regions[r]?.name ?? '?', playerColor: o => g.color(o),
+        rules: st.rules, you: g.you, live: g.live, regionName: r => st.regions[r]?.name ?? '?', playerColor: o => g.color(o),
         playerName: o => o === -1 ? (rep.sides.some(x => x.owner === -1 && x.fleets.length) ? 'The Warden' : 'Neutral garrison') : g.pname(o),
       });
       return true;

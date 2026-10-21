@@ -22,7 +22,7 @@ async function open(opts = {}, init) {
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(base);
-  await page.evaluate(() => { try { localStorage.clear(); localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); } catch { /* blocked */ } });
+  await page.evaluate(() => { try { localStorage.clear(); localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); localStorage.setItem('tc.herald.auto', 'off'); } catch { /* blocked */ } });
   await page.goto(base);
   return { ctx, page };
 }
