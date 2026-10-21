@@ -3,8 +3,8 @@
 A **3-player competitive WEGO space 4X** you can play with friends asynchronously in the browser.
 
 - **Five orders per turn, forever.** Your whole empire gets 5 orders a turn, inspired by Old World's Orders. Expansion gives you more options, never more actions.
-- **Simultaneous pulses.** The order in slot *k* resolves in pulse *k* for all three players at once. Everyone plans in secret, then it all happens together, and you watch the replay.
-- **Spaceship conflict over stalemate.** Head-on moves *clash* instead of bouncing. Battles are *sustained*: they rage pulse after pulse (bigger ones for longer, often over several turns) so reinforcements can arrive and sieges give defenders time to respond. Every battle still reaches a decision, and VP rewards holding contested Crowns, the Throne, and fighting.
+- **Simultaneous turns.** Everyone plans in secret; then all orders of all three players resolve together in one step, and you watch the replay.
+- **Spaceship conflict over stalemate.** Head-on moves *clash* instead of bouncing. Battles are *sustained*: they rage round after round (bigger ones for longer, often over several turns) so reinforcements can arrive and sieges give defenders time to respond. Every battle still reaches a decision, and VP rewards holding contested Crowns, the Throne, and fighting.
 - **Memorable fleets.** Named commanders earn traits through deeds. Rivals who meet again get vengeance bonuses. Veteran ships earn titles. Engines, weapons and shields get knocked out individually. Battles leave wreckage and memorials on the map.
 - **Light diplomacy and deception.** Intel signals come from rivals' actual orders. Feints, scans, conceal, influence and pacts are breakable, but betrayal costs VP.
 
@@ -37,19 +37,19 @@ To play with friends over the internet, run `npm start` on any machine they can 
 ## Live mode (Neptune's Pride style)
 
 When you create a game (vs AI or online), pick **Live** instead of WEGO:
-- The world ticks on a real clock (one pulse per tick: every 30 min at normal speed). Every 8 ticks a *cycle* (= a WEGO turn: income, scoring, edicts) ends.
+- The world ticks on a real clock (one resolution step per tick: every 30 min at normal speed). Every 8 ticks a *cycle* (= a WEGO turn: income, scoring, edicts) ends.
 - You earn **one order every 4 hours**, bank up to 6, and spend them whenever you like. Spent orders act at the next tick and can be taken back until then.
 - Moves go any distance. Fleets travel in real time with visible routes and ETAs. Halt is free.
 - Speeds: *Normal* (days-long games), *Fast* (×60, an evening), *Blitz* (×360, testing). Tune it in `rules.live`.
 - Online, the server runs the clock, so nobody has to be connected. Locally, the browser catches up on missed ticks when you come back. AI seats spend one banked order per tick.
 
-The engine lives in `shared/sim/live.ts` and reuses the same pulse resolver as WEGO.
+The engine lives in `shared/sim/live.ts` and reuses the same resolver as WEGO.
 
 ## On a phone
 
 Works in iPhone/Android browsers. On narrow screens the layout changes:
 - the map fills the screen;
-- a thumb dock at the bottom holds the 5 pulse slots and **Seal**;
+- a thumb dock at the bottom holds your 5 orders and **Seal**;
 - one bottom sheet opens at a time: the tapped fleet or region, or the Orders / Intel / Chronicle / Score / Chat tabs;
 - Replay, Intel and Help are under ☰.
 
@@ -103,8 +103,8 @@ In the browser console, `tc.state` / `tc.rules` / `tc.screen` give you the live 
 ## How a turn works
 
 1. **Plan** (secret): up to 5 orders in slots I–V, plus free doctrine changes, fleet splits, merges and renames. **Preview** simulates your plan against idle rivals.
-2. **Resolve** (once all 3 seal their orders): for each pulse, in fixed order, the server runs Prepare (fortify/scan/feint/conceal/pact) → Influence → Movement (clashes, blocking, guard reactions) → Sieges → Combat (each ongoing battle fights its rounds; finished sieges capture) → Economy (build/develop/excavate). Then everyone gets 5 fresh orders.
-3. **After pulse V**: the Warden acts, then income/upkeep/repairs/projects, then pacts. Then scoring, which uses the final state only.
+2. **Resolve** (once all 3 seal their orders): all orders resolve together in one step, in a fixed order: Prepare (fortify/scan/feint/conceal/pact/laws/refits) → Economy (build/develop/excavate) → Influence → Movement (clashes, blocking, guard reactions) → Sieges → Combat (each battle fights 5 rounds; finished sieges capture). A fleet gets one move or seize per turn; a Seize can march through clear space first. Then everyone gets 5 fresh orders.
+3. **Then**: the Warden acts, then income/upkeep/repairs/projects, then pacts. Then scoring, which uses the final state only.
 4. **Replay**: every client animates what *they* could see. Battles open in the battle viewer.
 
 Victory: first to the VP target, most VP at the turn limit, or hold all three Crowns for 3 consecutive turns.
@@ -137,10 +137,10 @@ The design comes from a research pass over WEGO/async games, action economies, 3
 
 - Old World's Orders and fatigue → fixed 5 orders, max 2 per fleet, and a fleet's second order costs credits.
 - Diplomacy's readable simultaneous resolution, minus bounces → clashes and forced decisions.
-- Dominions' published turn phases → a fixed step order inside each pulse.
+- Dominions' published turn phases → a fixed, published step order.
 - King of Tokyo / Battlefield conquest → a Throne that pays more the longer it's held, with the holder fully visible; Crown majority bonus.
 - Twilight Imperium objectives → Edicts announced a turn before they score.
 - Kingmaking mitigations → bounties for hitting the leader, battle honors, pacts that expire and cost VP to break.
 - XCOM / Shadow of Mordor / RimWorld → deed-based traits, nemesis and vengeance, ship titles, memorials, last stands.
-- Into the Breach / Neptune's Pride intel → signals show destination, arrival pulse and size band, never exact strength. Feints and scans.
+- Into the Breach / Neptune's Pride intel → signals show destination and size band, never exact strength. Feints and scans.
 - Subterfuge / Frozen Synapse → the Preview ghost planner.

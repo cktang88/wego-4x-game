@@ -1,21 +1,24 @@
 // ============================================================================
 //  TURN RESOLUTION — the WEGO heart of the game.
 //
-//  Each player submits up to N orders. The order in slot k resolves in pulse k,
-//  simultaneously for everyone. Inside a pulse the steps always run in this
-//  fixed, published order:
+//  Each player submits up to 5 orders. WEGO resolves them ALL TOGETHER in one
+//  step, simultaneously for everyone (rules.orders.pulses = 1; a fleet gets one
+//  move or seize per turn, and a Seize may march through clear space first).
+//  LIVE resolves one such step per tick. The step always runs in this order:
 //
-//    1. Prepare   — fortify, scan, feint, conceal, pact offers
-//    2. Influence — loyalty pushes; neutral regions may defect
-//    3. Movement  — all moving fleets advance one region per step, together.
+//    1. Prepare   — fortify, scan, feint, conceal, pact offers, laws, refits
+//    2. Economy   — build ships, start projects, excavate relics (WEGO: here,
+//                   so a ship built into a fleet sails with it; LIVE: last)
+//    3. Influence — loyalty pushes; neutral regions may defect
+//    4. Movement  — all moving fleets advance one region per step, together.
 //                   Head-on moves through the same border CLASH (no bounces).
 //                   Entering a region with hostile fleets or a hostile
 //                   garrison stops movement. Guard fleets react to invasions.
-//                   Battles happen wherever hostile fleets end a step together.
-//    4. Seize     — fleets ordered to seize fight the garrison and capture
-//    5. Economy   — build ships, start projects, excavate relics
+//    5. Sieges    — fleets ordered to seize lay siege
+//    6. Combat    — every engagement fights its rounds (roundsPerTurn in WEGO);
+//                   finished sieges capture. Big battles last several turns.
 //
-//  After pulse N: the Warden acts, upkeep and income, pacts, then scoring.
+//  Then: the Warden acts, upkeep and income, pacts, then scoring.
 //  VP is only ever scored on the final end-of-turn state.
 // ============================================================================
 import { TECH, LAW, MODULES } from '../config/empire.ts';
@@ -143,13 +146,15 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     }
   };
 
+  // rounds per combat step: LIVE fights a few per tick; WEGO spreads roundsPerTurn over its pulses (normally one step)
+  const roundsNow = live ? R.combat.roundsPerPulse : Math.max(1, Math.round((R.combat.roundsPerTurn ?? R.combat.roundsPerPulse * R.orders.pulses) / Math.max(1, R.orders.pulses)));
   /** Combat step of a pulse: every engagement fights its rounds, then finished sieges capture. */
   const combatPhase = (pulse: number, cameFrom: Map<number, RegionId>) => {
     for (const r of rotatedRegions) {
       const eng = engagementAt(s, r.id);
       if (!wouldFight(s, r.id) && !eng) continue;
       let rep: BattleReport | undefined;
-      const out = fightRounds(s, rng, r.id, pulse, R.combat.roundsPerPulse, cameFrom, e => (rep = getReport(e, pulse)));
+      const out = fightRounds(s, rng, r.id, pulse, roundsNow, cameFrom, e => (rep = getReport(e, pulse)));
       handleFight(out, r.id, pulse, rep);
     }
     // captures: a besieger standing in a region whose garrison is gone, with no hostile fleets left, takes it
@@ -183,7 +188,9 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   };
 
   // ======================================================================
-  const pulseList = live ? [tick!.pulse] : Array.from({ length: R.orders.pulses }, (_, i) => i + 1);
+  // WEGO resolves every order of the turn in one step (rules.orders.pulses = 1); LIVE resolves one tick
+  const allAtOnce = live || R.orders.pulses <= 1;
+  const pulseList = live ? [tick!.pulse] : Array.from({ length: Math.max(1, R.orders.pulses) }, (_, i) => i + 1);
   for (const pulse of pulseList) {
     emit({ k: 'pulse', pulse });
     const pulseOwners = s.regions.map(r => r.owner);
@@ -193,18 +200,62 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     const seatOrder = [...s.players.slice(rot), ...s.players.slice(0, rot)];
     for (const p of seatOrder) {
       if (p.eliminated) continue;
-      if (live) { for (const o of subs[p.id].orders) if (o) orders.push({ p: p.id, o }); continue; }
+      if (allAtOnce) { for (const o of subs[p.id].orders) if (o) orders.push({ p: p.id, o }); continue; }
       const o = subs[p.id].orders[pulse - 1];
       if (o) orders.push({ p: p.id, o });
     }
     // fleet fatigue: extra orders on the same fleet cost credits (Old World style)
-    for (const { p, o } of orders) {
+    for (let i = 0; i < orders.length; i++) {
+      const { p, o } = orders[i];
       if (!('fleet' in o) || o.type === 'build') continue;
       const f = s.fleets.find(x => x.id === o.fleet);
       if (!f || f.owner !== p) continue;   // never let an order touch a rival's per-fleet budget
+      // all-at-once: orders past a fleet's per-turn limit are dropped here (one step sees them all together)
+      if (allAtOnce && f.ordersThisTurn >= R.orders.maxPerFleet) {
+        fail(pulse, p, o, `a fleet can take at most ${R.orders.maxPerFleet} orders per turn`);
+        orders.splice(i--, 1);
+        continue;
+      }
       if (f.ordersThisTurn > 0) s.players[p].res.credits -= R.orders.repeatFleetCredits;
       f.ordersThisTurn++;
     }
+
+    // ---------------------------------------------------------- economy actions (build / develop / excavate)
+    // WEGO (one step): before movement, so a ship built into a fleet sails with it. LIVE / legacy pulses: last.
+    const economyStep = () => {
+      for (const { p, o: o0 } of orders) {
+        if (o0.type !== 'build' && o0.type !== 'develop' && o0.type !== 'excavate') continue;
+        // a build meant to join a fleet that has since left (or died) forms a new fleet at the yard instead
+        let o: Order = o0;
+        if (o.type === 'build' && o.fleet !== null) {
+          const tf = s.fleets.find(x => x.id === (o as { fleet: number }).fleet);
+          if (!tf || tf.region !== o.region || tf.owner !== p) o = { ...o, fleet: null };
+        }
+        const err = validateOrder(s, p, o);
+        if (err) { fail(pulse, p, o, err); continue; }
+        const regionId = o.type === 'excavate' ? s.fleets.find(f => f.id === o.fleet)!.region : o.region;
+        if (s.fleets.some(f => f.region === regionId && f.ships.length && hostile(s, f.owner, p))) { fail(pulse, p, o, 'enemies present'); continue; }
+        const cost = orderCost(s, o, p);
+        if (!canAfford(s.players[p].res, cost, creditRate(s, p))) { fail(pulse, p, o, 'not enough resources'); continue; }
+        pay(s.players[p].res, cost, creditRate(s, p));
+        if (o.type === 'build') {
+          let f = o.fleet !== null ? s.fleets.find(x => x.id === o.fleet)! : null;
+          if (!f) f = newFleet(s, rng, p, o.region);
+          const sh = newShip(s, rng, o.cls, p);
+          f.ships.push(sh);
+          emit({ k: 'build', pulse, region: o.region, owner: p, cls: o.cls, fleet: f.id, name: sh.name });
+          signal(pulse, p, o.region, `Shipyard activity at ${s.regions[o.region].name}`, { confirmed: false });
+        } else if (o.type === 'develop') {
+          s.regions[o.region].project = { key: o.project, progress: 0, owner: p };
+          emit({ k: 'project', pulse, region: o.region, owner: p, key: o.project, done: false });
+          signal(pulse, p, o.region, `Construction at ${s.regions[o.region].name}`);
+        } else {
+          excavate(s, rng, p, regionId, pulse, emit);
+        }
+      }
+    };
+    const economyFirst = !live && allAtOnce;
+    if (economyFirst) economyStep();
 
     // ---------------------------------------------------------- 1. prepare
     for (const { p, o } of orders) {
@@ -241,7 +292,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
               const exposed = s.scans.some(sc => sc.owner === obs.id && sc.until >= s.turn && (sc.region === o.target || s.regions[sc.region].neighbors.includes(o.target)));
               signals.push({ turn: s.turn, pulse: Math.min(R.orders.pulses, pulse + i), observer: obs.id, about: p, region: o.target, confidence: exposed ? 'confirmed' : 'inferred',
                 text: exposed ? `FALSE SIGNAL exposed by your scan: ${s.players[p].name} is faking movement toward ${t.name}`
-                  : `Fleet movement (${rng.pick(['small', 'medium', 'large'])}) ${s.regions[from].name} → ${t.name}, arriving pulse ${Math.min(R.orders.pulses, pulse + i + 1)}` });
+                  : `Fleet movement (${rng.pick(['small', 'medium', 'large'])}) ${s.regions[from].name} → ${t.name}, ${R.orders.pulses > 1 ? `arriving pulse ${Math.min(R.orders.pulses, pulse + i + 1)}` : 'arriving this turn'}` });
             }
           }
           emit({ k: 'note', pulse, owner: p, text: `Feint launched toward ${t.name}.`, region: o.target });
@@ -339,7 +390,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
           f.route = { path: o.path.slice(), seize: null, mp: startMp, overdrive: o.overdrive || undefined };
           if (o.overdrive) f.od = true;
         } else {
-          f.route = { path: f.region === o.target ? [] : [o.target], seize: o.target, mp: startMp };
+          f.route = { path: f.region === o.target ? [] : [...(o.via ?? []), o.target], seize: o.target, mp: startMp };
           for (const id of [...new Set(o.also ?? [])].filter(id => id !== o.fleet).slice(0, MAX_JOINERS)) {
             const g = s.fleets.find(x => x.id === id && x.owner === p && x.ships.length);
             if (!g || g === f || (g.region !== o.target && !s.regions[g.region].neighbors.includes(o.target))) continue;
@@ -355,11 +406,12 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       const err = validateOrder(s, p, o.type === 'seize' ? { ...o, also: undefined } : o);
       if (err) { fail(pulse, p, o, err); continue; }
       const f = s.fleets.find(x => x.id === o.fleet)!;
+      if (movers.some(m => m.f === f)) { fail(pulse, p, o, `${f.name} already has a move or seize this turn`); continue; }
       if (o.type === 'move') {
         if (o.overdrive) f.od = true;
         movers.push({ f, path: o.path.slice(), idx: 0, seize: null, p, o });
       } else {
-        movers.push({ f, path: f.region === o.target ? [] : [o.target], idx: 0, seize: o.target, p, o });
+        movers.push({ f, path: f.region === o.target ? [] : [...(o.via ?? []), o.target], idx: 0, seize: o.target, p, o });
         // combined assault: extra fleets adjacent to (or at) the target join in
         for (const id of [...new Set(o.also ?? [])].filter(id => id !== o.fleet).slice(0, MAX_JOINERS)) {
           const g = s.fleets.find(x => x.id === id && x.owner === p && x.ships.length);
@@ -396,7 +448,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       if (!m.path.length) continue;
       const dest = m.dest ?? m.path[m.path.length - 1];
       const txt = live ? `Fleet movement (${strengthBand(m.f.ships.length)}) ${s.regions[m.f.region].name} → ${s.regions[dest].name}, heading onward`
-        : `Fleet movement (${strengthBand(m.f.ships.length)}) ${s.regions[m.f.region].name} → ${s.regions[dest].name}, arriving pulse ${pulse}`;
+        : `Fleet movement (${strengthBand(m.f.ships.length)}) ${s.regions[m.f.region].name} → ${s.regions[dest].name}, ${R.orders.pulses > 1 ? `arriving pulse ${pulse}` : 'arriving this turn'}`;
       for (const o of s.players) {
         if (o.id === m.p) continue;
         const seesFrom = covStart[o.id].has(m.f.region), seesTo = covStart[o.id].has(dest) || coverage(s, o.id).has(dest);
@@ -519,30 +571,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     combatPhase(pulse, cameFrom);
 
     // ---------------------------------------------------------- 6. economy actions
-    for (const { p, o } of orders) {
-      if (o.type !== 'build' && o.type !== 'develop' && o.type !== 'excavate') continue;
-      const err = validateOrder(s, p, o);
-      if (err) { fail(pulse, p, o, err); continue; }
-      const regionId = o.type === 'excavate' ? s.fleets.find(f => f.id === o.fleet)!.region : o.region;
-      if (s.fleets.some(f => f.region === regionId && f.ships.length && hostile(s, f.owner, p))) { fail(pulse, p, o, 'enemies present'); continue; }
-      const cost = orderCost(s, o, p);
-      if (!canAfford(s.players[p].res, cost, creditRate(s, p))) { fail(pulse, p, o, 'not enough resources'); continue; }
-      pay(s.players[p].res, cost, creditRate(s, p));
-      if (o.type === 'build') {
-        let f = o.fleet !== null ? s.fleets.find(x => x.id === o.fleet)! : null;
-        if (!f) f = newFleet(s, rng, p, o.region);
-        const sh = newShip(s, rng, o.cls, p);
-        f.ships.push(sh);
-        emit({ k: 'build', pulse, region: o.region, owner: p, cls: o.cls, fleet: f.id, name: sh.name });
-        signal(pulse, p, o.region, `Shipyard activity at ${s.regions[o.region].name}`, { confirmed: false });
-      } else if (o.type === 'develop') {
-        s.regions[o.region].project = { key: o.project, progress: 0, owner: p };
-        emit({ k: 'project', pulse, region: o.region, owner: p, key: o.project, done: false });
-        signal(pulse, p, o.region, `Construction at ${s.regions[o.region].name}`);
-      } else {
-        excavate(s, rng, p, regionId, pulse, emit);
-      }
-    }
+    if (!economyFirst) economyStep();
   }
 
   // ======================================================================
@@ -801,9 +830,11 @@ export function cleanOrder(s: GameState, o: unknown): Order | null {
     }
     case 'seize': {
       if (!isId(o.fleet) || !rid(o.target)) return null;
-      if (o.also === undefined) return { type: 'seize', fleet: o.fleet, target: o.target };
-      const also = idList(o.also, 8);
-      return also ? { type: 'seize', fleet: o.fleet, target: o.target, also } : null;
+      const via = o.via === undefined ? undefined : idList(o.via, 8);
+      if (via === null || (via && !via.every(rid))) return null;
+      const also = o.also === undefined ? undefined : idList(o.also, 8);
+      if (also === null) return null;
+      return { type: 'seize', fleet: o.fleet, target: o.target, ...(also ? { also } : {}), ...(via?.length ? { via } : {}) };
     }
     case 'build':
       if (!rid(o.region) || typeof o.cls !== 'string' || !Object.hasOwn(s.rules.ships, o.cls)) return null;

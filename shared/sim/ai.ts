@@ -36,6 +36,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
   const R = s.rules;
   const expert = lvl === 'expert', novice = lvl === 'novice';
   const live = !!s.live;
+  // WEGO resolves all orders in one step (rules.orders.pulses = 1): positions don't change between a turn's orders
+  const oneStep = live || s.rules.orders.pulses <= 1;
   const aggr = R.ai.aggression;
   const leader = currentLeader(s);
   const edictsNow = s.edicts.filter(e => e.scoresTurn === s.turn).map(e => e.id); // judged at the end of THIS turn
@@ -179,12 +181,13 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       me0().laws = [...(me0().laws ?? []).filter(x => x !== opp), o.law];
     }
     const use = (id: number, n = 1) => fleetUses.set(id, Math.min(R.orders.maxPerFleet, (fleetUses.get(id) ?? 0) + n));
-    if (isFleetOrder(o)) use(o.fleet);
+    // one-step WEGO: a fleet's orders all land at once, so a second one (move after excavate/fortify...) would undo the first
+    if (isFleetOrder(o)) use(o.fleet, oneStep ? 9 : 1);
     if (o.type === 'move') {
       const f = s.fleets.find(x => x.id === o.fleet)!;
       const dest = o.path[o.path.length - 1];
       // LIVE: a move sets the fleet travelling; it is not at dest for several ticks
-      if (!live) {
+      if (!oneStep) {
         // ending next to/among enemies means a battle (or a garrison stop): no clean second order
         if (hostileFleetsAt(dest).length || (s.regions[dest].owner !== null && s.regions[dest].owner !== pid && s.regions[dest].garrison > 0 && hostile(s, pid, s.regions[dest].owner!))) use(f.id, 9);
         f.region = dest; f.fortified = false; f.siege = null;
@@ -199,8 +202,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       usedTargets.add(`inf:${o.target}`);
       for (const g of [f, ...(o.also ?? []).map(id => s.fleets.find(x => x.id === id)).filter((x): x is Fleet => !!x)]) {
         if (g !== f) use(g.id);
-        if (fight || live) use(g.id, 9);
-        if (!live) { g.region = o.target; g.fortified = false; g.siege = o.target; }
+        if (fight || oneStep) use(g.id, 9);
+        if (!oneStep) { g.region = o.target; g.fortified = false; g.siege = o.target; }
       }
     }
     if (o.type === 'fortify') { const f = s.fleets.find(x => x.id === o.fleet)!; f.fortified = true; }
@@ -368,8 +371,25 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       const foeHereHp = hostileFleetsAt(here.id).reduce((a, x) => a + fleetPower(s, x), 0) + (here.owner !== pid && here.owner !== null ? here.garrison : 0);
       const stayInFight = engagedHere && !isScout && myHereHp >= foeHereHp * 0.7 ? 4 + regionValue(here) * 0.3 : 0;
 
-      // seize adjacent / current
-      for (const tid of [here.id, ...here.neighbors]) {
+      // seize adjacent / current, or (one-step WEGO) march through clear space and assault within speed
+      const viaOf = new Map<number, number[]>();
+      if (oneStep && !live) {
+        const sp0 = fleetSpeed(s, f);
+        const clear = (x: number) => (s.regions[x].owner === pid || s.regions[x].owner === null || !hostile(s, pid, s.regions[x].owner!)) && !(s.regions[x].owner === null && s.regions[x].garrison > 0) && !hostileFleetsAt(x).length;
+        const prev = new Map<number, number>([[here.id, -1]]); let frontier = [here.id];
+        for (let d = 1; d < sp0; d++) {
+          const next: number[] = [];
+          for (const r of frontier) for (const n of s.regions[r].neighbors) if (!prev.has(n) && clear(n)) { prev.set(n, r); next.push(n); }
+          frontier = next;
+        }
+        for (const [r] of prev) {
+          if (r === here.id) continue;
+          const via: number[] = []; for (let x = r; x !== here.id; x = prev.get(x)!) via.unshift(x);
+          for (const n of s.regions[r].neighbors) if (n !== here.id && !here.neighbors.includes(n) && !prev.has(n) && !viaOf.has(n)) viaOf.set(n, via);
+        }
+      }
+      for (const tid of [here.id, ...here.neighbors, ...viaOf.keys()]) {
+        const via = viaOf.get(tid);
         const t = s.regions[tid];
         if (t.owner === pid) continue;
         if (f.siege === tid) continue;   // already besieging: the siege carries on without new orders
@@ -406,7 +426,9 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
           v = regionValue(t) * p * aggr - (1 - p) * pow * 0.08 - fatiguePenalty;
         }
         if (t.owner !== null && t.owner !== pid && t.owner >= 0) v += 1.5 * aggr; // conflict is the point
-        out.push({ o: also.length ? { type: 'seize', fleet: f.id, target: tid, also } : { type: 'seize', fleet: f.id, target: tid }, v, tag: `seize:${tid}` });
+        if (via) v -= 0.3 * via.length;   // a longer march: slightly less sure of the picture on arrival
+        const so: Order = { type: 'seize', fleet: f.id, target: tid, ...(also.length ? { also } : {}), ...(via ? { via } : {}) };
+        out.push({ o: so, v, tag: `seize:${tid}` });
       }
 
       // move: toward opportunities, home to defend, or (expert) to concentrate

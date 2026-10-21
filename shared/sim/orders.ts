@@ -134,7 +134,15 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       const t = reg(o.target);
       if (!t) return 'no such region';
       if (t.owner === p) return 'already yours';
-      if (fleet!.region !== o.target && !s.regions[fleet!.region].neighbors.includes(o.target)) return 'target must be adjacent';
+      if (o.via !== undefined && (!Array.isArray(o.via) || o.via.length > 8 || !o.via.every(x => reg(x)))) return 'bad path';
+      const via = o.via ?? [];
+      if (via.length) {
+        // march then assault: the whole way (via + the target) must fit in one turn's movement
+        if (!s.live && via.length + 1 > fleetSpeed(s, fleet!)) return `too far (speed ${fleetSpeed(s, fleet!)})`;
+        let cur = fleet!.region;
+        for (const r of via) { if (!gateNeighbors(s, p, cur).includes(r)) return 'path is not connected'; cur = r; }
+        if (!s.regions[cur].neighbors.includes(o.target)) return 'target must be next to the end of the path';
+      } else if (fleet!.region !== o.target && !s.regions[fleet!.region].neighbors.includes(o.target)) return 'target must be adjacent';
       if (o.also !== undefined && (!Array.isArray(o.also) || o.also.length > 8)) return 'bad joining fleets';
       // the resolver takes at most MAX_JOINERS distinct joiners and silently drops the rest: say so up front
       if (new Set((o.also ?? []).filter(id => id !== o.fleet)).size > MAX_JOINERS) return `at most ${MAX_JOINERS} fleets can join an assault`;

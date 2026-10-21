@@ -95,7 +95,7 @@ a full-screen modal over the board.
 
 | Under the pointer | Verb | Card |
 |---|---|---|
-| own or empty region in range | Move | `➤ Move · pulse II` |
+| own or empty region in range | Move | `➤ Move` |
 | beyond speed but within overdrive | Overdrive | `➤ +1 · fatigued next turn` (amber arrow) |
 | adjacent hostile or neutral region | Seize | `⚔ 68% · 34 vs 20⛨` (red arrow with swords head) |
 | another own fleet here | Merge (free) | `+ 7/8 ships` |

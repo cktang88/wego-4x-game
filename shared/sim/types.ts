@@ -162,7 +162,7 @@ export interface Edict {
 // ------------------------------------------------------------------- orders
 export type Order =
   | { type: 'move'; fleet: FleetId; path: RegionId[]; overdrive?: boolean }
-  | { type: 'seize'; fleet: FleetId; target: RegionId; also?: FleetId[] }   // `also`: extra fleets joining the assault
+  | { type: 'seize'; fleet: FleetId; target: RegionId; also?: FleetId[]; via?: RegionId[] }   // `also`: extra fleets joining the assault; `via`: regions crossed on the way (WEGO: path length <= speed)
   | { type: 'build'; region: RegionId; cls: string; fleet: FleetId | null }
   | { type: 'develop'; region: RegionId; project: string }
   | { type: 'fortify'; fleet: FleetId }

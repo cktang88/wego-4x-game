@@ -34,7 +34,7 @@ export const DEFAULT_RULES = {
   // ---------------------------------------------------------------- orders
   orders: {
     perTurn: 5,            // the Old World-style fixed budget. Same for everyone, forever.
-    pulses: 5,             // order in slot k resolves in pulse k
+    pulses: 1,             // WEGO: all of a turn's orders resolve together in one step (legacy: N pulses, slot k in pulse k)
     // An Order spent on a fleet that already acted this turn costs fatigue:
     // each extra order on the same fleet in one turn costs this many credits.
     repeatFleetCredits: 4,
@@ -146,7 +146,8 @@ export const DEFAULT_RULES = {
   // ---------------------------------------------------------------- combat
   combat: {
     maxRounds: 8,              // (legacy single-battle cap; sustained battles use the knobs below)
-    roundsPerPulse: 1,         // battles are SUSTAINED: each engagement fights this many rounds per pulse (5 per turn)
+    roundsPerPulse: 1,         // LIVE: rounds fought per tick
+    roundsPerTurn: 5,          // WEGO: battles are SUSTAINED: each engagement fights this many rounds per turn, then carries on next turn
     frontageBase: 2,           // ships per side that can fire each round = base + perShip x armed ships (max frontage),
     frontagePerShip: 0.34,     //   so firepower grows slower than hit points: bigger battles take longer
     frontage: 8,
