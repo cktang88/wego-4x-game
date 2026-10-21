@@ -6,7 +6,13 @@
 // Also checks the phone never scrolls sideways. Screenshots: /tmp/claude-0/font-audit/<vp>-<surface>.png
 // node scripts/font-audit.mjs [outdir] [baseUrl] [--only=desk|wide|phone] [--report]   (--report: never exit 1)
 import { chromium } from 'playwright-core';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
+// Icon glyphs that must not survive as text (client/src/art/icons.ts GLYPHS): typography such as × · → − ‹ › • ●
+// and the plain-ASCII entries stay allowed.
+const GLYPH_SRC = readFileSync(new URL('../client/src/art/icons.ts', import.meta.url), 'utf8');
+const ALLOWED = new Set(['×', '●', '!', '+', '?', 'Zz']);
+const ICON_GLYPHS = [...GLYPH_SRC.matchAll(/^\s*'([^']+)': \{ i: '/gm)].map(m => m[1]).filter(g => !ALLOWED.has(g));
+const GLYPH_RE_SRC = ICON_GLYPHS.map(g => g.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).sort((a, b) => b.length - a.length).join('|');
 const args = process.argv.slice(2);
 const pos = args.filter(a => !a.startsWith('--'));
 const out = pos[0] ?? '/tmp/claude-0/font-audit';
@@ -59,8 +65,9 @@ const INIT = () => {
 };
 
 /** Every visible text node's rendered font size; the smallest offenders below `floor`. */
-const AUDIT = ({ floor, cfloor }) => {
-  const res = { min: Infinity, minText: '', bad: [], n: 0, cmin: Infinity, cminText: '', cbad: [] };
+const AUDIT = ({ floor, cfloor, gre }) => {
+  const res = { min: Infinity, minText: '', bad: [], n: 0, cmin: Infinity, cminText: '', cbad: [], glyphs: [], cglyphs: [] };
+  const G = new RegExp(gre, 'u');
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   const seen = new Set();
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
@@ -83,10 +90,12 @@ const AUDIT = ({ floor, cfloor }) => {
       el.parentElement ? el.parentElement.tagName.toLowerCase() + (typeof el.parentElement.className === 'string' && el.parentElement.className ? '.' + el.parentElement.className.trim().split(/\s+/)[0] : '') : ''].reverse().join(' > ');
     if (px < res.min) { res.min = px; res.minText = `${txt.slice(0, 30)} [${path}]`; }
     if (px < floor - 0.01) res.bad.push(`${px.toFixed(2)}px "${txt.slice(0, 30)}" [${path}]`);
+    if (G.test(txt) && !el.closest('textarea,input,[data-glyph-ok]')) res.glyphs.push(`"${txt.slice(0, 40)}" [${path}]`);
   }
   for (const [k, v] of window.__ct) {
     if (v.px < res.cmin) { res.cmin = v.px; res.cminText = `${k} (${v.where}, ${v.font})`; }
     if (v.px < cfloor - 0.01) res.cbad.push(`${v.px.toFixed(2)}px "${k}" (${v.where}, ${v.font})`);
+    if (G.test(k)) res.cglyphs.push(`"${k}" (${v.where})`);
   }
   return res;
 };
@@ -105,11 +114,15 @@ for (const vp of VPS) {
     await page.waitForTimeout(350);
     await page.screenshot({ path: `${out}/${vp.tag}-${name}.png` });
     const floor = vp.phone ? 13 : 14 * ui, cfloor = 12 * ui;
-    const r = await ev(AUDIT, { floor, cfloor });
+    const r = await ev(AUDIT, { floor, cfloor, gre: GLYPH_RE_SRC });
     if (r.min < vmin.dom) { vmin.dom = r.min; vmin.domText = `${name}: ${r.minText}`; }
     const bad = [...new Set(r.bad)];
     check(bad.length === 0, `${vp.tag} ${name}: ${r.n} text nodes, smallest ${r.min.toFixed(1)}px (floor ${floor.toFixed(1)})${bad.length ? '\n      ' + bad.slice(0, 12).join('\n      ') + (bad.length > 12 ? `\n      … +${bad.length - 12} more` : '') : ''}`);
+    const gl = [...new Set(r.glyphs)];
+    check(gl.length === 0, `${vp.tag} ${name}: no icon glyphs left as text${gl.length ? '\n      ' + gl.slice(0, 10).join('\n      ') : ''}`);
     if (canvas) {
+      const cg = [...new Set(r.cglyphs)];
+      check(cg.length === 0, `${vp.tag} ${name} canvas: no icon glyphs drawn as text${cg.length ? '\n      ' + cg.slice(0, 10).join('\n      ') : ''}`);
       if (r.cmin < vmin.canvas) { vmin.canvas = r.cmin; vmin.canvasText = `${name}: ${r.cminText}`; }
       check(r.cbad.length === 0, `${vp.tag} ${name} canvas: smallest ${r.cmin === Infinity ? '-' : r.cmin.toFixed(1)}px (floor ${cfloor.toFixed(1)})${r.cbad.length ? '\n      ' + r.cbad.slice(0, 12).join('\n      ') : ''}`);
     }

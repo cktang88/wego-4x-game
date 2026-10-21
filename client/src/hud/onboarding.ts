@@ -6,6 +6,7 @@
 import type { GameScreen } from '../game.ts';
 import { esc } from '../ui/dom.ts';
 import { intentFor } from './verbs.ts';
+import { ic } from '../art/icons.ts';
 
 type Step = 'drag' | 'seal' | 'build' | 'enemy' | 'research' | 'laws' | 'posture';
 const ALL: Step[] = ['drag', 'seal', 'build', 'enemy', 'research', 'laws', 'posture'];
@@ -91,7 +92,7 @@ export class Teach {
     if (!this.cur) { el.classList.add('hidden'); el.innerHTML = ''; el.dataset.s = ''; return; }
     if (el.dataset.s !== this.cur) {
       el.dataset.s = this.cur;
-      el.innerHTML = `<span>${esc(this.text(this.cur))}</span><button data-t="ok" aria-label="Got it">✓</button><button data-t="skip" aria-label="Skip tips" title="Skip tips">×</button>`;
+      el.innerHTML = `<span>${esc(this.text(this.cur))}</span><button data-t="ok" aria-label="Got it">${ic('check')}</button><button data-t="skip" aria-label="Skip tips" title="Skip tips">${ic('close')}</button>`;
     }
     el.classList.remove('hidden');
     this.frame();

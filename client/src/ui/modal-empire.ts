@@ -4,6 +4,7 @@ import { BRANCHES, TECHS, TECH, LAWS, LAW, LAW_PAIRS, MODULES, MODULE, VEINS, ty
 import { techCost, researchBlock, lawSlots, lawCost, opposite, starOwner, connected, hasVein, blueprintFor, classBlock, shipStats, baseHp, shipCostMod, lawBlock } from '../../../shared/sim/empire.ts';
 import type { Ship } from '../../../shared/sim/types.ts';
 import { type Ctx, type Host, ui, esc, ROMAN, per, costHtml, pendingResearch, pendingRevoke, pendingBlueprint, pendingOrder, leftover, affordable, shortOf, dropFree, dropOrder, lockWhy, costState, pendingPlayers } from './modal-util.ts';
+import { ic as icn, icFor } from '../art/icons.ts';
 
 const BRANCH_IDS = Object.keys(BRANCHES) as Branch[];
 const TIER = ['', 'I', 'II', 'III', '★'];
@@ -33,12 +34,12 @@ const TECH_FX: Record<string, string> = {
 };
 /** What a technology unlocks, as chips: [icon, label]. */
 const TECH_UNLOCK: Record<string, [string, string][]> = {
-  railguns: [['⁍', 'Railgun']], deflectors: [['◠', 'Deflector']], ion: [['»', 'Ion Drive']],
-  cruisers: [['ship:long', 'Cruiser'], ['⚛', 'needs']],
+  railguns: [['railgun', 'Railgun']], deflectors: [['shield', 'Deflector']], ion: [['thruster', 'Ion Drive']],
+  cruisers: [['ship:long', 'Cruiser'], ['antimatter', 'needs']],
   siege: [['ship:dread', 'Dreadnought']], alpha: [['ship:dread', 'Dreadnought']],
-  batteries: [['⊕', 'Battery']], pshield: [['◎', 'Shield'], ['◆', 'needs']],
-  depots: [['⛽', 'Depot']], gates: [['⧉', 'Warp Gate'], ['◆', 'needs']],
-  bureaucracy: [['⚑', '+1 slot']],
+  batteries: [['battery', 'Battery']], pshield: [['pshield', 'Shield'], ['crystal', 'needs']],
+  depots: [['depot', 'Depot']], gates: [['gate', 'Warp Gate'], ['crystal', 'needs']],
+  bureaucracy: [['law', '+1 slot']],
 };
 const LAW_FX: Record<string, string> = {
   bastion: 'Garrisons +30% · rebuild +3',
@@ -69,8 +70,8 @@ export function shipSvg(glyph: string, color: string, size = 120): string {
 }
 const unlockChip = ([ic, label]: [string, string]) => ic.startsWith('ship:')
   ? `<span class="chipx">${shipSvg(ic.slice(5), '#cfc4ff', 46)}<b>${esc(label)}</b></span>`
-  : label === 'needs' ? `<span class="chipx need" title="Needs ${ic === '⚛' ? 'Antimatter' : 'Crystals'}"><i style="color:${ic === '⚛' ? VEINS.antimatter.color : VEINS.crystal.color}">${ic}</i><b>needed</b></span>`
-  : `<span class="chipx"><i>${ic}</i><b>${esc(label)}</b></span>`;
+  : label === 'needs' ? `<span class="chipx need" title="Needs ${ic === 'antimatter' ? 'Antimatter' : 'Crystals'}"><i style="color:${ic === 'antimatter' ? VEINS.antimatter.color : VEINS.crystal.color}">${icn(ic)}</i><b>needed</b></span>`
+  : `<span class="chipx"><i>${icn(ic)}</i><b>${esc(label)}</b></span>`;
 
 // ====================================================================== who / header
 export function empirePid(g: Host): number {
@@ -95,7 +96,7 @@ export function empireHead(c: Ctx): string {
   return `${pick}<div class="mh-res">${res}${veins}${cut ? `<span class="rs neg" title="Regions cut off from the capital: half yield">✂<b>${cut}</b></span>` : ''}</div>`;
 }
 
-export const EMPIRE_TABS: [string, string, string][] = [['research', '✺', 'Research'], ['laws', '⚑', 'Laws'], ['ships', '➤', 'Ships']];
+export const EMPIRE_TABS: [string, string, string][] = [['research', icn('research'), 'Research'], ['laws', icn('law'), 'Laws'], ['ships', icn('ships'), 'Ships']];
 
 export function empireBody(c: Ctx): string {
   const g = c.g;
@@ -158,7 +159,7 @@ function researchHtml(c: Ctx): string {
     const dots = rivals.length ? `<span class="rn-dots">${rivals.map(p => `<i style="background:${esc(p.color)}" title="${esc(p.name)} has it"></i>`).join('')}</span>` : '';
     const rc = inf.owner !== undefined ? `;--rc:${esc(st.players[inf.owner].color)}` : '';
     return `<button class="rn s-${inf.s} t${t.tier}${ui.tech === t.id ? ' sel' : ''}${fx} ${cls}" data-a="tech" data-id="${t.id}" style="--bc:${B.color}${rc}" title="${esc(t.name)}" aria-label="${esc(`${t.name}, ${TIER[t.tier]}, ${inf.s}`)}">
-      <span class="rn-disc"><span class="rn-ic">${t.icon}</span><i class="rn-tier">${TIER[t.tier]}</i></span><span class="rn-nm">${esc(t.name.replace(/^The /, ''))}</span><span class="rn-sub">${sub}</span>${dots}</button>`;
+      <span class="rn-disc"><span class="rn-ic">${icn(icFor('tech', t.id, t.icon))}</span><i class="rn-tier">${TIER[t.tier]}</i></span><span class="rn-nm">${esc(t.name.replace(/^The /, ''))}</span><span class="rn-sub">${sub}</span>${dots}</button>`;
   };
   const cols = BRANCH_IDS.map(b => {
     const B = BRANCHES[b];
@@ -166,7 +167,7 @@ function researchHtml(c: Ctx): string {
     const f = ts.filter(t => t.tier === 3);
     const owned = ts.filter(t => pl.techs?.includes(t.id)).length;
     return `<section class="rb" style="--bc:${B.color}" data-branch="${b}">
-      <header class="rb-h"><span class="rb-ic">${B.icon}</span><b>${B.name}</b><span class="rb-pips">${[0, 1, 2, 3].map(i => `<i class="${i < owned ? 'on' : ''}"></i>`).join('')}</span></header>
+      <header class="rb-h"><span class="rb-ic">${icn(icFor('branch', b, B.icon))}</span><b>${B.name}</b><span class="rb-pips">${[0, 1, 2, 3].map(i => `<i class="${i < owned ? 'on' : ''}"></i>`).join('')}</span></header>
       <div class="rb-tree"><svg class="rb-lines" aria-hidden="true"></svg>
         <div class="rb-row">${node(ts.find(t => t.tier === 1))}</div>
         <div class="rb-row">${node(ts.find(t => t.tier === 2))}</div>
@@ -205,7 +206,7 @@ function techCard(c: Ctx, pid: number, editable: boolean): string {
   const owners = st.players.filter(p => p.techs?.includes(t.id));
   return `<div class="tcard" data-a="noop" style="--bc:${B.color}" role="dialog" aria-label="${esc(t.name)}">
     <button class="tcard-x" data-a="tech-close" aria-label="Close">×</button>
-    <div class="tcard-h"><span class="tcard-ic">${t.icon}</span><div><b>${esc(t.name)}</b><small>${B.icon} ${B.name} ${TIER[t.tier]}${t.tier === 3 ? ' · pick one' : t.tier === 4 ? ' · one owner' : ''}</small></div></div>
+    <div class="tcard-h"><span class="tcard-ic">${icn(icFor('tech', t.id, t.icon))}</span><div><b>${esc(t.name)}</b><small>${icn(icFor('branch', t.branch, B.icon))} ${B.name} ${TIER[t.tier]}${t.tier === 3 ? ' · pick one' : t.tier === 4 ? ' · one owner' : ''}</small></div></div>
     <div class="tcard-fx" title="${esc(t.desc)}">${esc(TECH_FX[t.id] ?? '')}</div>
     ${unlock.length ? `<div class="tcard-un">${unlock.map(unlockChip).join('')}</div>` : ''}
     ${owners.length ? `<div class="tcard-own">${owners.map(p => `<span class="crest-dot" style="--pc:${esc(p.color)}">${esc(p.name)}</span>`).join('')}</div>` : ''}
@@ -336,7 +337,7 @@ function lawsHtml(c: Ctx): string {
         if (general) generalWhy.add(s.why);
         foot = `<span class="lw-cost ${s.why && /Need/.test(s.why) ? 'neg' : ''}">✦${s.cost}${s.switching ? ` <s>✦${Math.round(s.cost / 2)}</s>` : ''}</span>${s.why && !general && pid === g.you ? `<span class="m-why neg">${esc(s.why)}</span>` : ''}`;
       }
-      return `<div class="lw-card s-${s.state}" data-law="${l.id}" title="${esc(l.desc)}"><span class="lw-ic">${l.icon}</span><div class="lw-tx"><b>${esc(l.name)}</b><span>${esc(LAW_FX[l.id] ?? '')}</span></div>${dots}<div class="lw-foot">${foot}</div></div>`;
+      return `<div class="lw-card s-${s.state}" data-law="${l.id}" title="${esc(l.desc)}"><span class="lw-ic">${icn(icFor('law', l.id, l.icon))}</span><div class="lw-tx"><b>${esc(l.name)}</b><span>${esc(LAW_FX[l.id] ?? '')}</span></div>${dots}<div class="lw-foot">${foot}</div></div>`;
     };
     return `<div class="lw-row"><span class="lw-pair">${esc(pairName)}</span><div class="lw-toggle" data-active="${activeIdx < 0 ? 'none' : activeIdx}"${from ? ` data-from="${from}"` : ''}><i class="lw-thumb"></i>${card(pair[0], states[0])}<span class="lw-vs">⇄</span>${card(pair[1], states[1])}</div></div>`;
   }).join('');
@@ -371,14 +372,14 @@ function shipsHtml(c: Ctx): string {
     const mods = MODULES.map(m => {
       const known = !m.tech || cs.players[pid].techs?.includes(m.tech);
       const on = m.id === cur;
-      return `<button class="mod ${on ? 'on' : ''} ${known ? '' : 'lock'}" ${editable && known && !on ? `data-a="bp" data-id="${k}:${m.id}"` : ''} ${known ? '' : 'disabled'} title="${esc(`${m.name}: ${m.desc}${known ? '' : ` Needs ${TECH[m.tech!]?.name}.`}`)}" aria-pressed="${on}"><i>${m.icon}</i><span>${MOD_SHORT[m.id] ?? m.name}</span></button>`;
+      return `<button class="mod ${on ? 'on' : ''} ${known ? '' : 'lock'}" ${editable && known && !on ? `data-a="bp" data-id="${k}:${m.id}"` : ''} ${known ? '' : 'disabled'} title="${esc(`${m.name}: ${m.desc}${known ? '' : ` Needs ${TECH[m.tech!]?.name}.`}`)}" aria-pressed="${on}"><i>${icn(icFor('module', m.id, m.icon))}</i><span>${MOD_SHORT[m.id] ?? m.name}</span></button>`;
     }).join('');
     const why = block ? block.replace(/\s*\(.*\)\s*$/, '').replace(/^needs/, 'Needs') : '';
     const atk = s.shots > 1 ? `${s.attack}<small>×${s.shots}</small>` : `${s.attack}`;
     return `<article class="shc ${block ? 'locked' : ''}" style="--pc:${esc(color)}">
       <div class="sc-art">${shipSvg(d.glyph, block ? '#6f6796' : color, 150)}</div>
       <div class="sc-h"><b>${esc(d.name)}</b><span class="sc-cost">${costHtml(cost)}</span></div>
-      <div class="sc-st"><span title="Attack × shots">⚔<b>${atk}</b></span><span title="Hull">❤<b>${s.hp}</b></span><span title="Speed">➤<b>${s.speed}</b></span><span title="Shields">⛨<b>${s.shields}</b></span></div>
+      <div class="sc-st"><span title="Attack × shots">⚔<b>${atk}</b></span><span title="Hull">❤<b>${s.hp}</b></span><span title="Speed">${icn('speed')}<b>${s.speed}</b></span><span title="Shields">${icn('shield')}<b>${s.shields}</b></span></div>
       ${block ? `<div class="sc-lock">${esc(why)}</div>` : `<div class="sc-mods" role="group" aria-label="Module">${mods}</div>${pend ? `<div class="sc-pend gold">${g.live ? 'Next tick' : 'New design queued'}</div>` : ''}`}
     </article>`;
   }).join('');

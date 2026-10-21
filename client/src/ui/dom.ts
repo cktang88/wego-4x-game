@@ -1,7 +1,9 @@
+import { ic, glyphHtml, iconizeHtml } from '../art/icons.ts';
+
 export function h(tag: string, attrs: Record<string, string> = {}, html = ''): HTMLElement {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
-  if (html) e.innerHTML = html;
+  if (html) e.innerHTML = iconizeHtml(html);
   return e;
 }
 
@@ -42,7 +44,7 @@ export function toast(msg: string) {
   // a newer toast replaces the old one at once (it slides in on top); an expiring one fades up and away
   document.querySelectorAll('.toast').forEach(t => t.remove());
   const t = h('div', { class: 'toast' });
-  t.textContent = msg;
+  t.innerHTML = glyphHtml(esc(msg));
   document.body.appendChild(t);
   setTimeout(() => {
     if (!t.isConnected) return;
@@ -55,7 +57,7 @@ export function overlay(html: string, closable = true): HTMLElement {
   const o = h('div', { class: 'overlay' }, html);
   if (closable) {
     o.addEventListener('click', e => { if (e.target === o) o.remove(); });
-    const x = h('button', { class: 'small closex', title: 'Close (Esc)' }, '✕');
+    const x = h('button', { class: 'small closex', title: 'Close (Esc)', 'aria-label': 'Close' }, ic('close'));
     x.addEventListener('click', () => o.remove());
     o.querySelector('.dialog')?.prepend(x);
     const esc = (e: KeyboardEvent) => {

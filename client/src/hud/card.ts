@@ -22,13 +22,14 @@ import { bannerSvg } from '../art/sigils.ts';
 import { postureRow, fateRow, postureStatus, worldSigRows, sigAction } from './signature.ts';
 import { systemRows, tributeRows, tributeAction } from './systems.ts';
 import { starIndustry, sysOn, systemCostMult, worldFx } from '../../../shared/sim/systems.ts';
+import { ic, icFor } from '../art/icons.ts';
 
-const PROJ_ICON: Record<string, string> = { station: '⬡', develop: '▲', shipyard: '⚒', fortress: '⛨', mine: '⚙', tradehub: '¢', sensor: '◎', academy: '✺', extractor: '⚛', battery: '⚔', pshield: '⛨', depot: '➤', gate: '◎' };
+const PROJ_ICON = new Proxy({} as Record<string, string>, { get: (_t, k: string) => ic(icFor('structure', k)) });
 const MOD_COLOR: Record<string, string> = { armor: '#c9c3e6', railgun: '#ff9b6b', deflector: '#6fd0ff', ion: '#9dff8a' };
 const STANCES: { id: Doctrine['stance']; icon: string; label: string; retreat: number; guard: boolean; tip: string }[] = [
-  { id: 'aggressive', icon: '⚔', label: 'Attack', retreat: 0.15, guard: false, tip: 'Engages anything hostile; retreats late' },
-  { id: 'defensive', icon: '⛨', label: 'Hold', retreat: 0.35, guard: true, tip: 'Fights when attacked; guards neighbours' },
-  { id: 'evasive', icon: '➤', label: 'Evade', retreat: 0.6, guard: false, tip: 'Avoids fights; retreats early' },
+  { id: 'aggressive', icon: ic('attack'), label: 'Attack', retreat: 0.15, guard: false, tip: 'Engages anything hostile; retreats late' },
+  { id: 'defensive', icon: ic('hold'), label: 'Hold', retreat: 0.35, guard: true, tip: 'Fights when attacked; guards neighbours' },
+  { id: 'evasive', icon: ic('evade'), label: 'Evade', retreat: 0.6, guard: false, tip: 'Avoids fights; retreats early' },
 ];
 
 /** The card's open "⋯" section, per fleet (kept across re-renders). */
@@ -81,7 +82,7 @@ function ownFleet(g: GameScreen, f: Fleet): string {
   const tword = trait ? CMD_TRAITS[trait]?.name ?? trait : '';
   const siblings = st.fleets.filter(x => x.owner === f.owner && x.region === f.region && x.ships.length);
   const sib = siblings.length > 1 ? `<span class="sib"><button data-a="sib" data-d="-1" aria-label="Previous fleet">‹</button><small>${siblings.indexOf(f) + 1}/${siblings.length}</small><button data-a="sib" data-d="1" aria-label="Next fleet">›</button></span>` : '';
-  const stats = stat('⚔', String(power), 'Power') + stat('❤', `${hpPct}%`, 'Hull', hpPct < 50 ? 'bad' : '') + stat('➤', String(speed), 'Speed') +
+  const stats = stat('⚔', String(power), 'Power') + stat('❤', `${hpPct}%`, 'Hull', hpPct < 50 ? 'bad' : '') + stat(ic('speed'), String(speed), 'Speed') +
     `<span class="cmd"${tip(`${c.name}${tword ? ` · ${tword}` : ''}`)}>${esc(c.name.split(' ').slice(-1)[0])}${tword ? ` · <em>${esc(tword)}</em>` : ''}</span>`;
   // one status line, icon-first
   const status: string[] = [];
@@ -265,7 +266,7 @@ function intoRow(g: GameScreen, r: Region): string {
   const js = joinable(g, r);
   const cur = intoOf(g, r);
   const left = bannersLeft(g, r.id);
-  const chips = js.map(f => `<button class="into ${cur === f.id ? 'on' : ''}" data-a="into" data-id="${f.id}"${tip(`Build into ${f.name}`)}>${f.banner ? bannerSvg(f.banner.sigil, g.color(f.owner), 18) : '<i>◇</i>'}<span>${esc(f.name.replace(/^The /, '').split(' ').slice(0, 2).join(' '))}</span><small>${f.ships.length}</small></button>`).join('');
+  const chips = js.map(f => `<button class="into ${cur === f.id ? 'on' : ''}" data-a="into" data-id="${f.id}"${tip(`Build into ${f.name}`)}>${f.banner ? bannerSvg(f.banner.sigil, g.color(f.owner), 18) : `<i>${ic('ships')}</i>`}<span>${esc(f.name.replace(/^The /, '').split(' ').slice(0, 2).join(' '))}</span><small>${f.ships.length}</small></button>`).join('');
   return `<div class="intos">${chips}<button class="into new ${cur === 'new' ? 'on' : ''}" data-a="into" data-id="new"${tip('Found a new fleet: a new banner')}><i>⚑</i><span>New banner</span><small class="${left.free <= 0 ? 'bad' : ''}">${Math.max(0, left.free)}/${left.limit}</small></button></div>`;
 }
 

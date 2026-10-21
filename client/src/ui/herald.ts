@@ -7,6 +7,7 @@ import { headlineVisible } from '../../../shared/sim/herald.ts';
 import { soulOn, SR } from '../../../shared/sim/soul.ts';
 import { esc, toast } from './dom.ts';
 import { sigilSvg } from '../art/sigils.ts';
+import { iconizeDom, ic, icFor } from '../art/icons.ts';
 
 const KIND_ICON: Record<string, string> = {
   rout: '⤺', caught: '✝', destroyed: '✝', broken: '✝', death: '✝', vengeance: '⚔', debt: '✠', vow_broken: '✗', vow_kept: '✦',
@@ -15,7 +16,7 @@ const KIND_ICON: Record<string, string> = {
   p_called: '✓', p_caught: '✗', p_ambush: '◉', p_broken: '⚡', p_exposed: '◌', p_scorched: '♨', p_levies: '⚑',
   tribute: '⚖', tribute_offer: '⚖', refugees: '⇢',
 };
-export const headlineIcon = (k: string) => KIND_ICON[k] ?? (k.startsWith('p_') ? '◉' : '•');
+export const headlineIcon = (k: string) => ic(icFor('herald', k, KIND_ICON[k] ?? (k.startsWith('p_') ? '◉' : '•')));
 
 const seenKey = (g: GameScreen) => `tc.herald.${g.gameKey()}.${g.you ?? 's'}`;
 function seen(g: GameScreen): number { try { return Number(localStorage.getItem(seenKey(g)) ?? 0) || 0; } catch { return 0; } }
@@ -146,4 +147,5 @@ function render(g: GameScreen, ed: HeraldEdition) {
       <aside class="hd-side"><h3>Dispatches</h3>${disp || '<p class="hd-none">No house wrote in.</p>'}${plant}</aside>
     </div>
     <footer class="hd-foot">${nav}<button class="hb go" data-h="close">To the board ▸</button></footer>`;
+  iconizeDom(art);
 }

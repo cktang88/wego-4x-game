@@ -13,6 +13,7 @@ import { drawGlow, beam, tracer, fireball, smoke, shieldHit } from '../art/fx.ts
 import { fbm2, rand as artRand, mix as artMix, css as artCss, rgb as artRgb } from '../art/util.ts';
 import { drawStructure } from '../art/structures.ts';
 import { uiScale } from '../ui/dom.ts';
+import { iconizeDom, iconizeHtml, ic, drawIcon, fillIconText } from '../art/icons.ts';
 
 export interface BattleViewerCtx {
   rules: Rules;
@@ -107,7 +108,7 @@ function esc(s: string): string {
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
-  if (html !== undefined) e.innerHTML = html;
+  if (html !== undefined) e.innerHTML = iconizeHtml(html);
   return e;
 }
 
@@ -443,7 +444,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   const ctrl = el('div', 'bv-ctrl');
   const bRestart = el('button', 'bv-btn', '⟲'); bRestart.title = 'Restart';
   const bPlay = el('button', 'bv-btn', '❚❚'); bPlay.title = 'Play / pause (Space)';
-  const bNext = el('button', 'bv-btn', '▶|'); bNext.title = 'Next round (→)';
+  const bNext = el('button', 'bv-btn', ic('skip')); bNext.title = 'Next round (→)';
   const speedBox = el('div', 'bv-speed');
   const speedBtns = [1, 2, 4].map(v => { const b = el('button', 'bv-btn', `${v}×`); b.dataset.v = String(v); speedBox.appendChild(b); return b; });
   const roundLbl = el('div', 'bv-round');
@@ -471,6 +472,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       <div class="bv-sub">${esc(ctx.regionName(report.region))} · ${when}</div>
       <div class="bv-rule"></div><div class="bv-sides">${parts.join('')}</div>
       <div class="bv-hint">Tap to skip</div></div>`;
+    iconizeDom(intro);
   }
   stage.appendChild(intro);
 
@@ -509,6 +511,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       <table><tr><th>Side</th><th>Ships</th><th>Lost</th><th>Fled</th><th>Garrison</th></tr>${rows}</table>
       ${mvpHtml}${hl}
       <div class="bv-endbtns"><button class="bv-btn" data-a="replay">⟲ Replay</button><button class="bv-btn" data-a="close">Close</button></div></div>`;
+    iconizeDom(outro);
     outro.style.display = 'none';
   }
   stage.appendChild(outro);
@@ -1333,7 +1336,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   function sync() {
     const ri = currentRound(T);
     roundLbl.textContent = T < INTRO ? 'Deploying' : !nRounds ? 'No fighting' : T >= BATTLE_END && T >= END - 0.01 ? `Round ${nRounds}/${nRounds}` : `Round ${Math.max(1, ri + 1)}/${nRounds}`;
-    bPlay.innerHTML = playing ? '❚❚' : '▶';
+    bPlay.innerHTML = playing ? ic('pause') : ic('play');
     barFill.style.width = `${(T / END) * 100}%`;
     speedBtns.forEach(b => b.classList.toggle('bv-on', Number(b.dataset.v) === speed));
     // intro card

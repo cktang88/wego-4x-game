@@ -39,3 +39,7 @@
 
 /* on the parchment Herald and Saga the icons are printed in the page's ink */
 .herald .ic, .saga .ic { color: inherit; }
+
+/* glyphs these replaced were optically small (×, ⋯): their buttons size the font up, so trim the icons back */
+.ic-close { width: 0.78em; height: 0.78em; vertical-align: -0.06em; }
+.ic-more { width: 0.95em; height: 0.95em; vertical-align: -0.12em; }

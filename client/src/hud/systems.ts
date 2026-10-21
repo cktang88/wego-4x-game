@@ -12,6 +12,7 @@ import { connected } from '../../../shared/sim/empire.ts';
 import { esc } from '../ui/dom.ts';
 import { tip, shortWhy } from './util.ts';
 import { setFree, dropFree } from './soul.ts';
+import { ic, icFor } from '../art/icons.ts';
 
 /** What one body adds to the citizens cap (for its row), or 0. */
 function bodyCap(g: GameScreen, r: Region, b: Body): number {
@@ -35,7 +36,7 @@ export function roleBadge(g: GameScreen, r: Region): string {
   const info = systemInfo(g.st, r.id);
   if (!info?.role) return '';
   const R = ROLES[info.role];
-  return `<span class="sysrole role-${info.role}"${tip(`${R.name}: ${R.desc} (derived from the bodies, never chosen)`)}>${R.icon} ${R.name}</span>`;
+  return `<span class="sysrole role-${info.role}"${tip(`${R.name}: ${R.desc} (derived from the bodies, never chosen)`)}>${ic(icFor('role', info.role, R.icon))} ${R.name}</span>`;
 }
 
 /** Star line + body rows + citizens and slots. Empty for lane waypoints and old maps. */
@@ -45,18 +46,18 @@ export function systemRows(g: GameScreen, r: Region): string {
   const S = STARS[r.star];
   const info = systemInfo(st, r.id);
   const pip = (n: number, max: number) => `<span class="cpips">${Array.from({ length: max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</span>`;
-  const top = `<div class="sysrow star"><i style="color:${S.color}">${S.icon}</i><b>${esc(S.name)}</b><small>${esc(S.desc)}</small></div>`;
+  const top = `<div class="sysrow star"><i style="color:${S.color}">${ic(icFor('star', r.star, S.icon))}</i><b>${esc(S.name)}</b><small>${esc(S.desc)}</small></div>`;
   const out = bodyOutputs(g, r);
   const rows = (r.bodies ?? []).map((b, i) => {
     const D = BODIES[b.kind];
     const cap = bodyCap(g, r, b);
-    const vein = b.vein ? ` <em class="vein v-${esc(b.vein)}">${b.vein === 'antimatter' ? '⚛' : '◆'}</em>` : '';
+    const vein = b.vein ? ` <em class="vein v-${esc(b.vein)}">${ic(icFor('vein', b.vein))}</em>` : '';
     const tag = bodyTag(st, r, i);
-    return `<div class="sysrow body"${tip(`${D.name}${tag ? ` · ${tag}` : ''}: ${D.desc}${D.orbital ? ' Orbital: its output goes to whoever holds space.' : ' Surface: blockaded while an enemy holds space.'}`)}><i>${D.icon}</i><b>${esc(b.name)}</b>${tag ? `<em class="btag">${esc(tag)}</em>` : ''}<small>${esc(bodyLine(b))}${cap ? ` · cap +${cap}` : ''}</small>${vein}${out.get(i) ?? ''}</div>`;
+    return `<div class="sysrow body"${tip(`${D.name}${tag ? ` · ${tag}` : ''}: ${D.desc}${D.orbital ? ' Orbital: its output goes to whoever holds space.' : ' Surface: blockaded while an enemy holds space.'}`)}><i>${ic(icFor('body', b.kind, D.icon))}</i><b>${esc(b.name)}</b>${tag ? `<em class="btag">${esc(tag)}</em>` : ''}<small>${esc(bodyLine(b))}${cap ? ` · cap +${cap}` : ''}</small>${vein}${out.get(i) ?? ''}</div>`;
   }).join('');
   const stTag = (r.buildings.station ?? 0) > 0 ? bodyTag(st, r, BODY_STATION) : null;
-  const station = (r.buildings.station ?? 0) > 0 ? `<div class="sysrow body"${tip(`${STATION.desc} Orbital.`)}><i>${STATION.icon}</i><b>Station</b>${stTag ? `<em class="btag">${esc(stTag)}</em>` : ''}<small>built · cap +${sysOn(st) ? SY(st).capStation : 1}</small>${out.get(BODY_STATION) ?? ''}</div>` : '';
-  const space = out.get(-1) ? `<div class="sysrow body"${tip('Output with no body of its own (a Depot without a Station): orbital')}><i>✧</i><b>Open space</b><small>orbital</small>${out.get(-1)}</div>` : '';
+  const station = (r.buildings.station ?? 0) > 0 ? `<div class="sysrow body"${tip(`${STATION.desc} Orbital.`)}><i>${ic('station')}</i><b>Station</b>${stTag ? `<em class="btag">${esc(stTag)}</em>` : ''}<small>built · cap +${sysOn(st) ? SY(st).capStation : 1}</small>${out.get(BODY_STATION) ?? ''}</div>` : '';
+  const space = out.get(-1) ? `<div class="sysrow body"${tip('Output with no body of its own (a Depot without a Station): orbital')}><i>${ic('star')}</i><b>Open space</b><small>orbital</small>${out.get(-1)}</div>` : '';
   let foot = '';
   if (info) {
     const sl = info.slots;
@@ -64,7 +65,7 @@ export function systemRows(g: GameScreen, r: Region): string {
     const grow = info.role === 'core' && r.owner !== null && info.citizens < info.cap ? `<small${tip('Turns of growth banked: an uncontested Core gains a citizen every few turns')}>↑${info.growth}</small>` : '';
     foot = `<div class="sysfoot">${roleBadge(g, r)}<span class="syscit"${tip(`Citizens ${info.citizens}/${info.cap}: the cap comes from the bodies and the star`)}>☺ ${info.citizens}/${info.cap} ${pip(Math.min(info.citizens, 5), Math.max(info.cap, info.citizens))}${grow}</span>` +
       `<span class="sysslot"${tip('Civil slots (from bodies; a Station adds one): Mine, Trade Hub, Extractor, Academy, Shipyard')}>⚙ ${sl.civilUsed}/${sl.civil}</span>` +
-      `<span class="sysslot"${tip(`Military/logistics slots: ${SY(st).milSlots} everywhere, +${SY(st).chokeSlots} at a chokepoint`)}>⛨ ${sl.milUsed}/${sl.mil}${info.choke ? ' ⋈' : ''}</span>${disc}</div>`;
+      `<span class="sysslot"${tip(`Military/logistics slots: ${SY(st).milSlots} everywhere, +${SY(st).chokeSlots} at a chokepoint`)}>⛨ ${sl.milUsed}/${sl.mil}${info.choke ? ` ${ic('choke')}` : ''}</span>${disc}</div>`;
   }
   return `<div class="sys">${statusLine(g, r)}${top}${rows}${station}${space}${foot}</div>`;
 }
@@ -84,14 +85,14 @@ function statusLine(g: GameScreen, r: Region): string {
     cls = 'contested';
     const holder = S.holder;
     const hc = holder === null || holder === undefined || holder < 0 ? '#bdb6d6' : g.color(holder);
-    bits.push(`<b${tip('An enemy warship is in the system: no growth; orbital output goes to whoever holds space')}>⚔ Contested</b>`);
+    bits.push(`<b${tip('An enemy warship is in the system: no growth; orbital output goes to whoever holds space')}>${ic('chain')} Contested</b>`);
     bits.push(`<span class="hold" style="--pc:${esc(hc)}"${tip(holder === r.owner ? 'The owner holds space: no blockade' : holder === null ? 'Two hostile besiegers: nobody holds space; the orbitals produce nothing' : `${nm(g, holder)} holds space: plunders the orbitals, blockades the surface`)}><i></i>${holder === null ? 'no one holds space' : `${esc(nm(g, holder))} holds space`}</span>`);
     bits.push(`<span${tip('Consecutive contested turns')}>${S.contestedTurns}t</span>`);
     if (S.refugeesIn !== null) bits.push(`<span class="warn"${tip(`Every ${SY(st).refugeeTurns} contested turns a citizen flees as refugees`)}>⚠ refugees in ${S.refugeesIn}t</span>`);
   }
   if (S.occupiedLeft > 0) { if (cls === 'held') cls = 'occupied'; bits.push(`<b${tip(`Just taken: the new owner gets ${S.occupiedScorched ? 'nothing (scorched)' : `${Math.round(SY(st).occupiedShare * 100)}%`} of its output; its Calling sleeps too`)}>⚑ Occupied</b><span>${S.occupiedLeft}t left</span>`); }
   if (S.tribute) { if (cls === 'held') cls = 'tribute'; bits.push(`<b style="--pc:${esc(g.color(S.tribute.to))}"${tip(`${r.name} pays ${Math.round(SY(st).tributeShare * 100)}% of its output to ${g.pname(S.tribute.to)}; they don't fight here`)}>⚖ Tribute → ${esc(nm(g, S.tribute.to))}</b><span>${S.tributeLeft}t left</span>`); }
-  if (!bits.length) bits.push(`<b${tip('Held: the owner gets all of its output')}>◆ Held</b>`);
+  if (!bits.length) bits.push(`<b${tip('Held: the owner gets all of its output')}>${ic('check')} Held</b>`);
   return `<div class="sysstat s-${cls}">${bits.join('')}</div>`;
 }
 
@@ -168,7 +169,7 @@ export function systemNotes(g: GameScreen): { key: string; icon: string; text: s
     if (tributeOfferer(st, r.id, 'plan') !== null && !g.myFree().some(x => x.type === 'tribute' && x.region === r.id)) out.push({ key: `trib${r.id}`, icon: '⚖', text: `Terms for ${r.name.split(' ')[0]}`, tone: 'gold', go: at(r) });
     const S = systemStatus(st, r);
     if (S.blockaded && S.refugeesIn === 1) out.push({ key: `ref${r.id}`, icon: '⚠', text: `Refugees soon: ${r.name.split(' ')[0]}`, tone: 'bad', go: at(r) });
-    else if (S.blockaded) out.push({ key: `blk${r.id}`, icon: '⚔', text: `${r.name.split(' ')[0]} blockaded`, tone: 'bad', go: at(r) });
+    else if (S.blockaded) out.push({ key: `blk${r.id}`, icon: '⛓', text: `${r.name.split(' ')[0]} blockaded`, tone: 'bad', go: at(r) });
   }
   return out.slice(0, 2);
 }

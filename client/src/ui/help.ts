@@ -2,6 +2,7 @@
 // page, written for the UX v2 board (drag-to-order, the plan strip, the primary button, modals) and the Soul layer.
 import type { GameState } from '../../../shared/sim/types.ts';
 import { ORDER_INFO } from '../../../shared/sim/orders.ts';
+import { ORDER_ICON } from '../hud/util.ts';
 
 export function helpHtml(st: GameState): string {
   const R = st.rules, S = R.soul;
@@ -69,7 +70,9 @@ export function helpHtml(st: GameState): string {
   <h2>Winning</h2>
   <ul><li>First to <b>${R.victory.vpTarget} VP</b>, or most VP after turn ${R.victory.turnLimit}, or hold <b>all three Crowns</b> for ${R.crowns.holdTurnsToWin} consecutive turns. Crowns pay ${R.victory.vpPerCrownPerTurn} VP a turn each; the Hollow Throne pays 1, 2, 3… for each turn held; relics, captured capitals, edicts and battle honours add more. Falling ${R.comeback.gap}+ VP behind gives +${Math.round(R.comeback.incomeBonus * 100)}% income.</li></ul>
   <h2>Orders reference</h2>
-  <ul>${Object.values(ORDER_INFO).map(o => `<li>${o.icon} <b>${o.name}</b>: ${o.help}</li>`).join('')}</ul>
+  <ul>${Object.entries(ORDER_INFO).map(([k, o]) => `<li>${ORDER_ICON[k as keyof typeof ORDER_ICON]} <b>${o.name}</b>: ${o.help}</li>`).join('')}</ul>
   <h2>On a phone</h2>
-  <p class="dim">The board fills the screen; the strip and the primary button sit in the thumb zone. Tap to select (the card is a bottom sheet: swipe it down), drag a fleet to order it (a loupe shows what is under your finger), pinch to zoom, drag empty space to pan, long-press for the ring. The screens fold into ≡.</p>`;
+  <p class="dim">The board fills the screen; the strip and the primary button sit in the thumb zone. Tap to select (the card is a bottom sheet: swipe it down), drag a fleet to order it (a loupe shows what is under your finger), pinch to zoom, drag empty space to pan, long-press for the ring. The screens fold into ≡.</p>
+  <h2>Credits</h2>
+  <p class="dim">Icons by Lorc, Delapouite &amp; contributors, <a href="https://game-icons.net" target="_blank" rel="noopener">game-icons.net</a>, <a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noopener">CC BY 3.0</a>. Sound effects by Kenney (kenney.nl); music by cynicmusic, SRG774, congusbongus and RandomMind (OpenGameArt.org); textures by ambientCG: all CC0. Fonts from Google Fonts (SIL OFL 1.1).</p>`;
 }

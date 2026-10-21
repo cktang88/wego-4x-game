@@ -358,3 +358,92 @@ export function drawIcon(ctx: CanvasRenderingContext2D, name: IconKey | string, 
 
 /** Width a canvas icon takes before text at `size` (icon box + a gap), for laying out "icon number" runs. */
 export const iconAdvance = (size: number, gap = 0.2) => size * (1 + gap);
+
+// ------------------------------------------------------------------ canvas text with icons
+const SPLIT_RE = new RegExp(`(${TEXT_GLYPHS.map(reEsc).join('|')})[\\uFE0E\\uFE0F]?`, 'gu');
+/** Splits "⛓3!" into [{ icon: 'chain' }, { text: '3!' }]. */
+export function iconRuns(s: string): ({ icon: IconName; text?: undefined } | { text: string; icon?: undefined })[] {
+  const out: ({ icon: IconName } | { text: string })[] = [];
+  let last = 0;
+  for (const m of s.matchAll(SPLIT_RE)) {
+    if (m.index! > last) out.push({ text: s.slice(last, m.index) });
+    out.push({ icon: GLYPHS[m[1]].i });
+    last = m.index! + m[0].length;
+  }
+  if (last < s.length) out.push({ text: s.slice(last) });
+  return out as ReturnType<typeof iconRuns>;
+}
+const fontPx = (font: string) => Number(/(\d+(?:\.\d+)?)px/.exec(font)?.[1] ?? 12);
+
+export interface IconTextOpts {
+  /** Icon box size in the current transform's units (default 1.15 × the font size, as in icons.css). */
+  size?: number;
+  /** Icon colour (default: the current fillStyle). */
+  iconColor?: string;
+  /** Dark outline under text and icons (stroke width in the current units). */
+  halo?: string;
+  haloWidth?: number;
+  /** Gap between an icon and the text after it, in ems (default 0.15). */
+  gap?: number;
+}
+/** Measures what fillIconText would draw. */
+export function measureIconText(ctx: CanvasRenderingContext2D, s: string, opts: IconTextOpts = {}): number {
+  const px = fontPx(ctx.font), size = opts.size ?? px * 1.15, gap = (opts.gap ?? 0.15) * px;
+  return iconRuns(s).reduce((w, r, i, all) => w + (r.icon ? size + (i < all.length - 1 ? gap : 0) : ctx.measureText(r.text!).width), 0);
+}
+/** fillText that draws the known glyphs as icons. Honours ctx.textAlign (left/center/right/start/end); the
+ *  icons are centred on the text's middle line whatever the textBaseline, so set 'middle' for exact centring. */
+export function fillIconText(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, opts: IconTextOpts = {}): void {
+  const runs = iconRuns(s);
+  if (runs.length === 1 && runs[0].text !== undefined && !opts.halo) { ctx.fillText(s, x, y); return; }
+  const px = fontPx(ctx.font), size = opts.size ?? px * 1.15, gap = (opts.gap ?? 0.15) * px;
+  const w = measureIconText(ctx, s, opts);
+  const al = ctx.textAlign;
+  let cx = al === 'center' ? x - w / 2 : al === 'right' || al === 'end' ? x - w : x;
+  const bl = ctx.textBaseline;
+  const mid = bl === 'middle' ? y : bl === 'top' || bl === 'hanging' ? y + px * 0.5 : bl === 'bottom' || bl === 'ideographic' ? y - px * 0.5 : y - px * 0.36;
+  const fill = ctx.fillStyle as string;
+  ctx.save();
+  ctx.textAlign = 'left';
+  runs.forEach((r, i) => {
+    if (r.icon) {
+      drawIcon(ctx, r.icon, cx, mid, size, opts.iconColor ?? fill, { align: 'left', halo: opts.halo, haloWidth: opts.haloWidth !== undefined ? opts.haloWidth / 2 : undefined });
+      cx += size + (i < runs.length - 1 ? gap : 0);
+    } else {
+      if (opts.halo) { ctx.lineJoin = 'round'; ctx.strokeStyle = opts.halo; ctx.lineWidth = opts.haloWidth ?? 3; ctx.strokeText(r.text!, cx, y); }
+      ctx.fillText(r.text!, cx, y);
+      cx += ctx.measureText(r.text!).width;
+    }
+  });
+  ctx.restore();
+}
+
+const CLOSE_RE = />[×✕]<\/(button|i)>/g;
+/** For whole rendered HTML (HUD panels, modals, overlays): glyphHtml(), plus close buttons whose only content is
+ *  "×" become the close icon. Ambiguous glyphs should already be ic(icFor(…)) in the template; this is the net. */
+export function iconizeHtml(html: string): string {
+  if (!html) return html;
+  if (html === '×' || html === '✕') return ic('close');
+  return glyphHtml(html.replace(CLOSE_RE, (_m, tag: string) => `>${ic('close')}</${tag}>`));
+}
+
+const TEST_RE = new RegExp(GLYPH_RE.source, 'u');
+const escText = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** iconizeHtml for DOM that is already built: swaps glyph text nodes (and lone-× close buttons) in place. */
+export function iconizeDom(root: Element | null | undefined): void {
+  if (!root || typeof document === 'undefined') return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const hits: Text[] = [];
+  for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
+    const p = n.parentElement;
+    if (!p || p.closest('script,style,textarea,svg,option')) continue;
+    const t = n.data;
+    if (TEST_RE.test(t) || ((t === '×' || t === '✕') && (p.tagName === 'BUTTON' || p.tagName === 'I') && p.childNodes.length === 1)) hits.push(n);
+  }
+  for (const n of hits) {
+    const html = n.data === '×' || n.data === '✕' ? ic('close') : glyphHtml(escText(n.data));
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    n.replaceWith(tpl.content);
+  }
+}

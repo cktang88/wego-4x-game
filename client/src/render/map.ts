@@ -24,6 +24,7 @@ import { contestOn, systemStatus } from '../../../shared/sim/contest.ts';
 import { STARS } from '../../../shared/config/systems.ts';
 import { battleViewerOpen } from './battle.ts';
 import { uiScale } from '../ui/dom.ts';
+import { drawIcon, fillIconText, measureIconText, icFor, type IconName } from '../art/icons.ts';
 import {
   type Tier, type Lens, coarsePointer, medianRegionRadius, tierFor, slotFor, slotScale, anchorOf, powerOf, garrisonPower,
   garrisonMax, regionEdges, empireLabels, nearestRegion, ROMAN, isLane, hyperlanes,
@@ -1105,10 +1106,10 @@ export class MapRenderer {
         const p = at(deg, tr);
         deg += step;
         ctx.font = numFont(fz * S);
-        const w = ctx.measureText(txt).width + fz * 0.7 * S, h = th;
+        const w = measureIconText(ctx, txt) + fz * 0.7 * S, h = th;
         ctx.beginPath(); ctx.roundRect(p.x - w / 2, p.y - h / 2, w, h, h / 2);
         ctx.fillStyle = 'rgba(8,4,16,0.92)'; ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 1.1 * S * k; ctx.stroke();
-        ctx.fillStyle = '#f6ead0'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, p.x, p.y + 0.5 * S);
+        ctx.fillStyle = '#f6ead0'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; fillIconText(ctx, txt, p.x, p.y + 0.5 * S);
         ctx.textBaseline = 'alphabetic';
       };
       if (cs.contested) {
@@ -1154,10 +1155,7 @@ export class MapRenderer {
         ctx.beginPath(); ctx.arc(mx, my, R + 2.6 * S, a0, a1);
         ctx.strokeStyle = i < tier ? '#ffd86b' : dorm ? 'rgba(150,150,160,0.35)' : 'rgba(200,180,140,0.32)'; ctx.lineWidth = 2 * S; ctx.stroke();
       }
-      ctx.font = numFont(13 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = dorm ? '#9a98a6' : '#ffe2a0';
-      ctx.fillText(c?.icon ?? '◇', mx, my + 0.5 * S);
-      ctx.textBaseline = 'alphabetic';
+      drawIcon(ctx, icFor('calling', so.calling.id, c?.icon), mx, my, R * 1.45, dorm ? '#9a98a6' : '#ffe2a0');
       ctx.restore();
       this.labelBoxes.push({ x: mx - R - 4 * S, y: my - R - 4 * S, w: (R + 4 * S) * 2, h: (R + 4 * S) * 2 });
     }
@@ -1290,9 +1288,7 @@ export class MapRenderer {
       const bw = 36 * S, bh = 5 * S;
       const box = { x: cx - bw / 2 - 12 * S, y: y - 3 * S, w: bw + 14 * S, h: 12 * S };
       if (!hit(box)) {
-        ctx.font = numFont(13 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        haloText(ctx, '✦', cx - bw / 2 - 6 * S, y + bh / 2, st.players[I.you].color, 'rgba(5,3,12,0.9)', 3 * S);
-        ctx.textBaseline = 'alphabetic';
+        drawIcon(ctx, 'influence', cx - bw / 2 - 6 * S, y + bh / 2, 14 * S, st.players[I.you].color, { halo: 'rgba(5,3,12,0.9)', haloWidth: 1.5 * S });
         roundRect(ctx, cx - bw / 2, y, bw, bh, 2 * S); ctx.fillStyle = 'rgba(5,3,12,0.9)'; ctx.fill();
         roundRect(ctx, cx - bw / 2, y, Math.max(2 * S, bw * fr), bh, 2 * S); ctx.fillStyle = st.players[I.you].color; ctx.fill();
         this.labelBoxes.push(box);
@@ -1370,7 +1366,7 @@ export class MapRenderer {
       if (V) parts.push({ t: `${V.icon} ${V.name.toUpperCase()}`, c: (r.buildings.extractor ?? 0) > 0 ? '#ffffff' : 'rgba(225,220,248,0.75)' });
       ctx.font = nameFont(13 * S);
       const gap = 10 * S;
-      const ws = parts.map(q => ctx.measureText(q.t).width);
+      const ws = parts.map(q => measureIconText(ctx, q.t));
       const w = ws.reduce((a, b) => a + b, 0) + gap * (parts.length - 1) + 12 * S;
       const box = { x: cx - w / 2, y, w, h: lineH };
       if (!hit(box)) {
@@ -1379,7 +1375,7 @@ export class MapRenderer {
           roundRect(ctx, box.x, yy, w, lineH, lineH / 2); ctx.fillStyle = 'rgba(9,6,20,0.7)'; ctx.fill();
           ctx.font = nameFont(13 * S); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
           let x = box.x + 6 * S;
-          parts.forEach((q, i) => { ctx.fillStyle = q.c; ctx.fillText(q.t, x, yy + lineH / 2 + 0.5 * S); x += ws[i] + gap; });
+          parts.forEach((q, i) => { ctx.fillStyle = q.c; fillIconText(ctx, q.t, x, yy + lineH / 2 + 0.5 * S); x += ws[i] + gap; });
           ctx.textBaseline = 'alphabetic';
         });
         this.labelBoxes.push(box);
@@ -1409,9 +1405,7 @@ export class MapRenderer {
     else if (b === 'relic') { diamondPath(ctx, x, y, s * 0.7, s * 0.9); ctx.strokeStyle = '#f2f6ff'; ctx.lineWidth = 1.5 * S; ctx.stroke(); }
     else if (b.startsWith('vein:')) {
       const V = VEINS[b.slice(5)];
-      ctx.font = numFont(size * 0.95); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = V ? desat(V.color, 0.35) : STONE; ctx.fillText(V?.icon ?? '◆', x, y + 0.5 * S);
-      ctx.textBaseline = 'alphabetic';
+      drawIcon(ctx, icFor('vein', b.slice(5), V?.icon), x, y, size * 1.05, V ? desat(V.color, 0.35) : STONE);
     } else buildingIcon(ctx, b, x, y, s * 0.78, STONE, 1.3 * S);
     ctx.restore();
   }
@@ -1432,14 +1426,14 @@ export class MapRenderer {
       ctx.beginPath(); ctx.arc(x, y, 13 * S, 0, TAU); ctx.fillStyle = PLATE; ctx.fill();
       ctx.strokeStyle = hexA0(V.color, mined ? 1 : 0.5); ctx.lineWidth = (mined ? 2.2 : 1.2) * S; ctx.stroke();
       if (mined) { ctx.shadowColor = V.color; ctx.shadowBlur = 10 * S; }
-      ctx.font = numFont(18 * S); ctx.fillStyle = V.color; ctx.fillText(V.icon, x, y + 1 * S);
+      drawIcon(ctx, icFor('vein', r.vein!, V.icon), x, y, 17 * S, V.color);
       ctx.restore();
     }
     if (T) {
       const x = r.site.x - off * S, y = r.site.y + 3 * S;
       ctx.beginPath(); ctx.arc(x, y, 12 * S, 0, TAU); ctx.fillStyle = PLATE; ctx.fill();
       ctx.strokeStyle = 'rgba(255,220,150,0.6)'; ctx.lineWidth = 1.2 * S; ctx.stroke();
-      ctx.font = numFont(16 * S); ctx.fillStyle = '#ffe2a8'; ctx.fillText(T.icon, x, y + 1 * S);
+      drawIcon(ctx, icFor('trait', r.trait!, T.icon), x, y, 15 * S, '#ffe2a8');
     }
     ctx.textBaseline = 'alphabetic';
   }
@@ -1466,7 +1460,7 @@ export class MapRenderer {
         const S = this.px(1), x = r.site.x + 22 * S, y = r.site.y + 10 * S;
         roundRect(ctx, x - 10 * S, y - 9 * S, 20 * S, 18 * S, 5 * S); ctx.fillStyle = PLATE; ctx.fill();
         ctx.strokeStyle = c; ctx.lineWidth = 1.5 * S; ctx.stroke();
-        ctx.font = numFont(13 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = c; ctx.fillText('◎', x, y + 0.5 * S); ctx.textBaseline = 'alphabetic';
+        drawIcon(ctx, 'scan', x, y, 14 * S, c);
       }
     }
 
@@ -2027,10 +2021,10 @@ export class MapRenderer {
     }
     // posture / dug-in / exposed medallions along the front of the base (strategic: the posture only)
     {
-      const marks: { t: string; fill: string; ink: string }[] = [];
-      if (tPost && tPost !== 'steady') marks.push({ t: POSTURES[tPost]?.icon ?? '◇', fill: owner === I.you ? '#1d1f26' : '#3a1418', ink: owner === I.you ? '#ffe2a0' : '#ffb0a0' });
-      if (dug && tier !== 'strategic') marks.push({ t: '⛓', fill: '#2a2a30', ink: '#d8dbe6' });
-      if (exposed) marks.push({ t: '◉', fill: '#5a1010', ink: '#ffd0c8' });
+      const marks: { t: IconName; fill: string; ink: string }[] = [];
+      if (tPost && tPost !== 'steady') marks.push({ t: icFor('posture', tPost, POSTURES[tPost]?.icon), fill: owner === I.you ? '#1d1f26' : '#3a1418', ink: owner === I.you ? '#ffe2a0' : '#ffb0a0' });
+      if (dug && tier !== 'strategic') marks.push({ t: icFor('state', 'dug'), fill: '#2a2a30', ink: '#d8dbe6' });
+      if (exposed) marks.push({ t: icFor('state', 'exposed'), fill: '#5a1010', ink: '#ffd0c8' });
       if (marks.length) {
         const R = (tier === 'strategic' ? 8.5 : 10) * S;
         let x = -((marks.length - 1) * (R * 2 + 2 * S)) / 2;
@@ -2040,7 +2034,7 @@ export class MapRenderer {
           ctx.beginPath(); ctx.arc(x, y, R, 0, TAU);
           ctx.fillStyle = m.fill; ctx.fill();
           ctx.strokeStyle = '#c9a35c'; ctx.lineWidth = 1.1 * S; ctx.stroke();
-          ctx.fillStyle = m.ink; ctx.fillText(`${m.t}\uFE0E`, x, y + 0.5 * S);
+          drawIcon(ctx, m.t, x, y, R * 1.35, m.ink);
           x += R * 2 + 2 * S;
         }
         ctx.textBaseline = 'alphabetic';
@@ -2054,11 +2048,11 @@ export class MapRenderer {
         try { eta = lf.route?.path.length ? Math.max(1, Math.ceil(lf.route.path.length / Math.max(1, fleetSpeed(I.state, lf)))) : 0; } catch { eta = 0; }
         const lt = eta ? `⌂ ${eta}${I.state.mode === 'live' ? '' : 'T'}` : '⌂';
         ctx.font = numFont(13 * S, 700);
-        const lw = ctx.measureText(lt).width + 8 * S, lh = 16 * S;
+        const lw = measureIconText(ctx, lt) + 8 * S, lh = 16 * S;
         const lx = px0 + (t.side > 0 ? 0 : pw2 - lw), ly = py0 + ph + 2 * S;
         roundRect(ctx, lx, ly, lw, lh, 3 * S); ctx.fillStyle = 'rgba(40,22,10,0.95)'; ctx.fill();
         ctx.strokeStyle = 'rgba(255,170,110,0.8)'; ctx.lineWidth = 1 * S; ctx.stroke();
-        ctx.fillStyle = '#ffcf9e'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(lt, lx + 4 * S, ly + lh / 2 + 0.5 * S);
+        ctx.fillStyle = '#ffcf9e'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; fillIconText(ctx, lt, lx + 4 * S, ly + lh / 2 + 0.5 * S);
       }
     }
     // status badges at the base's inner shoulder: ⚠ out of supply, Zz idle (can take orders)
@@ -2072,7 +2066,8 @@ export class MapRenderer {
       roundRect(ctx, bx - bw / 2, by - bh / 2, bw, bh, bh / 2);
       ctx.fillStyle = t.oos ? '#ffd27a' : '#f2efff'; ctx.fill();
       ctx.strokeStyle = 'rgba(8,4,16,0.9)'; ctx.lineWidth = 1.2 * S; ctx.stroke();
-      ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.fillText(badge, bx, by + 0.5 * S);
+      ctx.fillStyle = INK; ctx.textAlign = 'center';
+      if (t.oos) drawIcon(ctx, 'warning', bx, by, 13 * S, INK); else ctx.fillText(badge, bx, by + 0.5 * S);
     }
     ctx.textBaseline = 'alphabetic';
     ctx.restore();
@@ -2600,11 +2595,11 @@ export class MapRenderer {
         ctx.fillStyle = '#fff'; ctx.fillText(label, pm.x, pm.y + 0.5 * s);
       } else {
         // ETA at the head
-        const w = ctx.measureText(label).width + 10 * s;
+        const w = measureIconText(ctx, label) + 10 * s;
         const hx = p2.x + Math.cos(ang) * 4 * s + (Math.cos(ang) >= 0 ? 8 * s : -8 * s - w), hy = p2.y - 20 * s;
         roundRect(ctx, hx, hy, w, 17 * s, 4 * s); ctx.fillStyle = 'rgba(8,4,16,0.92)'; ctx.fill();
         ctx.strokeStyle = hexA(color, 0.8); ctx.lineWidth = 1 * s; ctx.stroke();
-        ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.fillText(label, hx + 5 * s, hy + 9 * s);
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; fillIconText(ctx, label, hx + 5 * s, hy + 9 * s);
       }
       ctx.textBaseline = 'alphabetic';
     }
@@ -2639,11 +2634,11 @@ export class MapRenderer {
     }
     if (label) {
       ctx.font = numFont(13 * s); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-      const w = ctx.measureText(label).width + 10 * s;
+      const w = measureIconText(ctx, label) + 10 * s;
       const hx = tip.x + (Math.cos(ang) >= 0 ? 12 * s : -12 * s - w), hy = tip.y - 22 * s;
       roundRect(ctx, hx, hy, w, 17 * s, 4 * s); ctx.fillStyle = 'rgba(8,4,16,0.92)'; ctx.fill();
       ctx.strokeStyle = hexA(color, 0.8); ctx.lineWidth = 1 * s; ctx.stroke();
-      ctx.fillStyle = '#fff'; ctx.fillText(label, hx + 5 * s, hy + 9 * s);
+      ctx.fillStyle = '#fff'; fillIconText(ctx, label, hx + 5 * s, hy + 9 * s);
       ctx.textBaseline = 'alphabetic';
     }
     ctx.restore();
@@ -2709,10 +2704,8 @@ export class MapRenderer {
       ctx.beginPath(); ctx.arc(H.x, H.y, 14 * s, 0, TAU); ctx.fillStyle = 'rgba(5,3,12,0.94)'; ctx.fill();
       ctx.strokeStyle = col; ctx.lineWidth = 2.5 * s; if (invalid || hollow) ctx.setLineDash([3 * s, 2.5 * s]); ctx.stroke(); ctx.setLineDash([]);
       ctx.strokeStyle = invalid ? '#c8c6d7' : '#ffffff'; ctx.lineWidth = 2.6 * s; ctx.lineCap = 'round';
-      if (D.verb === 'seize' || D.verb === 'join') swords(ctx, H.x, H.y, 8.5 * s, '#ffffff', 2 * s);
-      else if (D.verb === 'merge') { ctx.beginPath(); ctx.moveTo(H.x - 7 * s, H.y); ctx.lineTo(H.x + 7 * s, H.y); ctx.moveTo(H.x, H.y - 7 * s); ctx.lineTo(H.x, H.y + 7 * s); ctx.stroke(); }
-      else if (D.verb === 'split') { ctx.beginPath(); ctx.moveTo(H.x, H.y + 7 * s); ctx.lineTo(H.x, H.y); ctx.lineTo(H.x - 6 * s, H.y - 6 * s); ctx.moveTo(H.x, H.y); ctx.lineTo(H.x + 6 * s, H.y - 6 * s); ctx.stroke(); }
-      else { ctx.beginPath(); ctx.moveTo(H.x - 6 * s, H.y - 6 * s); ctx.lineTo(H.x + 6 * s, H.y + 6 * s); ctx.moveTo(H.x + 6 * s, H.y - 6 * s); ctx.lineTo(H.x - 6 * s, H.y + 6 * s); ctx.stroke(); }
+      const vi: IconName = D.verb === 'seize' || D.verb === 'join' ? 'attack' : D.verb === 'merge' ? 'merge' : D.verb === 'split' ? 'split' : 'close';
+      drawIcon(ctx, vi, H.x, H.y, 17 * s, invalid ? '#c8c6d7' : '#ffffff');
     }
     ctx.restore();
   }
@@ -2859,10 +2852,8 @@ export class MapRenderer {
         ctx.font = numFont(this.px(14 * pop));
         ctx.textAlign = 'center';
         const y = P.y - this.px(36) - easeOutCubic(t) * this.px(20);
-        ctx.lineWidth = this.px(3); ctx.strokeStyle = `rgba(6,3,14,${0.7 * Math.min(1, (1 - t) * 2)})`;
-        ctx.strokeText(fx.text, P.x, y);
         ctx.fillStyle = hexA(fx.kind === 'text' || fx.kind === 'explode' ? c : '#ffffff', Math.min(1, (1 - t) * 2));
-        ctx.fillText(fx.text, P.x, y);
+        fillIconText(ctx, fx.text, P.x, y, { halo: `rgba(6,3,14,${0.7 * Math.min(1, (1 - t) * 2)})`, haloWidth: this.px(3) });
       }
     }
     if (list === this.ownFx) this.drawHoverLabels(I);

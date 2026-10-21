@@ -16,6 +16,7 @@ import { renderNotes, bindNotes } from './notify.ts';
 import * as M from '../ui/modals.ts';
 import { fmtClock, plus, shortName, tip } from './util.ts';
 import { fatePill, fatePop } from './signature.ts';
+import { ic, icFor } from '../art/icons.ts';
 
 type ModalName = 'empire' | 'score' | 'chronicle' | 'help';
 interface ModalsModule {
@@ -28,7 +29,7 @@ interface ModalsModule {
 const modals: ModalsModule | null = M;
 const loadModals = (): Promise<ModalsModule | null> => Promise.resolve(modals);
 
-const LENS_ICON: Record<Lens, string> = { political: '◐', supply: '⛓', economy: '⚙', military: '⚔' };
+const lensIcon = (l: Lens) => ic(icFor('lens', l));
 const LENS_NAME: Record<Lens, string> = { political: 'Political', supply: 'Supply', economy: 'Economy', military: 'Military' };
 
 export class Hud {
@@ -177,8 +178,8 @@ export class Hud {
     const newBattles = !!g.st.last?.battles.length && g.st.last.turn >= g.lastSeenTurn && !g.replay;
     const html = `${emp ? `<button class="tool" data-act="empire"${tip('Empire · E')} aria-label="Empire">✺${dot(g.canResearchNow())}</button>` : ''}
       <button class="tool" data-act="score"${tip('Score · Q')} aria-label="Score">♛${dot(g.unreadChat > 0)}</button>
-      <button class="tool" data-act="chronicle"${tip('Chronicle · C')} aria-label="Chronicle">☰${dot(newBattles && false)}</button>
-      <button class="tool" data-act="lens"${tip(`Lens: ${LENS_NAME[g.lens]} · 1-4`)} aria-label="Lens">${LENS_ICON[g.lens]}</button>
+      <button class="tool" data-act="chronicle"${tip('Chronicle · C')} aria-label="Chronicle">${ic('chronicle')}${dot(newBattles && false)}</button>
+      <button class="tool" data-act="lens"${tip(`Lens: ${LENS_NAME[g.lens]} · 1-4`)} aria-label="Lens">${lensIcon(g.lens)}</button>
       <button class="tool" data-act="menu" aria-label="Menu">≡${dot(g.phone && (g.unreadChat > 0 || g.canResearchNow()))}</button>`;
     g.setHtml(this.h.tools, html);
   }
@@ -227,21 +228,21 @@ export class Hud {
       return `<div class="bd"><div class="h">${icon} ${now}</div>${row('Income', `${plus(det.total[k])}/${per}`, 'good')}${up ? row('Upkeep', `−${up}`, 'bad') : ''}${sp ? row('Planned', `−${sp}`, now - sp < 0 ? 'bad' : '') : ''}${sp ? row('Left', String(now - sp), now - sp < 0 ? 'bad' : '') : ''}${cut ? row('⚠ Cut off', '½', 'bad') : ''}</div>`;
     }
     if (kind === 'lens') {
-      return `<div class="lenses">${LENSES.map((l, i) => `<button class="${g.lens === l ? 'on' : ''}" data-lens="${l}"${tip(`${LENS_NAME[l]} · ${i + 1}`)}><i>${LENS_ICON[l]}</i><span>${LENS_NAME[l]}</span></button>`).join('')}</div>`;
+      return `<div class="lenses">${LENSES.map((l, i) => `<button class="${g.lens === l ? 'on' : ''}" data-lens="${l}"${tip(`${LENS_NAME[l]} · ${i + 1}`)}><i>${lensIcon(l)}</i><span>${LENS_NAME[l]}</span></button>`).join('')}</div>`;
     }
     if (kind === 'menu') {
       const local = g.src instanceof LocalSource ? g.src : null;
       const emp = st.rules.empire?.enabled !== false;
       const link = g.src.kind === 'remote' && g.you !== null ? `${location.origin}${location.pathname}#/g/${g.src.meta.id}/${(g.src as unknown as { token: string }).token}` : '';
       const item = (x: string, icon: string, label: string, extra = '') => `<button data-m="${x}"${extra}><i>${icon}</i><span>${label}</span></button>`;
-      const phoneItems = g.phone ? `<div class="mrow">${emp ? item('empire', '✺', 'Empire', g.canResearchNow() ? ' class="hot"' : '') : ''}${item('score', '♛', 'Score', g.unreadChat ? ' class="hot"' : '')}${item('chronicle', '☰', 'Chronicle')}</div>` : '';
+      const phoneItems = g.phone ? `<div class="mrow">${emp ? item('empire', '✺', 'Empire', g.canResearchNow() ? ' class="hot"' : '') : ''}${item('score', '♛', 'Score', g.unreadChat ? ' class="hot"' : '')}${item('chronicle', ic('chronicle'), 'Chronicle')}</div>` : '';
       const last = g.live ? (st.live?.tick ?? 0) : st.turn - 1;
       return `<div class="menu">${phoneItems}
         ${item('replaylast', '⟲', g.live ? 'Replay tick' : 'Replay turn')}
         ${last >= 1 ? `<label class="mrep"><span>${g.live ? 'Tick' : 'Turn'}</span><input type="number" min="1" max="${last}" value="${Math.max(1, last)}" data-rt><button data-m="replayturn">▶</button></label>` : ''}
         ${item('signals', '◎', `Signals ${g.showSignals ? 'on' : 'off'}`)}
-        ${item('help', '?', 'Help')}
-        ${g.you !== null ? item('teach', '↻', 'Teach again') : ''}
+        ${item('help', ic('help'), 'Help')}
+        ${g.you !== null ? item('teach', ic('replay'), 'Teach again') : ''}
         ${local ? item('save', '⤓', 'Save file') : ''}
         ${local ? `<label class="mchk"><input type="checkbox" data-m="reveal" ${local.save.reveal ? 'checked' : ''}><span>Reveal map</span></label>` : ''}
         ${link ? `<label class="mlink"><span>Seat link</span><input value="${esc(link)}" readonly data-copy></label><label class="mlink"><span>Invite</span><input value="${esc(`${location.origin}${location.pathname}#/g/${g.src.meta.id}`)}" readonly data-copy></label>` : ''}

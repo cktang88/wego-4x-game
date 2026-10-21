@@ -1,6 +1,9 @@
 // Help modal (?): a short encyclopedia. Every bullet ≤ 12 words; numbers come from the rules.
 import type { GameState } from '../../../shared/sim/types.ts';
 import { type Ctx } from './modal-util.ts';
+import { ic } from '../art/icons.ts';
+
+const A = (href: string, text: string) => `<a href="${href}" target="_blank" rel="noopener">${text}</a>`;
 
 export const HELP_TABS: [string, string, string][] = [['win', '♛', 'How to win'], ['orders', '➤', 'Orders'], ['combat', '⚔', 'Combat'], ['soul', '⚑', 'Banners'], ['bets', '⛉', 'Postures'], ['empire', '✺', 'Empire'], ['live', '⏱', 'Live mode']];
 
@@ -72,9 +75,14 @@ function cards(st: GameState, tab: string): Card[] {
 
 export function helpBody(c: Ctx): string {
   const cs = cards(c.g.st, c.tab);
+  const credits = c.tab === 'win' ? `<section class="hc credits"><h3><span>${ic('dispatch')}</span>Credits</h3><ul>
+    <li>Icons by <b>Lorc, Delapouite &amp; contributors</b>, ${A('https://game-icons.net', 'game-icons.net')}, ${A('https://creativecommons.org/licenses/by/3.0/', 'CC BY 3.0')} (recoloured; a few drawn for this game).</li>
+    <li>Sound effects by <b>Kenney</b> (${A('https://kenney.nl', 'kenney.nl')}), ${A('https://creativecommons.org/publicdomain/zero/1.0/', 'CC0')}.</li>
+    <li>Music from ${A('https://opengameart.org', 'OpenGameArt.org')}, CC0: <b>cynicmusic</b>, <b>SRG774</b>, <b>congusbongus</b>, <b>RandomMind</b>.</li>
+    <li>Textures by <b>ambientCG</b> (${A('https://ambientcg.com', 'ambientcg.com')}), CC0. Fonts: Google Fonts, SIL OFL 1.1.</li></ul></section>` : '';
   const keys = c.tab === 'win' ? `<section class="hc keys"><h3><span>⌨</span>Keys</h3><div class="kgrid"><kbd>E</kbd><span>Empire</span><kbd>Q</kbd><span>Score</span><kbd>C</kbd><span>Chronicle</span><kbd>?</kbd><span>Help</span><kbd>Esc</kbd><span>Close</span><kbd>1–7</kbd><span>Tabs</span><kbd>Tab</kbd><span>Idle fleet</span><kbd>Enter</kbd><span>Seal</span><kbd>Space</kbd><span>Peek / skip</span></div></section>` : '';
   const restart = c.g.you !== null && (c.g.restartTips || c.g.restartTour) ? `<button class="mbtn m-ghost" data-a="tips">↻ Restart tips</button>` : '';
-  return `<div class="m-help"><div class="hgrid">${cs.map(x => `<section class="hc"><h3><span>${x.ic}</span>${x.t}</h3><ul>${x.b.map(b => `<li>${b}</li>`).join('')}</ul></section>`).join('')}${keys}</div>${restart ? `<div class="help-foot">${restart}</div>` : ''}</div>`;
+  return `<div class="m-help"><div class="hgrid">${cs.map(x => `<section class="hc"><h3><span>${x.ic}</span>${x.t}</h3><ul>${x.b.map(b => `<li>${b}</li>`).join('')}</ul></section>`).join('')}${keys}${credits}</div>${restart ? `<div class="help-foot">${restart}</div>` : ''}</div>`;
 }
 
 export function helpAct(c: Ctx, a: string): boolean {

@@ -16,14 +16,15 @@ import { EMPIRE_TABS, empireHead, empireBody, empireAfter, empireAct } from './m
 import { scoreHead, scoreBody, scoreAct, sendChat } from './modal-score.ts';
 import { CHRON_FILTERS, chronicleHead, chronicleBody, chronicleAct } from './modal-chronicle.ts';
 import { HELP_TABS, helpBody, helpAct } from './modal-help.ts';
+import { iconizeHtml, ic } from '../art/icons.ts';
 
 export type { ModalName } from './modal-util.ts';
 
 const META: Record<ModalName, { icon: string; title: string; key: string; tabs: [string, string, string][] }> = {
   empire: { icon: '✺', title: 'Empire', key: 'E', tabs: EMPIRE_TABS },
   score: { icon: '♛', title: 'Score', key: 'Q', tabs: [] },
-  chronicle: { icon: '☰', title: 'Chronicle', key: 'C', tabs: [] },
-  help: { icon: '?', title: 'Help', key: '?', tabs: HELP_TABS },
+  chronicle: { icon: ic('chronicle'), title: 'Chronicle', key: 'C', tabs: [] },
+  help: { icon: ic('help'), title: 'Help', key: '?', tabs: HELP_TABS },
 };
 const ORDER: ModalName[] = ['empire', 'score', 'chronicle', 'help'];
 
@@ -156,11 +157,11 @@ function render(force = false) {
     const k = el.dataset.keep ?? el.className.split(' ')[0];
     scrolls.set(k, { top: el.scrollTop, left: el.scrollLeft, bottom: el.scrollTop + el.clientHeight >= el.scrollHeight - 4 });
   });
-  if (force || head !== o.html.head) { o.head.innerHTML = head; o.html.head = head; }
+  if (force || head !== o.html.head) { o.head.innerHTML = iconizeHtml(head); o.html.head = head; }
   const changed = force || body !== o.html.body;
   if (changed) {
     o.panel.querySelectorAll(':scope > .chat').forEach(x => x.remove());
-    o.body.innerHTML = body; o.html.body = body;
+    o.body.innerHTML = iconizeHtml(body); o.html.body = body;
     // the chat drawer belongs to the panel (beside the scrolling body, under the header)
     const chat = o.body.querySelector<HTMLElement>('.chat');
     if (chat) o.panel.appendChild(chat);

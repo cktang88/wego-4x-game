@@ -2,6 +2,7 @@
 // All functions draw in the current transform; sizes are in that transform's units (callers pass world units
 // already scaled to screen-constant px).
 import type { Pt } from '../../../shared/sim/types.ts';
+import { drawIcon, icFor } from '../art/icons.ts';
 
 export const TAU = Math.PI * 2;
 export const numFont = (px: number, w = 700) => `${w} ${px}px "Rajdhani", system-ui, sans-serif`;
@@ -172,10 +173,7 @@ export function buildingIcon(ctx: CanvasRenderingContext2D, key: string, x: numb
       break;
     }
     default: {
-      const g: Record<string, string> = { mine: '⛏', tradehub: '¢', sensor: '◎', academy: '✺', extractor: '⛁' };
-      ctx.font = numFont(s * 2.1, 700); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(g[key] ?? '•', 0, s * 0.1);
-      ctx.textBaseline = 'alphabetic';
+      drawIcon(ctx, icFor('structure', key), 0, s * 0.05, s * 2.1, ctx.fillStyle as string);
     }
   }
   ctx.restore();

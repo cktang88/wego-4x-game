@@ -17,6 +17,7 @@ import { LocalSource, tokens } from './net.ts';
 import { MapRenderer, regionLayout, reducedMotion, type DrawInput, type FleetDraw, type Fx } from './render/map.ts';
 import { openBattleViewer } from './render/battle.ts';
 import { h, esc, toast, overlay, roman, resetUiFx } from './ui/dom.ts';
+import { ic, icFor, glyphHtml, iconizeHtml } from './art/icons.ts';
 import { nextTickAt, tickMs, etaTicks, tickInCycle } from '../../shared/sim/live.ts';
 import type { FreeAction } from '../../shared/sim/types.ts';
 import { TECH, LAW, BRANCHES } from '../../shared/config/empire.ts';
@@ -189,7 +190,7 @@ export class GameScreen {
     let shownFor: HTMLElement | null = null;
     const show = (el: HTMLElement) => {
       shownFor = el;
-      t.textContent = el.dataset.tip ?? '';
+      t.innerHTML = glyphHtml(esc(el.dataset.tip ?? ''));
       t.classList.remove('hidden');
       const r = el.getBoundingClientRect(), w = t.offsetWidth, hh = t.offsetHeight;
       let y = r.top - hh - 8;
@@ -229,7 +230,7 @@ export class GameScreen {
   setHtml(el: HTMLElement, html: string): boolean {
     if (this.shownHtml.get(el) === html && (el.childElementCount || !html)) return false;
     this.shownHtml.set(el, html);
-    el.innerHTML = html;
+    el.innerHTML = iconizeHtml(html);
     return true;
   }
   /** Hide the info popover (set up by bindTips). */
@@ -806,7 +807,7 @@ export class GameScreen {
     };
     if (used < this.plan.orders.length && !now) {
       const o = overlay(`<div class="dialog seal-ask"><div class="big">${used}<small>/${this.plan.orders.length}</small></div><h2>Seal anyway?</h2>
-        <div class="row"><button class="primary" data-y>Seal ✓</button><button data-n>Back</button></div></div>`);
+        <div class="row"><button class="primary" data-y>Seal ${ic('check')}</button><button data-n>Back</button></div></div>`);
       o.querySelector('[data-y]')!.addEventListener('click', () => { o.remove(); go(); });
       o.querySelector('[data-n]')!.addEventListener('click', () => o.remove());
     } else go();
@@ -1029,7 +1030,7 @@ export class GameScreen {
 
   banner(t: string) {
     const b = this.el.banner;
-    b.textContent = t;
+    b.innerHTML = glyphHtml(esc(t));
     b.dataset.text = t; // the light sweep (fx.css) reads it
     // restart the sweep animation even if the previous banner is still up
     b.classList.remove('show', 'hide'); void b.offsetWidth; b.classList.add('show');
@@ -1498,7 +1499,7 @@ export function eventText(st: GameState, e: GameEvent, you: number | null): stri
     case 'move': return e.guard ? `${pn(e.owner)} guard ${fn(e.fleet)} rushes to ${rn(e.to)}` : `${pn(e.owner)} ${fn(e.fleet)} → ${rn(e.to)}`;
     case 'blocked': return `${pn(e.owner)} ${fn(e.fleet)} stopped at ${rn(e.at)} (${esc(e.reason)})`;
     case 'clash': return `Fleets clash on the ${rn(e.a)}–${rn(e.b)} border!`;
-    case 'battle': return `<a href="#" data-battle="${e.battle}">⚔ ${esc(e.name)}</a>`;
+    case 'battle': return `<a href="#" data-battle="${e.battle}">${ic('battle')} ${esc(e.name)}</a>`;
     case 'retreat': return `${pn(e.owner)} ${fn(e.fleet)} retreats to ${rn(e.to)}`;
     case 'destroyed': return `<span class="bad">${esc(e.name)} destroyed</span> at ${rn(e.region)}`;
     case 'capture': return `${pn(e.by)} ${e.how === 'influence' ? 'wins over' : 'captures'} ${rn(e.region)}${e.from !== null ? ` from ${pn(e.from)}` : ''}`;
@@ -1512,13 +1513,13 @@ export function eventText(st: GameState, e: GameEvent, you: number | null): stri
     case 'betrayal': return `<span class="bad">BETRAYAL:</span> ${pn(e.by)} attacks ${pn(e.victim)} at ${rn(e.region)}`;
     case 'fail': return e.owner === you ? `<span class="bad">${esc(e.text)}</span>` : '';
     case 'note': return esc(e.text);
-    case 'tech': { const t = TECH[e.tech]; return e.stolen ? `${pn(e.owner)} steals <b>${esc(t?.name ?? e.tech)}</b> from a captured Academy` : `${pn(e.owner)} researched ${t?.icon ?? ''} <b>${esc(t?.name ?? e.tech)}</b>${t?.tier === 4 ? ' <span class="gold">★</span>' : ''}`; }
-    case 'law': { const l = LAW[e.law]; return `${pn(e.owner)} ${e.revoked ? 'revokes' : 'enacts'} ${l?.icon ?? ''} <b>${esc(l?.name ?? e.law)}</b>`; }
+    case 'tech': { const t = TECH[e.tech]; return e.stolen ? `${pn(e.owner)} steals <b>${esc(t?.name ?? e.tech)}</b> from a captured Academy` : `${pn(e.owner)} researched ${ic(icFor('tech', e.tech, t?.icon))} <b>${esc(t?.name ?? e.tech)}</b>${t?.tier === 4 ? ' <span class="gold">★</span>' : ''}`; }
+    case 'law': { const l = LAW[e.law]; return `${pn(e.owner)} ${e.revoked ? 'revokes' : 'enacts'} ${ic(icFor('law', e.law, l?.icon))} <b>${esc(l?.name ?? e.law)}</b>`; }
     case 'refit': return `${pn(e.owner)} ${fn(e.fleet)} refits at ${rn(e.region)}`;
     case 'rout': return `${pn(e.owner)} ${fn(e.fleet)} routs from ${rn(e.from)}, limping home`;
     case 'soul': return esc(e.text);
     case 'posture': return esc(e.text);
-    case 'fate': return `✪ ${esc(e.text)}`;
+    case 'fate': return `${ic('fate')} ${esc(e.text)}`;
     default: return '';
   }
 }

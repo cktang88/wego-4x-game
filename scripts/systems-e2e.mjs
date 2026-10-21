@@ -60,8 +60,8 @@ async function run(tag, phone) {
   check(/Yellow dwarf/.test(capTxt), `${tag}: capital card shows its star`);
   check(await ev(() => document.querySelectorAll('.card .sysrow.body').length === 3), `${tag}: capital card shows 3 body rows`);
   check(/Core/.test(capTxt), `${tag}: role badge Core`);
-  check(/☺ 3\/5/.test(capTxt), `${tag}: citizens 3/5`);
-  check(/⚙ 1\/3/.test(capTxt) && /⛨ 1\/[23]/.test(capTxt), `${tag}: civil and military slots used/total`);
+  check(/3\/5/.test(capTxt) && await ev(() => !!document.querySelector('.card .syscit .ic-citizen')), `${tag}: citizens 3/5`);
+  check(/1\/3/.test(capTxt) && /1\/[23]/.test(capTxt) && await ev(() => !!document.querySelector('.card .sysslot .ic-industry') && !!document.querySelector('.card .sysslot .ic-garrison')), `${tag}: civil and military slots used/total`);
   const f1 = await fits();
   check(f1.page && f1.card && f1.sys, `${tag}: card fits the screen (${JSON.stringify(f1)})`);
   await shot('1-capital');

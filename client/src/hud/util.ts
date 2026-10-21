@@ -2,20 +2,10 @@
 import type { Order } from '../../../shared/sim/types.ts';
 import { ORDER_INFO } from '../../../shared/sim/orders.ts';
 import { esc } from '../ui/dom.ts';
+import { ic, icFor } from '../art/icons.ts';
 
-/** The closed icon set (docs/UX-V2.md §6). */
-export const IC = {
-  industry: '⚙', credits: '¢', influence: '✦', vp: '♛', power: '⚔', garrison: '⛨', move: '➤', build: '⚒',
-  develop: '▲', research: '✺', law: '⚑', scan: '◎', time: '⏱', alert: '⚠', antimatter: '⚛', crystal: '◆',
-} as const;
-
-/** One glyph per order type, from the closed set where one fits. */
-const ORDER_ICONS: Partial<Record<Order['type'], string>> = {
-  move: '➤', seize: '⚔', build: '⚒', develop: '▲', fortify: '⛨', influence: '✦', scan: '◎', feint: '☍',
-  conceal: '☾', excavate: '✧', pact: '⚭', law: '⚑', refit: '⚒',
-};
-/** Order glyph (new order kinds fall back to the rule table's icon). */
-export const ORDER_ICON = new Proxy(ORDER_ICONS as Record<string, string>, { get: (t, k: string) => t[k] ?? (ORDER_INFO as Record<string, { icon: string } | undefined>)[k]?.icon ?? '•' }) as Record<Order['type'], string>;
+/** One icon per order type (docs/UX-V2.md §6): inline SVG from art/icons.ts. */
+export const ORDER_ICON = new Proxy({} as Record<string, string>, { get: (_t, k: string) => ic(icFor('order', k, (ORDER_INFO as Record<string, { icon: string } | undefined>)[k]?.icon)) }) as Record<Order['type'], string>;
 
 /** Ship class silhouettes (inline SVG, 28x14, pointing right). */
 const SIL: Record<string, string> = {

@@ -11,6 +11,7 @@ import { intentFor, targetMap, commitIntent, isLane, VERB_COLOR, type DragSrc, t
 import { cardAction } from './card.ts';
 import { offerCharge } from './signature.ts';
 import { shortWhy } from './util.ts';
+import { glyphHtml, ic } from '../art/icons.ts';
 
 interface Press { id: number; x: number; y: number; touch: boolean; fleet: number | null; moved: boolean; pan: { cx: number; cy: number } | null; lp: number; longed: boolean }
 interface Drag { src: DragSrc; id: number; touch: boolean; x: number; y: number; rid: number | null; over: number | null; key: string; intent: Intent | null; ship: boolean }
@@ -407,14 +408,14 @@ export class Gestures {
     L.style.right = left ? '' : '0.75rem';
     const name = d.rid !== null ? g.st.regions[d.rid]?.name ?? '' : '';
     const lbl = L.querySelector('.lbl')!;
-    const txt = `${esc(name)}${d.intent ? ` · <b style="color:${d.intent.color}">${esc(d.intent.icon)} ${esc(d.intent.text)}</b>` : ''}`;
+    const txt = `${esc(name)}${d.intent ? ` · <b style="color:${d.intent.color}">${glyphHtml(esc(d.intent.icon))} ${esc(d.intent.text)}</b>` : ''}`;
     if (lbl.innerHTML !== txt) lbl.innerHTML = txt;
   }
 
   // ------------------------------------------------------------------ preview card
   private showPreview(it: Intent, x: number, y: number) {
     const el = this.g.hud.h.preview;
-    const html = `<i>${esc(it.icon)}</i><b>${esc(it.text)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}`;
+    const html = `<i>${glyphHtml(esc(it.icon))}</i><b>${esc(it.text)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}`;
     if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
     el.className = `dragcard v-${it.verb} ${it.ok ? 'ok' : 'no'}`;
     el.style.setProperty('--vc', it.color);
@@ -463,7 +464,7 @@ export class Gestures {
       if (!f.fortified) add('fortify', '⛨', 'Fortify', 0, { type: 'fortify', fleet: f.id });
       add('scan', '◎', 'Scan', 1, { type: 'scan', target: f.region });
       add('feint', '☍', 'Feint', 2, { type: 'feint', target: f.region });
-      add('conceal', '☾', 'Conceal', 3, { type: 'conceal' }, null);
+      add('conceal', ic('conceal'), 'Conceal', 3, { type: 'conceal' }, null);
       if (f.ships.length > 1 && g.fleetUses(f.id) === 0) add('split', '✂', 'Split', 4, null);
       if (r.owner === you && (r.buildings.shipyard ?? 0) > 0 && f.ships.some(s => s.mod !== blueprintFor(st, you, s.cls) || s.hp < s.maxHp)) add('refit', '⚒', 'Refit', 5, { type: 'refit', fleet: f.id });
       if (r.relic === 'unclaimed') add('excavate', '✧', 'Excavate', 6, { type: 'excavate', fleet: f.id });
@@ -492,7 +493,7 @@ export class Gestures {
     el.style.transform = `translate(${cx}px, ${cy}px)`;
     el.innerHTML = `<div class="rc">${hv ? `<b>${esc(hv.label)}</b><small>${esc(hv.sub)}</small>` : ''}</div>` + R.items.map(i => {
       const a = (i.pos / 8) * Math.PI * 2 - Math.PI / 2;
-      return `<button class="ri ${R.hover === i.a ? 'on' : ''}" data-ring="${i.a}" style="transform:translate(${(Math.cos(a) * rad).toFixed(1)}px, ${(Math.sin(a) * rad).toFixed(1)}px)" aria-label="${esc(i.label)}"><i>${i.icon}</i></button>`;
+      return `<button class="ri ${R.hover === i.a ? 'on' : ''}" data-ring="${i.a}" style="transform:translate(${(Math.cos(a) * rad).toFixed(1)}px, ${(Math.sin(a) * rad).toFixed(1)}px)" aria-label="${esc(i.label)}"><i>${glyphHtml(i.icon)}</i></button>`;
     }).join('');
   }
   private ringHover(a: string | null) { if (this.ring && this.ring.hover !== a) { this.ring.hover = a; this.renderRing(); } }

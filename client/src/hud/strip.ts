@@ -1,5 +1,5 @@
 // The plan strip and the primary button (docs/UX-V2.md §3 "Plan strip", §4 "Turn flow").
-// WEGO: five order chips (icon + 2-word target; an empty slot is a dashed outline), ↶ undo, 👁 preview, free
+// WEGO: five order chips (icon + 2-word target; an empty slot is a dashed outline), undo, preview, free
 // changes as a small chip. All of a turn's orders resolve together, so order in the strip doesn't matter.
 // LIVE: bank pips, "+1 in 3m", and the orders queued for the next tick. During a replay: a replay bar.
 import type { GameScreen } from '../game.ts';
@@ -9,6 +9,7 @@ import { LAW } from '../../../shared/config/empire.ts';
 import { nextTickAt } from '../../../shared/sim/live.ts';
 import { esc } from '../ui/dom.ts';
 import { ORDER_ICON, shortName, tip, romanN, fmtClock } from './util.ts';
+import { ic, icFor } from '../art/icons.ts';
 
 /** Two words for an order chip: what it targets. */
 export function orderTarget(g: GameScreen, o: Order): string {
@@ -32,7 +33,8 @@ export function orderTarget(g: GameScreen, o: Order): string {
   return ORDER_INFO_NAME(any.type);
 }
 const ORDER_INFO_NAME = (t: string) => t[0].toUpperCase() + t.slice(1);
-const FREE_ICON: Record<string, string> = { doctrine: '⚔', split: '✂', merge: '+', rename: '✎', research: '✺', blueprint: '⚒', revoke: '⚑', halt: '■', posture: '⛉', wposture: '⚑', fate: '✪', tribute: '⚖', vow: '✠', honour: '❖', calling: '◈', raze: '♨', dispatch: '✒' };
+const freeIcon = (t: string) => ic(icFor('free', t));
+const X = ic('close');
 
 export function renderStrip(g: GameScreen, el: HTMLElement) {
   const st = g.st;
@@ -40,17 +42,17 @@ export function renderStrip(g: GameScreen, el: HTMLElement) {
   if (g.blockingReplay && g.replay) {
     const R = g.replay;
     const pct = R.beats.length ? Math.round(((R.i + Math.min(1, R.prog)) / R.beats.length) * 100) : 0;
-    html = `<div class="replaybar"><span class="lbl">${R.preview ? '👁 Preview' : g.live ? `⟲ Tick` : `⟲ Turn ${R.result.turn}`}</span><div class="prog"><i style="width:${pct}%"></i></div>
-      <button data-r="pause" aria-label="${R.playing ? 'Pause' : 'Play'}">${R.playing ? '❚❚' : '▶'}</button><button data-r="speed" aria-label="Speed">${R.speed}×</button><button data-r="skip"${tip('Skip · Space')}>⏭</button></div>`;
+    html = `<div class="replaybar"><span class="lbl">${R.preview ? `${ic('eye')} Preview` : g.live ? `${ic('replay')} Tick` : `${ic('replay')} Turn ${R.result.turn}`}</span><div class="prog"><i style="width:${pct}%"></i></div>
+      <button data-r="pause" aria-label="${R.playing ? 'Pause' : 'Play'}">${R.playing ? ic('pause') : ic('play')}</button><button data-r="speed" aria-label="Speed">${R.speed}×</button><button data-r="skip"${tip('Skip · Space')} aria-label="Skip">${ic('skip')}</button></div>`;
   } else if (g.you === null || !g.canPlan) {
     html = '';
   } else if (g.live) {
     const cap = st.rules.live.bankCap;
     const next = st.live!.nextOrderAt[g.you] ?? 0;
     const pips = Array.from({ length: cap }, (_, i) => `<i class="pip ${i < g.bank ? 'on' : ''}"></i>`).join('');
-    const q = g.queue.map((o, i) => `<div class="chip filled live" data-live="${i}" data-pop="liveq:${i}:${o.type}:${'fleet' in o ? o.fleet : ''}"><i class="ic">${ORDER_ICON[o.type]}</i><span class="t">${esc(orderTarget(g, o))}</span><button class="x" data-x="${i}" aria-label="Take back">×</button></div>`).join('');
+    const q = g.queue.map((o, i) => `<div class="chip filled live" data-live="${i}" data-pop="liveq:${i}:${o.type}:${'fleet' in o ? o.fleet : ''}"><i class="oic">${ORDER_ICON[o.type]}</i><span class="t">${esc(orderTarget(g, o))}</span><button class="x" data-x="${i}" aria-label="Take back">${X}</button></div>`).join('');
     html = `<div class="bank ${g.bank >= cap ? 'full' : ''} ${g.bank > 0 ? 'has' : ''}"${tip(g.bank >= cap ? 'Bank full: spend one' : 'Orders banked')}><span class="pips">${pips}</span><small>${g.bank >= cap ? 'full' : `+1 <b data-countdown="${next}"></b>`}</small></div>
-      ${q ? `<div class="slots">${q}</div>` : ''}${g.queue.length ? `<button class="sbtn" data-act="undo"${tip('Take back last · Ctrl+Z')}>↶</button>` : ''}`;
+      ${q ? `<div class="slots">${q}</div>` : ''}${g.queue.length ? `<button class="sbtn" data-act="undo"${tip('Take back last · Ctrl+Z')} aria-label="Undo">${ic('undo')}</button>` : ''}`;
   } else {
     const n = g.plan.orders.length;
     const rep = g.replacing;
@@ -58,13 +60,13 @@ export function renderStrip(g: GameScreen, el: HTMLElement) {
       if (!o) return `<div class="chip empty ${g.targetSlot === i ? 'target' : ''}" data-slot="${i}" aria-label="Empty slot"><small>${romanN(i + 1)}</small></div>`;
       const err = g.validateAt(o, i);
       const hot = g.hoverSlot === i;
-      return `<div class="chip filled k-${o.type} ${err ? 'bad' : ''} ${rep ? 'replace' : ''} ${hot ? 'hot' : ''}" data-slot="${i}" data-pop="slots:${i}:${o.type}:${'fleet' in o ? o.fleet : ''}"${err ? tip(`⊘ ${err}`) : ''}><i class="ic">${ORDER_ICON[o.type]}</i><span class="t">${esc(orderTarget(g, o))}</span>${o.type === 'seize' && o.also?.length ? `<sup>+${o.also.length}</sup>` : ''}<button class="x" data-x="${i}" aria-label="Remove">×</button></div>`;
+      return `<div class="chip filled k-${o.type} ${err ? 'bad' : ''} ${rep ? 'replace' : ''} ${hot ? 'hot' : ''}" data-slot="${i}" data-pop="slots:${i}:${o.type}:${'fleet' in o ? o.fleet : ''}"${err ? tip(`⊘ ${err}`) : ''}><i class="oic">${ORDER_ICON[o.type]}</i><span class="t">${esc(orderTarget(g, o))}</span>${o.type === 'seize' && o.also?.length ? `<sup>+${o.also.length}</sup>` : ''}<button class="x" data-x="${i}" aria-label="Remove">${X}</button></div>`;
     }).join('');
     const free = g.plan.free;
-    const freeChip = free.length ? `<button class="chip freec" data-act="free"${tip('Free changes')}>${[...new Set(free.map(f => FREE_ICON[f.type] ?? '•'))].slice(0, 3).join('')}<small>${free.length}</small></button>` : '';
+    const freeChip = free.length ? `<button class="chip freec" data-act="free"${tip('Free changes')}>${[...new Set(free.map(f => f.type))].slice(0, 3).map(freeIcon).join('')}<small>${free.length}</small></button>` : '';
     const used = g.plan.orders.filter(Boolean).length;
-    html = `${rep ? '<div class="replace-hint">Replace which?<button data-act="cancelrep" aria-label="Cancel">×</button></div>' : ''}<div class="slots" style="--n:${n}">${chips}</div>${freeChip}
-      <div class="sbtns"><button class="sbtn" data-act="undo" ${g.undoStack.length ? '' : 'disabled'}${tip('Undo · Ctrl+Z')} aria-label="Undo">↶</button><button class="sbtn" data-preview ${used ? '' : 'disabled'}${tip('Preview vs idle rivals')} aria-label="Preview">👁</button></div>`;
+    html = `${rep ? `<div class="replace-hint">Replace which?<button data-act="cancelrep" aria-label="Cancel">${X}</button></div>` : ''}<div class="slots" style="--n:${n}">${chips}</div>${freeChip}
+      <div class="sbtns"><button class="sbtn" data-act="undo" ${g.undoStack.length ? '' : 'disabled'}${tip('Undo · Ctrl+Z')} aria-label="Undo">${ic('undo')}</button><button class="sbtn" data-preview ${used ? '' : 'disabled'}${tip('Preview vs idle rivals')} aria-label="Preview">${ic('eye')}</button></div>`;
   }
   g.root.classList.toggle('no-strip', !html);
   if (!g.setHtml(el, html)) g.tickClocks();
@@ -78,26 +80,26 @@ export function renderPrimary(g: GameScreen, el: HTMLElement) {
   let html = '';
   const btn = (cls: string, attrs: string, inner: string) => `<button class="pbtn ${cls}" ${attrs}>${inner}</button>`;
   if (g.blockingReplay) html = '';
-  else if (st.winner !== null) html = btn('gold', 'data-p="results"', '♛ Results');
+  else if (st.winner !== null) html = btn('gold', 'data-p="results"', `${ic('crown')} Results`);
   else if (g.watching) {
-    html = btn('', 'data-x="next"', 'Next ▶') + `<button class="pmini ${g.autoPlay ? 'on' : ''}" data-x="auto"${tip('Auto play')} aria-label="Auto">⏵⏵</button>`;
+    html = btn('', 'data-x="next"', `Next ${ic('play')}`) + `<button class="pmini ${g.autoPlay ? 'on' : ''}" data-x="auto"${tip('Auto play')} aria-label="Auto">${ic('fast')}</button>`;
   } else if (g.you === null || st.players[g.you]?.eliminated) html = '';
   else if (g.live) {
     const idle = g.idleFleets();
-    if (idle.length) html = btn('idle', 'data-p="idle"', `◉ Idle ×${idle.length}`);
-    else if (g.canResearchNow()) html = btn('research', 'data-p="research"', '✺ Research');
-    else html = btn('clock', 'data-p="tick" disabled', `⏱ <b data-countdown="${nextTickAt(st)}">${fmtClock(nextTickAt(st) - Date.now())}</b>`);
+    if (idle.length) html = btn('idle', 'data-p="idle"', `${ic('dormant')} Idle ×${idle.length}`);
+    else if (g.canResearchNow()) html = btn('research', 'data-p="research"', `${ic('research')} Research`);
+    else html = btn('clock', 'data-p="tick" disabled', `${ic('time')} <b data-countdown="${nextTickAt(st)}">${fmtClock(nextTickAt(st) - Date.now())}</b>`);
   } else if (g.submitted) {
     const seats = g.src.meta.seats;
     const pips = st.players.map(p => `<i class="sp ${seats[p.id]?.submitted ? 'on' : ''}" style="--pc:${esc(p.color)}"></i>`).join('');
-    html = btn('waiting', 'data-p="waiting" disabled', `Waiting <span class="sps">${pips}</span>`) + `<button class="pmini" data-unsubmit${tip('Unseal')} aria-label="Unseal">↶</button>`;
+    html = btn('waiting', 'data-p="waiting" disabled', `Waiting <span class="sps">${pips}</span>`) + `<button class="pmini" data-unsubmit${tip('Unseal')} aria-label="Unseal">${ic('undo')}</button>`;
   } else {
     const n = g.plan.orders.length, used = g.plan.orders.filter(Boolean).length;
     const idle = g.idleFleets();
     const full = used === n;
-    if (idle.length && !full) html = btn('idle', 'data-p="idle"', `◉ Idle ×${idle.length}`) + `<button class="pmini seal" data-submit${tip('Seal now · Enter')} aria-label="Seal">✓</button>`;
-    else if (g.canResearchNow()) html = btn('research', 'data-p="research"', '✺ Research') + `<button class="pmini seal" data-submit${tip('Seal now · Enter')} aria-label="Seal">✓</button>`;
-    else html = btn(`seal ${full || !idle.length ? 'ready' : ''}`, 'data-submit', `SEAL ✓<small>${used}/${n}</small>`);
+    if (idle.length && !full) html = btn('idle', 'data-p="idle"', `${ic('dormant')} Idle ×${idle.length}`) + `<button class="pmini seal" data-submit${tip('Seal now · Enter')} aria-label="Seal">${ic('check')}</button>`;
+    else if (g.canResearchNow()) html = btn('research', 'data-p="research"', `${ic('research')} Research`) + `<button class="pmini seal" data-submit${tip('Seal now · Enter')} aria-label="Seal">${ic('check')}</button>`;
+    else html = btn(`seal ${full || !idle.length ? 'ready' : ''}`, 'data-submit', `SEAL ${ic('check')}<small>${used}/${n}</small>`);
   }
   g.root.classList.toggle('no-prim', !html);
   g.setHtml(el, html);
@@ -205,6 +207,6 @@ function toggleFreeList(g: GameScreen, strip: HTMLElement) {
   if (old) { old.remove(); return; }
   const box = document.createElement('div');
   box.className = 'freelist';
-  box.innerHTML = g.plan.free.map((f, i) => `<div class="fr"><i>${FREE_ICON[f.type] ?? '•'}</i><span>${esc(g.freeText(f))}</span>${g.canPlan ? `<button data-delfree="${i}" aria-label="Remove">×</button>` : ''}</div>`).join('');
+  box.innerHTML = g.plan.free.map((f, i) => `<div class="fr"><i>${freeIcon(f.type)}</i><span>${esc(g.freeText(f))}</span>${g.canPlan ? `<button data-delfree="${i}" aria-label="Remove">${X}</button>` : ''}</div>`).join('');
   strip.appendChild(box);
 }

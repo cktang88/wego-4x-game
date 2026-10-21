@@ -4,9 +4,11 @@ import './fx.css';
 import './ux.css';
 import './empire.css';
 import './shell.css';
+import './icons.css';
 import { GameScreen, backfillRules } from './game.ts';
 import { LocalSource, RemoteSource, api, tokens, type LocalSave } from './net.ts';
 import { esc, toast, overlay } from './ui/dom.ts';
+import { ic } from './art/icons.ts';
 import { openTweaks, loadOverrides } from './ui/tweaks.ts';
 import type { GameMeta } from '../../shared/protocol.ts';
 import { LIVE_SPEEDS } from '../../shared/sim/live.ts';
@@ -193,7 +195,7 @@ function lobby() {
       </div>
       <div class="card"><h2>Fiddle</h2>
         <p class="dim" style="font-size:var(--fs-sm);margin-top:0">Everything is a knob. Change any rule (orders per turn, ship stats, VP values, combat odds…) and start a new game to try it.</p>
-        <div class="row"><button data-l="tweaks">⚙ Tweaks${tw ? ` (${tw} groups changed)` : ''}</button><button data-l="help">How to play</button></div>
+        <div class="row"><button data-l="tweaks">${ic('industry')} Tweaks${tw ? ` (${tw} groups changed)` : ''}</button><button data-l="help">How to play</button></div>
         <p class="faint" style="font-size:var(--fs-xs)">Dev tips: <code>npm run sim -- --games 50</code> runs headless AI-vs-AI balance tests. The <i>Menu</i> in a local game can reveal the whole map. All rules: <code>shared/config/rules.ts</code>.</p>
       </div>
     </div></div></div>`;
@@ -286,7 +288,7 @@ function lobby() {
       const mine = tokens.get(g.id);
       const open = g.seats.filter(s => s.kind === 'human' && !s.claimed).length;
       return `<div class="gamerow"><div class="row"><b class="grow">${esc(g.name)}</b><span class="faint">turn ${Number(g.turn)}${g.winner !== null ? ' · finished' : ''}</span></div>
-        <div class="seatline">${g.seats.map(s => `<span class="tag" title="${s.kind === 'ai' ? 'AI ' + esc(s.aiLevel) : s.claimed ? 'human' : 'open seat'}">${s.online && s.kind === 'human' ? '● ' : ''}${esc(s.name)}${s.kind === 'ai' ? ' (AI)' : s.claimed ? '' : ' (open)'}${s.submitted && s.kind === 'human' ? ' ✓' : ''}</span>`).join('')}
+        <div class="seatline">${g.seats.map(s => `<span class="tag" title="${s.kind === 'ai' ? 'AI ' + esc(s.aiLevel) : s.claimed ? 'human' : 'open seat'}">${s.online && s.kind === 'human' ? '● ' : ''}${esc(s.name)}${s.kind === 'ai' ? ' (AI)' : s.claimed ? '' : ' (open)'}${s.submitted && s.kind === 'human' ? ` ${ic('check')}` : ''}</span>`).join('')}
         <span class="grow"></span><a href="#/g/${esc(encodeURIComponent(g.id))}">${mine ? 'Continue' : open ? 'Join' : 'Watch'}</a></div></div>`;
     }).join('');
   }).catch(() => { if (gen !== routeGen) return; q('[data-o="list"]').innerHTML = '<span class="faint">Server not reachable. Run <code>npm run server</code> for online play. Local games work without it.</span>'; });

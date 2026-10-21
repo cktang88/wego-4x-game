@@ -9,10 +9,13 @@ import { sigOn, posturesOn, worldPosturesOn, fateOn, postureBlock, wpostureBlock
 import { esc, toast, uiScale } from '../ui/dom.ts';
 import { tip, shortWhy } from './util.ts';
 import { setFree, dropFree } from './soul.ts';
+import { ic, icFor } from '../art/icons.ts';
 
 /** Turn from which the posture selector appears (progressive disclosure: learn to move first). */
 export const POSTURE_FROM_TURN = 3;
-const T = (s: string) => `${s}︎`;
+const P = (p: string) => ic(icFor('posture', p, POSTURES[p]?.icon));
+const W = (p: string) => ic(icFor('wposture', p, WORLD_POSTURES[p]?.icon));
+const F = (u: string) => ic(icFor('fate', u, FATE_USES[u]?.icon));
 
 // ------------------------------------------------------------------ what's planned
 const myOrders = (g: GameScreen): (Order | null)[] => (g.live ? g.queue : g.plan.orders);
@@ -76,36 +79,36 @@ export function postureRow(g: GameScreen, f: Fleet): string {
   const chips = POSTURE_IDS.map(p => {
     const d = POSTURES[p];
     const why = p === cur ? null : locked ? 'it already took a posture this turn' : postureWhy(g, f, p);
-    return `<button class="pzc ${p === cur ? 'on' : ''} pz-${p}" data-a="posture" data-p="${p}"${why ? ` aria-disabled="true"${tip(`⊘ ${shortWhy(why)}`)}` : tip(d.bet)}><i>${T(d.icon)}</i><span>${esc(d.name)}</span></button>`;
+    return `<button class="pzc ${p === cur ? 'on' : ''} pz-${p}" data-a="posture" data-p="${p}"${why ? ` aria-disabled="true"${tip(`⊘ ${shortWhy(why)}`)}` : tip(d.bet)}><i>${P(p)}</i><span>${esc(d.name)}</span></button>`;
   }).join('');
   const bets = POSTURE_IDS.map(p => {
     const why = p === cur ? null : postureWhy(g, f, p);
     return `<div class="pzb ${p === cur ? 'cur' : ''}" data-p="${p}">${why ? `<span class="why">⊘ ${esc(why)}</span>` : betLines(POSTURES[p])}</div>`;
   }).join('');
-  return `<div class="posture" data-posture-row><div class="pz-h"><b>${T('⛉')} Posture</b><small>secret · this turn</small></div><div class="pz">${chips}</div><div class="pzbs">${bets}</div></div>`;
+  return `<div class="posture" data-posture-row><div class="pz-h"><b>${ic('guarded')} Posture</b><small>secret · this turn</small></div><div class="pz">${chips}</div><div class="pzbs">${bets}</div></div>`;
 }
 
 /** Status chips for a fleet's posture state (dug in, exposed, Fate in force), any owner. */
 export function postureStatus(g: GameScreen, f: Fleet): string[] {
   const st = g.st, out: string[] = [];
   if (!sigOn(st)) return out;
-  if (isDugIn(st, f)) out.push(`<span class="warn"${tip('Guarded, nobody came: cannot move this turn')}>⛓ Dug in</span>`);
-  if (isExposed(st, f)) out.push(`<span class="warn"${tip('Ambush, nobody came: seen by all, weaker')}>◉ Exposed</span>`);
+  if (isDugIn(st, f)) out.push(`<span class="warn"${tip('Guarded, nobody came: cannot move this turn')}>${ic(icFor('state', 'dug'))} Dug in</span>`);
+  if (isExposed(st, f)) out.push(`<span class="warn"${tip('Ambush, nobody came: seen by all, weaker')}>${ic('eye')} Exposed</span>`);
   const fu = fateOf(st, f);
-  if (fu) out.push(`<span class="fatechip"${tip(FATE_USES[fu]?.desc.split('.')[0] ?? '')}>✪ ${esc(FATE_USES[fu]?.name ?? fu)}</span>`);
-  if (f.owner !== g.you && f.posture && f.posture !== 'steady') out.push(`<span class="war"${tip('Seen by your scouts or a scan')}>${T(POSTURES[f.posture]?.icon ?? '◇')} ${esc(POSTURES[f.posture]?.name ?? f.posture)}</span>`);
+  if (fu) out.push(`<span class="fatechip"${tip(FATE_USES[fu]?.desc.split('.')[0] ?? '')}>${F(fu)} ${esc(FATE_USES[fu]?.name ?? fu)}</span>`);
+  if (f.owner !== g.you && f.posture && f.posture !== 'steady') out.push(`<span class="war"${tip('Seen by your scouts or a scan')}>${P(f.posture)} ${esc(POSTURES[f.posture]?.name ?? f.posture)}</span>`);
   return out;
 }
 
 // ------------------------------------------------------------------ Fate (fleet and world)
 let armed: { key: string; at: number } | null = null;
-const coins = (n: number, max: number) => `<span class="coins">${Array.from({ length: Math.max(max, n) }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</span>`;
+const coins = (n: number, max: number) => `<span class="coins">${Array.from({ length: Math.max(max, n) }, (_, i) => `<i class="${i < n ? 'on' : ''}">${ic('fate')}</i>`).join('')}</span>`;
 function fateBtn(g: GameScreen, use: FateUse, why: string | null, target: string): string {
   const d = FATE_USES[use];
   const key = `${use}:${target}`;
   const hot = armed && armed.key === key && performance.now() - armed.at < 4000;
   const label = use === 'laststand' ? 'Stand' : use === 'hyperjump' ? 'Jump' : use === 'twist' ? 'Twist' : use === 'rally' ? 'Rally' : 'Surge';
-  return `<button class="fz ${hot ? 'armed' : ''}" data-a="fate" data-use="${use}" data-key="${esc(key)}"${why ? ` aria-disabled="true"${tip(`⊘ ${shortWhy(why)}`)}` : tip(`${d.name}: ${d.desc.split('.')[0]}`)}><i>${T(d.icon)}</i><span>${hot ? 'Spend?' : label}</span></button>`;
+  return `<button class="fz ${hot ? 'armed' : ''}" data-a="fate" data-use="${use}" data-key="${esc(key)}"${why ? ` aria-disabled="true"${tip(`⊘ ${shortWhy(why)}`)}` : tip(`${d.name}: ${d.desc.split('.')[0]}`)}><i>${F(use)}</i><span>${hot ? 'Spend?' : label}</span></button>`;
 }
 export function fateRow(g: GameScreen, f: Fleet): string {
   const st = g.st;
@@ -114,7 +117,7 @@ export function fateRow(g: GameScreen, f: Fleet): string {
   const left = fateAvail(g);
   const engaged = (st.engagements ?? []).some(e => e.region === f.region);
   if (!pend && st.turn < POSTURE_FROM_TURN && !engaged && !f.limping) return '';
-  if (pend) return `<div class="fate-row pend"><b>✪ ${esc(FATE_USES[pend.use]?.name ?? pend.use)}</b><small>spent at seal</small>${g.live ? '' : '<button class="mini" data-a="unfate">↶</button>'}</div>`;
+  if (pend) return `<div class="fate-row pend"><b>${F(pend.use)} ${esc(FATE_USES[pend.use]?.name ?? pend.use)}</b><small>spent at seal</small>${g.live ? '' : '<button class="mini" data-a="unfate">↶</button>'}</div>`;
   const uses: FateUse[] = f.limping ? ['rally', 'laststand', 'twist', 'hyperjump'] : ['laststand', 'twist', 'hyperjump'];
   return `<div class="fate-row"><span class="fz-h"${tip('Fate: rare tokens, spent in public')}>Fate ${coins(left, SG(st).fateStart)}</span>${uses.map(u => fateBtn(g, u, fateWhy(g, u, f.id), `f${f.id}`)).join('')}</div>`;
 }
@@ -125,22 +128,22 @@ export function worldSigRows(g: GameScreen, r: Region): string {
   if (!sigOn(st) || r.owner !== g.you || g.you === null || r.kind === 'void' || (r.kind as string) === 'lane') return '';
   let html = '';
   const status: string[] = [];
-  if (regionIdle(st, r)) status.push(`<span class="warn"${tip('Levies called in vain: no output')}>⚑ Idle to T${r.idleUntil}</span>`);
-  if (r.surge === st.turn) status.push('<span class="gold">⚡ Surging ×2</span>');
+  if (regionIdle(st, r)) status.push(`<span class="warn"${tip('Levies called in vain: no output')}>${ic('levies')} Idle to T${r.idleUntil}</span>`);
+  if (r.surge === st.turn) status.push(`<span class="gold">${ic('surge')} Surging ×2</span>`);
   if (status.length) html += `<div class="cst">${status.join('')}</div>`;
   if (worldPosturesOn(st) && g.canPlan && (st.turn >= POSTURE_FROM_TURN || pendingWPosture(g, r.id))) {
     const cur = pendingWPosture(g, r.id) ?? (r.wposture && r.wposture.turn === st.turn ? r.wposture.kind : null);
     const chips = WORLD_POSTURE_IDS.map(p => {
       const d = WORLD_POSTURES[p];
       const why = p === cur ? null : cur && !pendingWPosture(g, r.id) ? 'already set this turn' : wpostureBlock(st, g.you!, r.id, p);
-      return `<button class="pzc ${p === cur ? 'on' : ''}" data-a="wposture" data-p="${p}"${why ? ` aria-disabled="true"${tip(`⊘ ${shortWhy(why)}`)}` : tip(d.bet)}><i>${T(d.icon === '🔥' ? '♨' : d.icon)}</i><span>${esc(d.name.split(' ').slice(-1)[0])}</span></button>`;
+      return `<button class="pzc ${p === cur ? 'on' : ''}" data-a="wposture" data-p="${p}"${why ? ` aria-disabled="true"${tip(`⊘ ${shortWhy(why)}`)}` : tip(d.bet)}><i>${W(p)}</i><span>${esc(d.name.split(' ').slice(-1)[0])}</span></button>`;
     }).join('') + `<button class="pzc ${cur ? '' : 'on'}" data-a="wposture" data-p=""${cur && !pendingWPosture(g, r.id) ? ' aria-disabled="true"' : tip('No bet this turn')}><i>◇</i><span>None</span></button>`;
     const bets = WORLD_POSTURE_IDS.map(p => `<div class="pzb ${p === cur ? 'cur' : ''}" data-p="${p}">${betLines(WORLD_POSTURES[p])}</div>`).join('') + `<div class="pzb ${cur ? '' : 'cur'}" data-p=""><span class="bt"><i>◎</i>no bet: nothing gained, nothing risked</span></div>`;
-    html += `<div class="posture world" data-wposture-row><div class="pz-h"><b>${T('⚑')} Stance</b><small>secret · this turn</small></div><div class="pz">${chips}</div><div class="pzbs">${bets}</div></div>`;
+    html += `<div class="posture world" data-wposture-row><div class="pz-h"><b>${ic('levies')} Stance</b><small>secret · this turn</small></div><div class="pz">${chips}</div><div class="pzbs">${bets}</div></div>`;
   }
   if (fateOn(st) && g.canPlan && st.turn >= POSTURE_FROM_TURN - 1) {
     const pend = pendingFate(g).find(x => x.use === 'surge' && x.region === r.id);
-    html += pend ? `<div class="fate-row pend"><b>✪ Surge</b><small>spent at seal</small>${g.live ? '' : '<button class="mini" data-a="unfate">↶</button>'}</div>`
+    html += pend ? `<div class="fate-row pend"><b>${F('surge')} Surge</b><small>spent at seal</small>${g.live ? '' : '<button class="mini" data-a="unfate">↶</button>'}</div>`
       : `<div class="fate-row"><span class="fz-h">Fate ${coins(fateAvail(g), SG(st).fateStart)}</span>${fateBtn(g, 'surge', fateWhy(g, 'surge', undefined, r.id), `r${r.id}`)}</div>`;
   }
   return html;
@@ -197,7 +200,7 @@ export function offerCharge(g: GameScreen, fleet: number, region: number) {
   offerEl?.remove();
   const el = document.createElement('button');
   el.className = 'chargeoffer';
-  el.innerHTML = `<i>${T(POSTURES.charge.icon)}</i><b>Charge?</b><small>${esc(POSTURES.charge.bet)}</small>`;
+  el.innerHTML = `<i>${P('charge')}</i><b>Charge?</b><small>${esc(POSTURES.charge.bet)}</small>`;
   const p = g.map.toScreen(g.st.regions[region].site);
   el.style.transform = `translate(${Math.round(Math.max(8, Math.min(g.map.w - 220 * uiScale(), p.x + 22)))}px, ${Math.round(Math.max(60 * uiScale(), p.y - 70 * uiScale()))}px)`;
   g.hud.h.res.parentElement!.appendChild(el);
@@ -230,5 +233,5 @@ export function fatePill(g: GameScreen): string {
 }
 export function fatePop(g: GameScreen): string {
   const n = fateAvail(g);
-  return `<div class="bd"><div class="h">✪ Fate ${n}</div>${(['laststand', 'twist', 'hyperjump', 'rally', 'surge'] as FateUse[]).map(u => `<div class="r"><span>${T(FATE_USES[u].icon)} ${esc(FATE_USES[u].name)}</span><b>${FATE_USES[u].target === 'region' ? 'world' : 'fleet'}</b></div>`).join('')}<div class="r"><span>Per turn</span><b>${SG(g.st).fatePerTurn}</b></div></div>`;
+  return `<div class="bd"><div class="h">${ic('fate')} Fate ${n}</div>${(['laststand', 'twist', 'hyperjump', 'rally', 'surge'] as FateUse[]).map(u => `<div class="r"><span>${F(u)} ${esc(FATE_USES[u].name)}</span><b>${FATE_USES[u].target === 'region' ? 'world' : 'fleet'}</b></div>`).join('')}<div class="r"><span>Per turn</span><b>${SG(g.st).fatePerTurn}</b></div></div>`;
 }

@@ -8,6 +8,7 @@ import { esc, toast } from './dom.ts';
 import { bannerSvg, drawSigil, goldPaint } from '../art/sigils.ts';
 import { headlineIcon } from './herald.ts';
 import { beatIcon } from '../hud/soul.ts';
+import { iconizeDom, ic, icFor } from '../art/icons.ts';
 
 const FATE: Record<FleetSaga['fate'], [string, string]> = {
   alive: ['Still flies', 'alive'], destroyed: ['Destroyed', 'dead'], caught: ['Hunted down', 'dead'], broken: ['Broken', 'dead'], retired: ['Retired', 'retired'], merged: ['Merged', 'merged'],
@@ -39,17 +40,17 @@ export function openSaga(g: GameScreen) {
         <div><h3>${esc(f.name)}</h3>${f.epithets.length ? `<em>${esc(f.epithets.join(' · '))}</em>` : ''}<small>${esc(f.rankName)} · ${esc(f.commander)}</small></div>
         <span class="sg-fate">${fw}${f.fateTurn ? ` · T${f.fateTurn}` : ''}</span></header>
       <p>${esc(f.paragraph)}</p>
-      <div class="sg-tags">${f.boons.map(b => `<span class="t boon" title="${esc(BOONS[b]?.name ?? b)}">${esc(BOONS[b]?.icon ?? '')} ${esc(BOONS[b]?.name ?? b)}</span>`).join('')}${f.banes.map(b => `<span class="t bane">${esc(BANES[b]?.icon ?? '')} ${esc(BANES[b]?.name ?? b)}</span>`).join('')}${f.scars.map(s => `<span class="t scar">${esc(SCARS[s]?.icon ?? '')} ${esc(SCARS[s]?.name ?? s)}</span>`).join('')}</div>
+      <div class="sg-tags">${f.boons.map(b => `<span class="t boon" title="${esc(BOONS[b]?.name ?? b)}">${ic(icFor('boon', b, BOONS[b]?.icon))} ${esc(BOONS[b]?.name ?? b)}</span>`).join('')}${f.banes.map(b => `<span class="t bane">${ic(icFor('bane', b, BANES[b]?.icon))} ${esc(BANES[b]?.name ?? b)}</span>`).join('')}${f.scars.map(s => `<span class="t scar">${ic(icFor('scar', s, SCARS[s]?.icon))} ${esc(SCARS[s]?.name ?? s)}</span>`).join('')}</div>
       <div class="sg-beats">${f.beats.slice(-10).map(b => `<span title="${esc(b.text)}"><i>${beatIcon(b.kind)}</i>${b.turn}</span>`).join('')}</div></article>`;
   }).join('');
-  const moments = S.moments.map((m, i) => `<figure class="sg-moment n${i}"><span class="ic">${headlineIcon(m.kind)}</span><blockquote>${esc(m.text)}</blockquote><figcaption>${g.live ? 'Cycle' : 'Turn'} ${m.turn}</figcaption></figure>`).join('');
+  const moments = S.moments.map((m, i) => `<figure class="sg-moment n${i}"><span class="mic">${headlineIcon(m.kind)}</span><blockquote>${esc(m.text)}</blockquote><figcaption>${g.live ? 'Cycle' : 'Turn'} ${m.turn}</figcaption></figure>`).join('');
   const mem = S.memorials.map(m => `<li><span>${esc(m.text)}</span></li>`).join('');
   const oaths = [
     ...S.oaths.map(o => `<li>${pn(o.player)} broke faith with ${pn(o.victim)} <small>T${o.turn}</small>${o.words ? `<q>${esc(o.words)}</q>` : ''}</li>`),
     ...S.vowsBroken.map(v => `<li>${esc(v.fleet)} <span class="dim">(${esc(g.pname(v.owner))})</span> forswore its vow <small>T${v.turn}</small></li>`),
   ].join('');
   const debts = S.debts.map(d => `<li>${pn(d.debtor)} owed ${pn(d.creditor)} for ${esc(d.victim)} <small>T${d.turn}</small> ${d.cleared ? `<span class="paid">avenged T${d.cleared}</span>` : '<span class="unpaid">unpaid</span>'}</li>`).join('');
-  const worlds = S.worlds.slice(0, 12).map(w => `<li><b>${esc(w.name)}</b>${w.epithet ? ` <em>${esc(w.epithet)}</em>` : ''}${w.calling ? ` · ${esc(CALLINGS[w.calling]?.icon ?? '')} ${esc(CALLINGS[w.calling]?.name ?? w.calling)}` : ''}${w.deeds.length ? ` · ${w.deeds.map(esc).join(', ')}` : ''}</li>`).join('');
+  const worlds = S.worlds.slice(0, 12).map(w => `<li><b>${esc(w.name)}</b>${w.epithet ? ` <em>${esc(w.epithet)}</em>` : ''}${w.calling ? ` · ${ic(icFor('calling', w.calling, CALLINGS[w.calling]?.icon))} ${esc(CALLINGS[w.calling]?.name ?? w.calling)}` : ''}${w.deeds.length ? ` · ${w.deeds.map(esc).join(', ')}` : ''}</li>`).join('');
   const link = shareLink(g);
   el.innerHTML = `<div class="saga" role="dialog" aria-label="The Saga">
     <header class="sg-head"><small class="kicker">The Saga of</small><h1>The Three Crowns</h1>
@@ -64,7 +65,8 @@ export function openSaga(g: GameScreen) {
       <section class="sg-sec"><h2>Worlds remembered</h2>${worlds ? `<ul class="sg-list">${worlds}</ul>` : '<p class="dim">No world made history.</p>'}</section>
       <section class="sg-sec mem"><h2>The memorial roll</h2>${mem ? `<ul class="sg-mem">${mem}</ul>` : '<p class="dim">No names on the stone.</p>'}</section>
     </div>
-    <footer class="sg-foot"><button class="hb" data-s="text">⧉ Copy text</button>${link ? '<button class="hb" data-s="link">⛓ Copy link</button>' : ''}<button class="hb" data-s="image">⤓ Save image</button><button class="hb go" data-s="close">Close</button></footer></div>`;
+    <footer class="sg-foot"><button class="hb" data-s="text">${ic('copy')} Copy text</button>${link ? '<button class="hb" data-s="link">⛓ Copy link</button>' : ''}<button class="hb" data-s="image">⤓ Save image</button><button class="hb go" data-s="close">Close</button></footer></div>`;
+  iconizeDom(el);
   document.body.appendChild(el);
   requestAnimationFrame(() => el?.classList.add('show'));
   el.addEventListener('click', e => {

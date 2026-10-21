@@ -318,7 +318,7 @@ q.sworn.mine { border-left-color: var(--gold); }
 .sg-moments { display: grid; grid-template-columns: repeat(auto-fit, minmax(16.25rem, 1fr)); gap: 0.75rem; }
 .sg-moment { margin: 0; padding: 1rem 1rem 0.75rem; border-radius: 0.625rem; background: var(--plate); border: 1px solid var(--rim); box-shadow: var(--bevel), var(--drop); position: relative; animation: hl-in 0.5s both; }
 .sg-moment.n1 { animation-delay: 0.1s; } .sg-moment.n2 { animation-delay: 0.2s; }
-.sg-moment .ic { position: absolute; right: 0.75rem; top: 0.5rem; font-size: 1.375rem; color: rgba(255, 216, 107, 0.6); }
+.sg-moment .mic { position: absolute; right: 0.75rem; top: 0.5rem; font-size: 1.375rem; color: rgba(255, 216, 107, 0.6); }
 .sg-moment blockquote { margin: 0; font-family: 'IM Fell English', Georgia, serif; font-style: italic; font-size: 1.3125rem; line-height: 1.25; color: #f4e8cc; padding-right: 1.5rem; }
 .sg-moment figcaption { margin-top: 0.5rem; font-family: var(--display); font-size: var(--fs-xs); letter-spacing: 0.2em; color: var(--brass); text-transform: uppercase; }
 .sg-reigns .bar { position: relative; height: 1rem; border-radius: 0.1875rem; background: rgba(255, 255, 255, 0.06); box-shadow: inset 1px 1px 0.1875rem rgba(0, 0, 0, 0.6); overflow: hidden; }
@@ -398,8 +398,9 @@ q.sworn.mine { border-left-color: var(--gold); }
 .fate-row { display: flex; align-items: center; gap: 0.3125rem; margin: 0.375rem 0 0.125rem; flex-wrap: wrap; }
 .fz-h { display: inline-flex; align-items: center; gap: 0.375rem; font-family: var(--display); font-weight: 800; font-size: var(--fs-xs); letter-spacing: 0.1em; color: #dcc0ff; margin-right: auto; }
 .coins { display: inline-flex; gap: 0.1875rem; }
-.coins i { width: 0.6875rem; height: 0.6875rem; border-radius: 50%; border: 1px solid rgba(214, 173, 98, 0.45); background: rgba(0, 0, 0, 0.4); }
-.coins i.on { background: radial-gradient(circle at 35% 30%, #fff6d0, #e2b04a 55%, #7a4c12); border-color: #f4dc9c; box-shadow: 0 0 0.3125rem rgba(255, 200, 100, 0.45); }
+.coins i { display: inline-flex; color: rgba(214, 173, 98, 0.32); font-style: normal; }
+.coins i .ic { width: 1.05em; height: 1.05em; vertical-align: 0; }
+.coins i.on { color: #ffd86b; filter: drop-shadow(0 0 0.15rem rgba(255, 200, 100, 0.45)); }
 .fz { display: inline-flex; align-items: center; gap: 0.3125rem; height: 2.125rem; padding: 0 0.625rem 0 0.5rem; border-radius: 1.0625rem; font-size: var(--fs-xs); font-weight: 700; box-shadow: none;
   background: linear-gradient(160deg, rgba(190, 150, 255, 0.14), rgba(10, 6, 20, 0.4)); border: 1px solid rgba(190, 150, 255, 0.45); color: #ead8ff; }
 .fz i { font-style: normal; font-size: var(--fs-sm); color: #e9d3ff; }
@@ -410,7 +411,8 @@ q.sworn.mine { border-left-color: var(--gold); }
 .fate-row.pend { color: #dcc0ff; font-size: var(--fs-xs); } .fate-row.pend b { color: #ead8ff; } .fate-row.pend small { color: var(--faint); margin-right: auto; }
 .cst .fatechip { color: #dcc0ff; }
 .fatepill { gap: 0; padding: 0 0.625rem; align-items: center; }
-.fatepill .coins i { width: 0.8125rem; height: 0.8125rem; }
+.fatepill .coins { gap: 0.125rem; }
+.fatepill .coins i .ic { width: 1.15em; height: 1.15em; }
 .fatepill.flip .coins i.on:last-child, .fatepill.flip .coins i:not(.on) + i:not(.on) { animation: coin-flip 0.7s ease-out; }
 .fatepill.flip { animation: fate-glow 1.2s ease-out; }
 @keyframes fate-glow { 0% { box-shadow: 0 0 0 0 rgba(210, 170, 255, 0.9), var(--bevel); } 100% { box-shadow: 0 0 0 0.875rem rgba(210, 170, 255, 0), var(--bevel); } }

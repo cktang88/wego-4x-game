@@ -10,12 +10,16 @@ import { canAfford, costText } from '../../../shared/sim/orders.ts';
 import { creditRate } from '../../../shared/sim/resolve.ts';
 import { distance } from '../../../shared/sim/graph.ts';
 import { esc, roman, toast } from './dom.ts';
+import { ic, icFor } from '../art/icons.ts';
+import { shipSvg } from '../hud/util.ts';
+const TI = (t: { id: string; icon: string }) => ic(icFor('tech', t.id, t.icon));
+const LI = (l: { id: string; icon: string }) => ic(icFor('law', l.id, l.icon));
 
 const tip = (t: string) => ` data-tip="${esc(t)}"`;
 const capFirst = (t: string | null) => (t ? t[0].toUpperCase() + t.slice(1) + (/[.!?]$/.test(t) ? '' : '.') : null);
 const TIER = ['', 'I', 'II', 'III', '★'];
 const BRANCH_IDS = Object.keys(BRANCHES) as Branch[];
-const GLYPH: Record<string, string> = { scout: '›', corvette: '➤', frigate: '◆', bombard: '■', cruiser: '▰', dread: '⬢' };
+
 
 export type EmpFocus = { kind: 'tech' | 'law'; id: string } | null;
 
@@ -124,14 +128,14 @@ function researchHtml(g: GameScreen, pid: number, editable: boolean): string {
     const t1 = `${t.icon} ${t.name} · ${B.name} ${TIER[t.tier]}\n${t.desc}\n${showCost ? `Cost ${costText(cost)}. ` : ''}${inf.why}${rivals.length ? `\nAlso owned by ${rivals.map(p => p.name).join(', ')}.` : ''}`;
     const pips = rivals.length ? `<span class="rp">${rivals.map(p => `<i style="background:${esc(p.color)}"></i>`).join('')}</span>` : '';
     const x = inf.s === 'pending' && editable && !g.live ? `<i class="x" data-unres title="Cancel this research" role="button" aria-label="Cancel research">×</i>` : '';
-    return `<button class="tn ${inf.s} t${t.tier} ${focus === t.id ? 'focus' : ''}" data-tech="${t.id}" data-pop="tech:${pid}.${t.id}.${inf.s}"${inf.owner !== undefined ? ` style="--rc:${esc(st.players[inf.owner].color)}"` : ''}${tip(t1)} aria-label="${esc(`${t.name}: ${inf.why}`)}"><span class="ti">${t.icon}</span><span class="tnm">${esc(t.name)}</span>${sub ? `<small>${sub}</small>` : ''}${pips}${x}</button>`;
+    return `<button class="tn ${inf.s} t${t.tier} ${focus === t.id ? 'focus' : ''}" data-tech="${t.id}" data-pop="tech:${pid}.${t.id}.${inf.s}"${inf.owner !== undefined ? ` style="--rc:${esc(st.players[inf.owner].color)}"` : ''}${tip(t1)} aria-label="${esc(`${t.name}: ${inf.why}`)}"><span class="ti">${TI(t)}</span><span class="tnm">${esc(t.name)}</span>${sub ? `<small>${sub}</small>` : ''}${pips}${x}</button>`;
   };
   const cols = BRANCH_IDS.map(b => {
     const B = BRANCHES[b];
     const ts = TECHS.filter(t => t.branch === b);
     const f = ts.filter(t => t.tier === 3);
     const owned = ts.filter(t => pl.techs?.includes(t.id)).length;
-    return `<div class="br" style="--bc:${B.color}"><div class="bh"${tip(`${B.icon} ${B.name}: ${B.pitch}\nI → II → III (pick one of two, forever) → ★ (one owner per game).`)}><span class="bi">${B.icon}</span><b>${B.name}</b><small>${owned}/4</small></div>
+    return `<div class="br" style="--bc:${B.color}"><div class="bh"${tip(`${B.icon} ${B.name}: ${B.pitch}\nI → II → III (pick one of two, forever) → ★ (one owner per game).`)}><span class="bi">${ic(icFor('branch', b, B.icon))}</span><b>${B.name}</b><small>${owned}/4</small></div>
       <div class="nodes">${node(ts.find(t => t.tier === 1))}${node(ts.find(t => t.tier === 2))}<div class="fork">${node(f[0])}<i class="or">or</i>${node(f[1])}</div>${node(ts.find(t => t.tier === 4))}</div></div>`;
   }).join('');
   const total = pl.techs?.length ?? 0;
@@ -148,7 +152,7 @@ function detailHtml(g: GameScreen, pid: number, editable: boolean, kind: 'tech' 
     let btn = '';
     if (editable && (inf.s === 'avail' || inf.s === 'short' || inf.s === 'busy')) btn = `<button class="primary small" data-research="${t.id}" ${inf.s === 'avail' ? '' : `disabled title="${esc(inf.why)}"`}>Research · ${costText(cost)}</button>`;
     else if (editable && inf.s === 'pending' && !g.live) btn = `<button class="small" data-unres>Cancel research</button>`;
-    return `<div class="edetail" style="--bc:${B.color}"><div class="row"><b class="grow">${t.icon} ${esc(t.name)}</b><span class="faint">${B.icon} ${B.name} ${TIER[t.tier]}</span></div><div>${esc(t.desc)}</div>
+    return `<div class="edetail" style="--bc:${B.color}"><div class="row"><b class="grow">${TI(t)} ${esc(t.name)}</b><span class="faint">${ic(icFor('branch', t.branch, B.icon))} ${B.name} ${TIER[t.tier]}</span></div><div>${esc(t.desc)}</div>
       <div class="row" style="margin-top:0.25rem">${btn}<span class="${inf.s === 'short' || inf.s === 'locked' || inf.s === 'rival' ? 'why' : 'note'} grow" style="margin:0">${esc(inf.why)}</span></div></div>`;
   }
   if (f?.kind === 'law' && LAW[f.id]) {
@@ -157,7 +161,7 @@ function detailHtml(g: GameScreen, pid: number, editable: boolean, kind: 'tech' 
     let btn = '';
     if (editable && c.state === 'open') btn = `<button class="primary small" data-enact="${l.id}" ${c.why ? `disabled title="${esc(c.why)}"` : ''}>Enact · ${c.cost}✦ + 1 order</button>`;
     if (editable && c.state === 'on') btn = `<button class="small" data-revoke="${l.id}" title="Free: the slot opens up">Revoke</button>`;
-    return `<div class="edetail law"><div class="row"><b class="grow">${l.icon} ${esc(l.name)}</b><span class="faint">${esc(LAW_PAIRS[l.pair])}</span></div><div>${esc(l.desc)}</div>
+    return `<div class="edetail law"><div class="row"><b class="grow">${LI(l)} ${esc(l.name)}</b><span class="faint">${esc(LAW_PAIRS[l.pair])}</span></div><div>${esc(l.desc)}</div>
       <div class="row" style="margin-top:0.25rem">${btn}<span class="${c.why ? 'why' : 'note'} grow" style="margin:0">${esc(c.why ?? c.note)}</span></div></div>`;
   }
   if (kind === 'law') return '';
@@ -218,7 +222,7 @@ function charterHtml(g: GameScreen, pid: number, editable: boolean): string {
       : c.state === 'revoking' && !g.live ? `<i class="x" data-unrevoke="${id}" title="Keep this law" role="button" aria-label="Keep ${esc(l.name)}">↺</i>`
       : c.state === 'pending' ? `<i class="x" data-unlaw="${id}" title="Remove this order" role="button" aria-label="Cancel">×</i>` : '') : '';
     const t1 = `${l.icon} ${l.name}\n${l.desc}\n${c.why ?? c.note}${rivals.length ? `\nAlso enacted by ${rivals.map(p => p.name).join(', ')}.` : ''}`;
-    return `<button class="lc ${c.state} ${c.why && c.state === 'open' ? 'blocked' : ''} ${focus === id ? 'focus' : ''}" data-law="${id}" data-pop="law:${pid}.${id}.${c.state}"${tip(t1)} aria-label="${esc(`${l.name}: ${c.why ?? c.note}`)}"><span class="li">${l.icon}</span><span class="lnm">${esc(l.name)}<small>${sub}</small></span>${pips}${x}</button>`;
+    return `<button class="lc ${c.state} ${c.why && c.state === 'open' ? 'blocked' : ''} ${focus === id ? 'focus' : ''}" data-law="${id}" data-pop="law:${pid}.${id}.${c.state}"${tip(t1)} aria-label="${esc(`${l.name}: ${c.why ?? c.note}`)}"><span class="li">${LI(l)}</span><span class="lnm">${esc(l.name)}<small>${sub}</small></span>${pips}${x}</button>`;
   };
   const rows = LAW_PAIRS.map((name, i) => {
     const [a, b] = LAWS.filter(l => l.pair === i);
@@ -240,9 +244,9 @@ function designsHtml(g: GameScreen, pid: number, editable: boolean): string {
     const chips = editable ? MODULES.map(x => {
       const ok = !x.tech || pl.techs?.includes(x.tech);
       const t1 = `${x.icon} ${x.name}: ${x.desc}${ok ? '' : `\nNeeds ${TECH[x.tech!]?.name ?? x.tech} (research).`}`;
-      return `<button class="mod ${x.id === c ? 'on' : ''}" data-bp="${k}:${x.id}" ${ok ? '' : 'disabled'}${tip(t1)} aria-label="${esc(`${x.name} for ${d.name}`)}">${x.icon}</button>`;
+      return `<button class="mod ${x.id === c ? 'on' : ''}" data-bp="${k}:${x.id}" ${ok ? '' : 'disabled'}${tip(t1)} aria-label="${esc(`${x.name} for ${d.name}`)}">${ic(icFor('module', x.id, x.icon))}</button>`;
     }).join('') : '';
-    return `<div class="bp"><span class="bpc"><span class="g">${GLYPH[k] ?? '•'}</span>${esc(d.name)}</span><span class="bpm"${tip(`${m?.name}: ${m?.desc}`)}>${m?.icon} ${esc(m?.name ?? c)}${pend ? ' <span class="gold">⏳</span>' : ''}</span><span class="mods">${chips}</span></div>`;
+    return `<div class="bp"><span class="bpc"><span class="g">${shipSvg(k, 'currentColor', 26)}</span>${esc(d.name)}</span><span class="bpm"${tip(`${m?.name}: ${m?.desc}`)}>${m ? ic(icFor('module', m.id, m.icon)) : ''} ${esc(m?.name ?? c)}${pend ? ' <span class="gold">⏳</span>' : ''}</span><span class="mods">${chips}</span></div>`;
   }).join('');
   const old = st.fleets.filter(f => f.owner === pid).reduce((a, f) => a + f.ships.filter(s => s.mod !== blueprintFor(st, pid, s.cls)).length, 0);
   const body = `<div class="bps">${rows}</div><div class="orderhelp">Each ship class carries one module. New ships get it. Older ships keep theirs until you <b>Refit</b> their fleet at one of your shipyards (an order, ${R.empire.refitIndustryPerShip}⚙ per ship; it also repairs).${known.length < MODULES.length ? ` Research ${MODULES.filter(m => m.tech && !pl.techs?.includes(m.tech)).map(m => TECH[m.tech!]?.name).join(', ')} for more modules.` : ''}</div>`;
@@ -287,8 +291,8 @@ function rivalsHtml(g: GameScreen, pid: number): string {
     const techs = TECHS.filter(t => p.techs?.includes(t.id));
     const laws = LAWS.filter(l => p.laws?.includes(l.id));
     return `<div class="rv"><b style="color:${esc(p.color)}">${esc(p.name)}</b>
-      <div class="rvt">${techs.length ? techs.map(t => `<span class="chip" style="--bc:${BRANCHES[t.branch].color}"${tip(`${t.name} (${BRANCHES[t.branch].name} ${TIER[t.tier]}): ${t.desc}`)}>${t.icon}</span>`).join('') : '<span class="faint">no technologies</span>'}</div>
-      <div class="rvt">${laws.length ? laws.map(l => `<span class="chip law"${tip(`${l.name}: ${l.desc}`)}>${l.icon} ${esc(l.name)}</span>`).join('') : '<span class="faint">no laws</span>'}</div></div>`;
+      <div class="rvt">${techs.length ? techs.map(t => `<span class="chip" style="--bc:${BRANCHES[t.branch].color}"${tip(`${t.name} (${BRANCHES[t.branch].name} ${TIER[t.tier]}): ${t.desc}`)}>${TI(t)}</span>`).join('') : '<span class="faint">no technologies</span>'}</div>
+      <div class="rvt">${laws.length ? laws.map(l => `<span class="chip law"${tip(`${l.name}: ${l.desc}`)}>${LI(l)} ${esc(l.name)}</span>`).join('') : '<span class="faint">no laws</span>'}</div></div>`;
   }).join('');
   const sum = `${st.players.filter(p => p.id !== pid).map(p => p.techs?.length ?? 0).join(' · ')} techs`;
   return g.sec('rivals', 'Rivals', `${rows}<div class="note">Research, laws and ship designs are public. Plan around them.</div>`, sum);

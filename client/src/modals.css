@@ -488,3 +488,4 @@
 @media (prefers-reduced-motion: reduce) {
   .mdl-root *, .mdl-root *::before, .mdl-root *::after { animation: none !important; transition: none !important; }
 }
+.hc li a { color: var(--m-gold); text-decoration: underline; text-underline-offset: 0.15em; }
