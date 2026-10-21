@@ -56,7 +56,8 @@ function route() {
   pending?.close();
   pending = null;
   // modal dialogs, battle viewers and toasts live on <body>: don't let them leak into the next screen
-  document.querySelectorAll('.overlay, .bv-overlay, .toast, .tooltip').forEach(e => { if (!app.contains(e)) e.remove(); });
+  // (the Herald and the Saga too: left open on Back, they covered the lobby and kept acting on the old game)
+  document.querySelectorAll('.overlay, .bv-overlay, .toast, .tooltip, .herald-ov, .saga-ov, .mdl-root').forEach(e => { if (!app.contains(e)) e.remove(); });
   document.title = 'Three Crowns';
   app.innerHTML = '';
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
@@ -107,7 +108,9 @@ async function openRemote(id: string, tokenFromUrl?: string) {
     // seat links carry the token; remember it and clean the URL
     const seat = await seatFromToken(id, tokenFromUrl);
     if (gen !== routeGen) return;
-    tokens.set(id, { token: tokenFromUrl, seat });
+    // a stale or mistyped link must not replace a working seat (or lock this browser out of the join dialog)
+    if (seat === -1) toast('That seat link is not valid for this game.');
+    else tokens.set(id, { token: tokenFromUrl, seat: seat ?? -1 });
     history.replaceState(null, '', `#/g/${encodeURIComponent(id)}`);
   }
   const tk = tokens.get(id);
@@ -132,11 +135,14 @@ async function openRemote(id: string, tokenFromUrl?: string) {
   expose();
 }
 
-async function seatFromToken(id: string, token: string): Promise<number> {
+/** The seat a token holds: -1 when the server says it holds none, null when the server could not be asked. */
+async function seatFromToken(id: string, token: string): Promise<number | null> {
   try {
-    const r = await (await fetch(`/api/games/${encodeURIComponent(id)}/view?token=${encodeURIComponent(token)}`)).json();
-    return r.view?.you ?? -1;
-  } catch { return -1; }
+    const res = await fetch(`/api/games/${encodeURIComponent(id)}/view`, { headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) return res.status === 404 ? -1 : null;
+    const r = await res.json();
+    return Number.isInteger(r.view?.you) ? r.view.you : -1;
+  } catch { return null; }
 }
 
 function joinDialog(meta: GameMeta) {
@@ -204,7 +210,7 @@ function lobby() {
       </div>
       <div class="card"><h2>Fiddle</h2>
         <p class="dim" style="font-size:var(--fs-sm);margin-top:0">Everything is a knob. Change any rule (orders per turn, ship stats, VP values, combat odds…) and start a new game to try it.</p>
-        <div class="row"><button data-l="tweaks">${ic('industry')} Tweaks${tw ? ` (${tw} groups changed)` : ''}</button><button data-l="help">How to play</button><button data-l="sound">${soundIcon(false)} Sound</button></div>
+        <div class="row"><button data-l="tweaks">${ic('industry')} Tweaks${tw ? ` (${tw} groups changed)` : ''}</button><button data-l="help">How to play</button><button data-l="sound">${soundIcon()} Sound</button></div>
         <p class="faint" style="font-size:var(--fs-xs)">Dev tips: <code>npm run sim -- --games 50</code> runs headless AI-vs-AI balance tests. The <i>Menu</i> in a local game can reveal the whole map. All rules: <code>shared/config/rules.ts</code>.</p>
       </div>
     </div></div></div>`;
@@ -260,8 +266,17 @@ function lobby() {
     };
     inp.click();
   });
-  q('[data-l="tweaks"]').addEventListener('click', () => openTweaks());
-  q('[data-l="sound"]').addEventListener('click', () => openSoundSettings());
+  // the button counts changed groups: recount when the editor closes
+  q('[data-l="tweaks"]').addEventListener('click', () => openTweaks(() => {
+    const n = Object.keys(loadOverrides()).length;
+    const b = app.querySelector('[data-l="tweaks"]');
+    if (b) b.innerHTML = `${ic('industry')} Tweaks${n ? ` (${n} groups changed)` : ''}`;
+  }));
+  q('[data-l="sound"]').addEventListener('click', () => {
+    // the button's speaker shows the current mute state: keep it in step while the dialog is open
+    const b = q('[data-l="sound"]'), off = audio.subscribe(s => { b.innerHTML = `${soundIcon(s.muted)} Sound`; });
+    openSoundSettings().addEventListener('fx-removed', off);
+  });
   q('[data-l="help"]').addEventListener('click', async () => {
     const { helpHtml } = await import('./ui/help.ts');
     const { createGame } = await import('../../shared/sim/setup.ts');

@@ -175,6 +175,11 @@ h2 { color: var(--accent); }
 .lobby { background: radial-gradient(ellipse at 28% 18%, #2c2a26 0%, #141519 52%, #08080a 100%); }
 .title h1 { font-family: var(--display); font-weight: 900; color: var(--gold); text-shadow: 0 0.1875rem 0 #000, 0 0 1.875rem rgba(255, 200, 110, 0.35); }
 .lobby .card { background: var(--plate); border: 1px solid var(--rim); box-shadow: var(--bevel), var(--drop); }
+/* the board's selection card (shell.css .card: 22rem wide, max-height + scroll) shares the class name: undo its
+   geometry here, or phone lobby cards were clipped to a scrolling sliver with their inputs past the screen edge */
+.lobby .card { position: relative; width: auto; max-height: none; overflow: visible; left: auto; right: auto; bottom: auto; z-index: auto; min-width: 0; }
+.lobby .form > * { min-width: 0; }
+.lobby .form input, .lobby .form select { max-width: 100%; }
 
 @media (prefers-reduced-motion: reduce) { .card { animation: none !important; } }
 

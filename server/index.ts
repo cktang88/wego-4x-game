@@ -271,13 +271,14 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
           case 'submit': {
             if (c.seat === null) return send(c, { type: 'error', error: 'spectators cannot submit', code: 'forbidden' });
             const resolved = store.submit(game, c.seat, m.submission, m.turn);
-            if (resolved) pushView(game); else { pushMeta(game); pushView(game, c); }
+            // every tab of this seat sees the seal (and its sealed orders), not only the one that sent it
+            if (resolved) pushView(game); else { pushMeta(game); pushView(game, o => o.seat === c.seat); }
             break;
           }
           case 'unsubmit':
             if (c.seat === null) return;
             store.unsubmit(game, c.seat);
-            pushMeta(game); pushView(game, c);
+            pushMeta(game); pushView(game, o => o.seat === c.seat);
             break;
           case 'chat': {
             if (!c.chats.take()) return send(c, { type: 'error', error: 'you are chatting too fast', code: 'rate_limited' });

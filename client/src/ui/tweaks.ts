@@ -28,7 +28,7 @@ function prune(o: any): any {
   return o;
 }
 
-export function openTweaks() {
+export function openTweaks(onClose?: () => void) {
   const base = defaultRules() as any;
   const over = loadOverrides();
   const groups: string[] = [];
@@ -66,6 +66,8 @@ export function openTweaks() {
     try {
       v = inp.dataset.type === 'boolean' ? inp.checked : inp.dataset.type === 'number' ? Number(inp.value) : inp.dataset.type === 'json' ? JSON.parse(inp.value) : inp.value;
     } catch { toast('Invalid JSON'); return; }
+    // an emptied number field means "back to the default", not 0 (Number('') is 0: e.g. zero orders a turn)
+    if (inp.dataset.type === 'number' && !inp.value.trim()) { v = def; inp.value = String(def); }
     if (typeof v === 'number' && Number.isNaN(v)) { toast('Not a number'); return; }
     const cur = loadOverrides();
     if (JSON.stringify(v) === JSON.stringify(def)) { set(cur, path, undefined); prune(JSON.parse(JSON.stringify(cur))); }
@@ -73,9 +75,13 @@ export function openTweaks() {
     saveOverrides(prune(JSON.parse(JSON.stringify(cur))));
     inp.closest('label')?.classList.toggle('changed', JSON.stringify(v) !== JSON.stringify(def));
   }));
+  if (onClose) o.addEventListener('fx-removed', () => onClose());
   o.querySelector('[data-x="close"]')!.addEventListener('click', () => o.remove());
-  o.querySelector('[data-x="reset"]')!.addEventListener('click', () => { saveOverrides({}); o.remove(); openTweaks(); });
-  o.querySelector('[data-x="export"]')!.addEventListener('click', async () => { await navigator.clipboard?.writeText(JSON.stringify(loadOverrides(), null, 2)); toast('Copied rule overrides to clipboard'); });
+  o.querySelector('[data-x="reset"]')!.addEventListener('click', () => { saveOverrides({}); o.remove(); openTweaks(onClose); });
+  o.querySelector('[data-x="export"]')!.addEventListener('click', async () => {
+    try { if (!navigator.clipboard) throw new Error('no clipboard'); await navigator.clipboard.writeText(JSON.stringify(loadOverrides(), null, 2)); toast('Copied rule overrides to clipboard'); }
+    catch { prompt('Copy the rule overrides', JSON.stringify(loadOverrides())); }
+  });
   o.querySelector('[data-x="import"]')!.addEventListener('click', () => {
     const t = prompt('Paste rule overrides JSON');
     if (!t) return;

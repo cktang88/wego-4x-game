@@ -388,6 +388,12 @@ function shipsHtml(c: Ctx): string {
 }
 
 // ====================================================================== actions
+/** WEGO: drop queued ship designs whose module needs a technology you neither own nor research this turn. */
+function dropStaleDesigns(g: Host) {
+  if (g.live || g.you === null) return;
+  const techs = g.st.players[g.you].techs ?? [], pend = pendingResearch(g);
+  dropFree(g, x => x.type === 'blueprint' && !!MODULE[x.mod]?.tech && !techs.includes(MODULE[x.mod].tech!) && MODULE[x.mod].tech !== pend);
+}
 export function empireAct(c: Ctx, a: string, el: HTMLElement): boolean {
   const g = c.g, id = el.dataset.id ?? '';
   switch (a) {
@@ -400,10 +406,17 @@ export function empireAct(c: Ctx, a: string, el: HTMLElement): boolean {
       if (techInfo(g, g.you, TECH[id]).s !== 'avail') return true;
       if (!g.live) dropFree(g, x => x.type === 'research');
       g.pushFree({ type: 'research', tech: id });
+      if (!g.live) {
+        // free actions apply in plan order: the research goes first, so a design that needs it can follow; a design
+        // that needed the technology just dropped would fail at resolution, so it goes too
+        const fa = g.plan.free.pop()!;
+        g.plan.free.unshift(fa);
+        dropStaleDesigns(g);
+      }
       c.acted();
       return true;
     }
-    case 'unresearch': if (g.canPlan) { dropFree(g, x => x.type === 'research'); c.acted(); } return true;
+    case 'unresearch': if (g.canPlan) { dropFree(g, x => x.type === 'research'); dropStaleDesigns(g); c.acted(); } return true;
     case 'enact': if (g.canPlan) { g.addOrder({ type: 'law', law: id }); c.acted(); } return true;
     case 'unlaw': {
       const k = pendingOrder(g, o => o.type === 'law' && o.law === id);
