@@ -2,10 +2,10 @@
 // chronicle, scoreboard, chat. Works with either a local or remote GameSource.
 import { describeOrder, orderCost, validateOrder, costText, canAfford, ORDER_INFO } from '../../shared/sim/orders.ts';
 import { findPath, fleetSpeed, fleetPower } from '../../shared/sim/graph.ts';
-import { income, currentLeader, resolveTurn, emptySubmission, flipThreshold } from '../../shared/sim/resolve.ts';
+import { incomeDetail, creditRate, currentLeader, resolveTurn, emptySubmission, flipThreshold } from '../../shared/sim/resolve.ts';
 import { TRAITS, RELICS, NEUTRAL_COLOR } from '../../shared/config/content.ts';
 import { EDICTS } from '../../shared/sim/edicts.ts';
-import type { Doctrine, Fleet, GameEvent, GameState, Order, Pt, Region, Submission, TurnResult } from '../../shared/sim/types.ts';
+import type { Doctrine, Fleet, GameEvent, GameState, Order, Player, Pt, Region, Submission, TurnResult } from '../../shared/sim/types.ts';
 import { predictAssault } from '../../shared/sim/ai.ts';
 import { maxGarrison } from '../../shared/sim/setup.ts';
 import { defaultRules, mergeRules } from '../../shared/config/rules.ts';
@@ -18,6 +18,9 @@ import { helpHtml } from './ui/help.ts';
 import { Coach, tutorialDone } from './ui/tutorial.ts';
 import { nextTickAt, tickMs, orderMs, etaTicks, tickInCycle } from '../../shared/sim/live.ts';
 import type { FreeAction } from '../../shared/sim/types.ts';
+import { TECH, LAW, MODULE, BRANCHES, TRAITS as WORLD_TRAITS, VEINS } from '../../shared/config/empire.ts';
+import { connected, supplied, blueprintFor, classBlock, maxDevAt, techCost, hasTech, hasLaw, researchBlock, opposite } from '../../shared/sim/empire.ts';
+import { empireHtml, bindEmpire, empireFreeText, pendingResearch, type EmpFocus } from './ui/empire.ts';
 
 /** "2h 05m", "4m 10s", "12s" */
 export function fmtDur(ms: number): string {
@@ -30,7 +33,7 @@ export function fmtDur(ms: number): string {
 }
 
 type Mode = null | { type: 'move'; fleet: number; overdrive: boolean } | { type: 'seize'; fleet: number } | { type: 'target'; order: 'influence' | 'scan' | 'feint' };
-type Tab = 'orders' | 'intel' | 'chronicle' | 'score' | 'chat';
+type Tab = 'orders' | 'empire' | 'intel' | 'chronicle' | 'score' | 'chat';
 
 interface ReplayFleet { id: number; owner: number; ships: number; region: number; alpha: number; name: string }
 interface Beat { dur: number; events: GameEvent[] }
@@ -94,9 +97,12 @@ export class GameScreen {
   /** which collapsible panel sections are open (kept for the session, per section name) */
   openSecs = new Set<string>();
   tipEl: HTMLElement | null = null;
+  /** Empire tab: the selected tech / law card, and (spectators) whose empire is shown */
+  empFocus: EmpFocus = null;
+  empPid: number | null = null;
   private ro: ResizeObserver | null = null;
   private timers = new Set<number>();
-  private memo: { visSrc?: number[]; vis?: Set<number>; laySrc?: Fleet[]; layPx?: number; lay?: Map<number, Pt>; hlKey?: string; hl?: Map<number, string> } = {};
+  private memo: { supSrc?: GameState; cut?: Set<number> | null; unsup?: Set<number>; visSrc?: number[]; vis?: Set<number>; laySrc?: Fleet[]; layPx?: number; lay?: Map<number, Pt>; hlKey?: string; hl?: Map<number, string> } = {};
 
   constructor(parent: HTMLElement, public src: GameSource, public onExit: () => void) {
     this.root = h('div', { class: 'game' });
@@ -193,7 +199,8 @@ export class GameScreen {
     };
     const hide = () => { shownFor = null; t.classList.add('hidden'); };
     this.root.addEventListener('pointerover', e => {
-      if (e.pointerType !== 'mouse') return;
+      // touch screens get the tip on tap instead (emulated mouse events after a tap must not pop it up)
+      if (e.pointerType !== 'mouse' || window.matchMedia('(pointer: coarse)').matches) return;
       const el = (e.target as HTMLElement).closest<HTMLElement>('[data-tip]');
       if (el) { if (el !== shownFor) show(el); } else if (shownFor) hide();
     });
@@ -301,8 +308,25 @@ export class GameScreen {
     }
     return pos;
   }
+  /** Players with your pending free actions applied (research, revokes, blueprints): they happen before pulse I. */
+  pendingPlayers(): Player[] {
+    const you = this.you;
+    if (you === null) return this.st.players;
+    const free = this.live ? this.st.live?.free[you] ?? [] : this.plan.free;
+    if (!free.some(x => x.type === 'research' || x.type === 'revoke' || x.type === 'blueprint')) return this.st.players;
+    return this.st.players.map(p => {
+      if (p.id !== you) return p;
+      const q: Player = { ...p, techs: [...(p.techs ?? [])], laws: [...(p.laws ?? [])], blueprint: { ...(p.blueprint ?? {}) } };
+      for (const fa of free) {
+        if (fa.type === 'research' && !q.techs!.includes(fa.tech)) q.techs!.push(fa.tech);
+        if (fa.type === 'revoke') q.laws = q.laws!.filter(x => x !== fa.law);
+        if (fa.type === 'blueprint') q.blueprint![fa.cls] = fa.mod;
+      }
+      return q;
+    });
+  }
   projectedState(k: number): GameState {
-    const s: GameState = { ...this.st, fleets: this.st.fleets.map(f => ({ ...f })), regions: this.st.regions };
+    const s: GameState = { ...this.st, fleets: this.st.fleets.map(f => ({ ...f })), regions: this.st.regions, players: this.pendingPlayers() };
     const pos = this.projected(k);
     const uses = new Map<number, number>();
     for (let i = 0; i <= k && i < this.plan.orders.length; i++) {
@@ -323,6 +347,9 @@ export class GameScreen {
     const tot = { industry: 0, credits: 0, influence: 0 };
     if (this.you === null) return tot;
     const uses = new Map<number, number>();
+    // research is bought before pulse I, so it comes out of the same purse first
+    const pr = pendingResearch(this);
+    if (pr && !this.live) { const c = techCost(this.st, this.you, pr); tot.industry += c.industry ?? 0; tot.credits += c.credits ?? 0; }
     for (const o of this.plan.orders) {
       if (!o) continue;
       const c = orderCost(this.st, o, this.you);
@@ -358,7 +385,7 @@ export class GameScreen {
     const o: Order = { type: 'fortify', fleet: f.id };
     if (this.live) {
       if (this.bank < 1) return `No orders banked. The next one arrives in ${fmtDur((this.st.live!.nextOrderAt[this.you!] ?? 0) - Date.now())}.`;
-      const s2: GameState = { ...this.st, fleets: this.st.fleets.map(x => ({ ...x })) };
+      const s2: GameState = { ...this.st, fleets: this.st.fleets.map(x => ({ ...x })), players: this.pendingPlayers() };
       for (const q of [...this.queue, o]) if ('fleet' in q && q.type !== 'build') { const x = s2.fleets.find(y => y.id === q.fleet); if (x) x.ordersThisTurn++; }
       return capFirst(validateOrder(s2, this.you!, o));
     }
@@ -367,11 +394,23 @@ export class GameScreen {
     return capFirst(this.validateAt(o, k));
   }
 
+  /** Why this (non-fleet) order can't be given right now, or null: plan lock, slots/bank, then the rules. */
+  orderWhy(o: Order): string | null {
+    const b = this.orderBlock();
+    if (b) return b;
+    if (this.live) {
+      const s2: GameState = { ...this.st, fleets: this.st.fleets.map(x => ({ ...x })), players: this.pendingPlayers() };
+      for (const q of [...this.queue, o]) if ('fleet' in q && q.type !== 'build') { const x = s2.fleets.find(y => y.id === q.fleet); if (x) x.ordersThisTurn++; }
+      return capFirst(validateOrder(s2, this.you!, o));
+    }
+    return capFirst(this.validateAt(o, this.nextSlot() ?? 0));
+  }
+
   addOrder(o: Order) {
     if (!this.canPlan) return;
     if (this.live) {
       if (this.bank < 1) { toast(`No orders banked. The next one arrives in ${fmtDur((this.st.live!.nextOrderAt[this.you!] ?? 0) - Date.now())}.`); return; }
-      const s2: GameState = { ...this.st, fleets: this.st.fleets.map(f => ({ ...f })) };
+      const s2: GameState = { ...this.st, fleets: this.st.fleets.map(f => ({ ...f })), players: this.pendingPlayers() };
       for (const q of [...this.queue, o]) if ('fleet' in q && q.type !== 'build') { const f = s2.fleets.find(x => x.id === q.fleet); if (f) f.ordersThisTurn++; }
       const err = validateOrder(s2, this.you!, o);
       if (err) { toast(`Can't: ${err}`); return; }
@@ -424,6 +463,7 @@ export class GameScreen {
     if (this.targetSlot !== null && this.targetSlot >= this.plan.orders.length) this.targetSlot = null;
     if (this.mode && (!this.canPlan || ('fleet' in this.mode && !this.fleet(this.mode.fleet)))) this.mode = null;
     const last = this.st.last;
+    const news = this.empireNews();
     if (last && last.turn > this.lastSeenTurn && this.st.turn > 1 && this.src.kind === 'remote' && document.hidden) {
       document.title = `(!) Turn ${this.st.turn} · Three Crowns`;
       try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Three Crowns', { body: `Turn ${last.turn} resolved. Your move, commander.` }); } catch { /* */ }
@@ -436,13 +476,20 @@ export class GameScreen {
         const first = this.lastSeenTick === -1;
         this.lastSeenTick = last.tick ?? 0;
         const interesting = last.events.some(e => e.k === 'move' || e.k === 'battle' || e.k === 'capture' || e.k === 'destroyed' || e.k === 'build' || e.k === 'clash');
+        if (!first && news.length && !document.hidden) {
+          // live: research and laws land between ticks; announce them (yours as confirmation, rivals' as intel)
+          for (const e of news.slice(0, 3)) { toast(eventText(this.st, e, this.you).replace(/<[^>]+>/g, '')); this.empireFx(e); }
+        }
         if (!first && interesting && !this.replay && !document.hidden) { this.startReplay(last); const r = this.replay as { speed: number } | null; if (r) r.speed = Math.max(this.replaySpeed, 3); this.pulseFx(true); }
         else if (!this.replay) this.pulseFx();
       }
     } else if (last && last.turn > this.lastSeenTurn && this.st.turn > 1) {
       this.lastSeenTurn = last.turn;
       try { localStorage.setItem(seenKey, String(last.turn)); } catch { /* */ }
-      this.startReplay(last);
+      // empire news (bought before pulse I) opens the replay; spectators already get the real events
+      const known = new Set(last.events.filter(e => e.k === 'tech' || e.k === 'law').map(e => JSON.stringify([e.k, (e as { owner: number }).owner, e.k === 'tech' ? e.tech : e.law])));
+      const extra = news.filter(e => !known.has(JSON.stringify([e.k, e.owner, e.k === 'tech' ? e.tech : e.law])));
+      this.startReplay(extra.length ? { ...last, events: [...extra, ...last.events] } : last);
       // hotseat: don't play the replay behind the curtain
       if (this.replay && this.curtain) this.replay.playing = false;
     }
@@ -565,11 +612,32 @@ export class GameScreen {
     else this.el.phase.textContent = phase;
     if (this.you !== null) {
       const p = st.players[this.you];
-      const inc = income(st, this.you);
+      const owned = st.regions.filter(r => r.owner === this.you);
+      const det = incomeDetail(st, this.you), inc = det.total;
+      // empire modifiers that bend the totals (laws, techs, traits, veins, supply): listed under each breakdown
+      const E = st.rules.empire, on = E?.enabled !== false, me = this.you;
+      const mods = { industry: [] as string[], credits: [] as string[], influence: [] as string[] };
+      if (on) {
+        const forge = owned.filter(r => r.trait === 'forge').length, gas = owned.filter(r => r.trait === 'gas').length;
+        const conn = connected(st, me);
+        const ext = owned.filter(r => r.vein && (r.buildings.extractor ?? 0) > 0 && conn.has(r.id)).length;
+        if (forge) mods.industry.push(`${WORLD_TRAITS.forge.icon} ${forge} Forge World${forge > 1 ? 's' : ''}: +${E.forgePerDev} per development`);
+        if (gas) mods.credits.push(`${WORLD_TRAITS.gas.icon} ${gas} Gas Giant${gas > 1 ? 's' : ''}: +${gas * E.gasCredits}`);
+        if (ext) mods.credits.push(`${ext} Extractor${ext > 1 ? 's' : ''}: +${ext * E.extractorCredits}`);
+        if (hasLaw(st, me, 'central')) for (const k of ['industry', 'credits', 'influence'] as const) mods[k].push(`${LAW.central.icon} Centralism: capital ×${E.centralMult}`);
+        if (hasLaw(st, me, 'mercantile')) mods.credits.push(`${LAW.mercantile.icon} Mercantile: ×${E.mercantileMult}`);
+        if (hasLaw(st, me, 'industrial')) { mods.industry.push(`${LAW.industrial.icon} Industrial: ×${E.industrialMult}`); mods.credits.push(`${LAW.industrial.icon} Industrial: ×${E.industrialCreditMult}`); }
+        if (hasTech(st, me, 'markets')) mods.credits.push(`${TECH.markets.icon} Free Markets: ×${E.marketsCreditsMult}`);
+        if (hasLaw(st, me, 'federal')) mods.influence.push(`${LAW.federal.icon} Federation: +1 per colony at development 3+`);
+        if (hasLaw(st, me, 'open')) mods.influence.push(`${LAW.open.icon} Open Society: +${E.openInfluence}`);
+        if (hasLaw(st, me, 'martial')) mods.influence.push(`${LAW.martial.icon} Martial Law: ${E.martialInfluence}`);
+        if (hasTech(st, me, 'bureaucracy')) mods.influence.push(`${TECH.bureaucracy.icon} Bureaucracy: +2`);
+        for (const w of det.why) for (const k of ['industry', 'credits', 'influence'] as const) if (k === 'credits' || !w.includes('¢')) mods[k].push(w);
+      }
+      const modTxt = (k: 'industry' | 'credits' | 'influence') => (mods[k].length ? `\n${mods[k].join('\n')}` : '');
       const upkeep = st.fleets.filter(f => f.owner === this.you).reduce((a, f) => a + f.ships.reduce((b, s) => b + (st.rules.ships[s.cls]?.upkeep ?? 0), 0), 0);
       const sp = this.plannedSpend();
       const per = this.live ? 'cycle' : 'turn';
-      const owned = st.regions.filter(r => r.owner === this.you);
       const mines = owned.reduce((a, r) => a + (r.buildings.mine ?? 0) * st.rules.economy.mineBonus, 0);
       const hubs = owned.reduce((a, r) => a + (r.buildings.tradehub ?? 0) * st.rules.economy.tradeHubBonus, 0);
       const cell = (icon: string, v: number, spend: number, inc: number, why: string) => {
@@ -577,9 +645,9 @@ export class GameScreen {
         const t = `${why}\nNow: ${v}${spend ? `, planned spend −${spend} → ${v - spend} left` : ''}${v - spend < 0 ? ' (SHORT: some orders will fail)' : ''}\nNet ${plus(inc)} per ${per}`;
         return `<div class="r"${tip(t)}><span>${icon} <span class="${v - spend < 0 ? 'bad' : ''}" data-num="res-${key}">${v - spend}</span>${spend ? `<small style="display:inline"> /${v}</small>` : ''}</span><small>${plus(inc)}/${per}</small></div>`;
       };
-      this.el.res.innerHTML = cell('⚙', p.res.industry, sp.industry, inc.industry, `Industry ⚙: builds ships and projects.\nIncome: +${inc.industry - mines} from ${owned.length} region${owned.length === 1 ? '' : 's'} (more with Develop)${mines ? `, +${mines} from mines` : ''}.`) +
-        cell('¢', p.res.credits, sp.credits, inc.credits - upkeep, `Credits ¢: upkeep, projects, and a fleet's 2nd order (+${st.rules.orders.repeatFleetCredits}¢). Spare credits cover an industry shortfall at ${st.rules.economy.creditsPerIndustry}¢ per ⚙.\nIncome: +${inc.credits - hubs} from regions${hubs ? `, +${hubs} from trade hubs` : ''}, −${upkeep} ship upkeep.`) +
-        cell('✦', p.res.influence, sp.influence, inc.influence, `Influence ✦: Influence, Scan, Feint, Conceal and Pact orders.\nIncome: +${inc.influence} from your regions (capital gives most).`);
+      this.el.res.innerHTML = cell('⚙', p.res.industry, sp.industry, inc.industry, `Industry ⚙: builds ships, projects and research.\nIncome: +${inc.industry} from ${owned.length} region${owned.length === 1 ? '' : 's'} (more with Develop)${mines ? `, incl. +${mines} from mines` : ''}.${modTxt('industry')}`) +
+        cell('¢', p.res.credits, sp.credits, inc.credits - upkeep, `Credits ¢: upkeep, projects, and a fleet's 2nd order (+${st.rules.orders.repeatFleetCredits}¢). Spare credits cover an industry shortfall at ${hasTech(st, me, 'markets') ? 1 : st.rules.economy.creditsPerIndustry}¢ per ⚙.\nIncome: +${inc.credits}${hubs ? ` (incl. +${hubs} from trade hubs)` : ''}, −${upkeep} ship upkeep.${modTxt('credits')}`) +
+        cell('✦', p.res.influence, sp.influence, inc.influence, `Influence ✦: Influence, Scan, Feint, Conceal, Pact and law orders.\nIncome: +${inc.influence} from your regions (capital gives most).${modTxt('influence')}`);
     } else this.el.res.innerHTML = '';
     const leader = currentLeader(st);
     this.el.players.innerHTML = st.players.map(p => {
@@ -599,8 +667,10 @@ export class GameScreen {
   }
 
   renderTabs() {
-    const tabs: [Tab, string][] = [['orders', 'Orders'], ['intel', 'Intel'], ['chronicle', 'Chronicle'], ['score', 'Score'], ['chat', 'Chat']];
-    this.el.tabs.innerHTML = tabs.map(([k, n]) => `<button class="${this.tab === k ? 'on' : ''}" data-tab="${k}">${n}${k === 'chat' && this.unreadChat ? `<span class="badge">${this.unreadChat}</span>` : ''}${k === 'intel' && this.st.last?.signals.length ? `<span class="badge" style="background:var(--accent)">${this.st.last.signals.length}</span>` : ''}</button>`).join('');
+    const emp = this.st.rules.empire?.enabled !== false;
+    const tabs: [Tab, string][] = [['orders', 'Orders'], ...(emp ? [['empire', 'Empire'] as [Tab, string]] : []), ['intel', 'Intel'], ['chronicle', 'Chronicle'], ['score', 'Score'], ['chat', 'Chat']];
+    const canBuy = emp && this.canResearchNow();
+    this.el.tabs.innerHTML = tabs.map(([k, n]) => `<button class="${this.tab === k ? 'on' : ''}" data-tab="${k}"${k === 'empire' && canBuy ? ' title="You can research a technology this turn"' : ''}>${n}${k === 'chat' && this.unreadChat ? `<span class="badge">${this.unreadChat}</span>` : ''}${k === 'intel' && this.st.last?.signals.length ? `<span class="badge" style="background:var(--accent)">${this.st.last.signals.length}</span>` : ''}${k === 'empire' && canBuy ? '<span class="dotbadge" aria-label="research available"></span>' : ''}</button>`).join('');
     if (this.phone) this.el.tabs.insertAdjacentHTML('beforeend', '<button class="sheetx" data-sheetx aria-label="Close">✕</button>');
     this.el.tabs.querySelector('[data-sheetx]')?.addEventListener('click', () => this.closeSheet());
     this.el.tabs.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(b => b.addEventListener('click', () => {
@@ -613,13 +683,25 @@ export class GameScreen {
     const b = this.el.tabbody;
     switch (this.tab) {
       case 'orders': if (this.live) { b.innerHTML = this.liveHtml(); this.bindLive(); } else { b.innerHTML = this.ordersHtml(); this.bindOrders(); } break;
+      case 'empire': b.innerHTML = empireHtml(this); bindEmpire(this); break;
       case 'intel': b.innerHTML = this.intelHtml(); break;
       case 'chronicle': b.innerHTML = this.chronicleHtml(); break;
       case 'score': b.innerHTML = this.scoreHtml(); b.querySelectorAll<HTMLElement>('[data-pact]').forEach(e => e.addEventListener('click', () => this.addOrder({ type: 'pact', with: Number(e.dataset.pact) }))); break;
       case 'chat': b.innerHTML = this.chatHtml(); this.bindChat(); break;
     }
     b.querySelectorAll<HTMLElement>('[data-battle]').forEach(e => e.addEventListener('click', ev => { ev.preventDefault(); this.openBattle(Number(e.dataset.battle)); }));
+    b.querySelectorAll<HTMLElement>('[data-gotab]').forEach(e => e.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); this.tab = e.dataset.gotab as Tab; this.renderTabs(); this.renderTab(); }));
     b.querySelectorAll<HTMLElement>('[data-region]').forEach(e => e.addEventListener('click', () => { this.select({ kind: 'region', id: Number(e.dataset.region) }); this.focus(this.st.regions[Number(e.dataset.region)].site); }));
+  }
+
+  /** You could buy a technology right now (nothing queued yet, one affordable): the Empire tab shows a dot. */
+  canResearchNow(): boolean {
+    if (this.you === null || !this.canPlan || pendingResearch(this)) return false;
+    const st = this.st, me = this.you, p = st.players[me];
+    if ((p.researched ?? 0) >= st.rules.empire.researchPerTurn) return false;
+    const sp = this.live ? { industry: 0, credits: 0, influence: 0 } : this.plannedSpend();
+    const left = { industry: p.res.industry - sp.industry, credits: p.res.credits - sp.credits, influence: p.res.influence - sp.influence };
+    return Object.keys(TECH).some(id => !researchBlock(st, me, id) && canAfford(left, techCost(st, me, id), creditRate(st, me)));
   }
 
   /** A collapsible secondary section; its open state is remembered for the session. */
@@ -647,7 +729,7 @@ export class GameScreen {
         <div class="acts">${o && this.canPlan ? `<button data-up="${i}" title="Move to an earlier pulse" ${i === 0 ? 'disabled' : ''}>▲</button><button data-down="${i}" title="Move to a later pulse" ${i === n - 1 ? 'disabled' : ''}>▼</button><button data-del="${i}" title="Remove this order">✕</button>` : ''}</div>
       </div>`;
     }).join('');
-    const free = this.plan.free.length ? this.sec('free', 'Free changes', `<div class="feed">${this.plan.free.map((x, i) => `<div class="entry row" style="font-size:12px"><span class="grow">${esc(this.freeText(x))}</span>${this.canPlan ? `<button class="small" data-delfree="${i}" title="Remove">✕</button>` : ''}</div>`).join('')}</div>`, `${this.plan.free.length} · no order cost`) : '';
+    const free = this.plan.free.length ? this.sec('free', 'Free changes', `<div class="feed">${this.plan.free.map((x, i) => `<div class="entry row" style="font-size:12px"><span class="grow">${esc(this.freeText(x))}${x.type === 'research' && this.you !== null ? ` <span class="faint">· ${costText(techCost(st, this.you, x.tech))}</span>` : ''}</span>${this.canPlan ? `<button class="small" data-delfree="${i}" title="Remove">✕</button>` : ''}</div>`).join('')}</div>`, `${this.plan.free.length} · no order needed`) : '';
     const seats = this.src.meta.seats.map(s => `<span style="color:${this.color(s.seat)}">${esc(s.name)} ${s.submitted ? '✓' : '…'}</span>`).join(' · ');
     const res = st.players[this.you].res;
     const shortOf = (k: 'industry' | 'credits' | 'influence') => sp[k] > res[k] ? 'bad' : '';
@@ -722,7 +804,7 @@ export class GameScreen {
       case 'rename': return `Rename ${fn(x.fleet)} to “${x.name}”`;
       case 'merge': return `Merge ${fn(x.fleet)} into ${fn(x.into)}`;
       case 'split': return `Split ${x.ships.length} ship(s) off ${fn(x.fleet)}`;
-      default: return (x as { type: string }).type;
+      default: return empireFreeText(x, cls => this.st.rules.ships[cls]?.name ?? cls) ?? (x as { type: string }).type;
     }
   }
 
@@ -778,6 +860,14 @@ export class GameScreen {
     const pending = this.live ? this.queue : this.plan.orders;
     const yard = st.regions.find(r => r.owner === you && (r.buildings.shipyard ?? 0) > 0);
     if (yard && !pending.some(o => o?.type === 'build') && st.players[you].res.industry >= 20) tips.push({ p: 5, r: yard.id, t: `⚙ Your shipyard at <b>${esc(yard.name)}</b> is idle${this.live ? '' : ' this turn'}.` });
+    if (st.rules.empire?.enabled !== false) {
+      const conn = connected(st, you), sup = supplied(st, you, conn);
+      const cut = st.regions.filter(r => r.owner === you && !conn.has(r.id));
+      if (cut.length) tips.push({ p: 1, r: cut[0].id, t: `✂ <b>${esc(cut[0].name)}</b>${cut.length > 1 ? ` and ${cut.length - 1} more` : ''} cut off from your capital: half yield until you link it back.` });
+      const oos = st.fleets.filter(f => f.owner === you && f.ships.length && !sup.has(f.region));
+      if (oos.length) tips.push({ p: 2, r: oos[0].region, t: `⛽ <b>${esc(oos[0].name)}</b>${oos.length > 1 ? ` and ${oos.length - 1} more` : ''} out of supply: no repairs, then wear.` });
+      if (this.canResearchNow()) tips.push({ p: 5, t: `⚗ You can research a technology this ${this.live ? 'cycle' : 'turn'} (no order needed). <a href="#" data-gotab="empire">Open Empire</a>` });
+    }
     for (const e of st.edicts) tips.push({ p: 6, t: `📜 Edict <b>${esc(e.name)}</b>: ${esc(e.desc)} (${e.vp} VP, judged end of ${this.live ? 'cycle' : 'turn'} ${e.scoresTurn})` });
     if (st.turn === 1 && (this.coach ? !this.coach.active : tutorialDone(this.live))) tips.push({ p: 7, t: this.live
       ? '👋 Spend banked orders any time: Seize a neighbouring colony, or Build a ship. They act at the next tick.'
@@ -977,15 +1067,29 @@ export class GameScreen {
     const block = this.canPlan ? this.orderBlock() : null;
     const dis = (why: string | null) => why ? `disabled title="${esc(why)}"` : '';
     // ---- status numbers, each with its breakdown one hover/tap away
+    const E = R.empire, emp = E?.enabled !== false;
     const mult = Math.max(1, r.dev), mine = (r.buildings.mine ?? 0) * R.economy.mineBonus, hub = (r.buildings.tradehub ?? 0) * R.economy.tradeHubBonus;
-    const yi = y ? y.industry * mult + mine : 0, yc = y ? y.credits * mult + hub : 0, yf = y ? (r.kind === 'void' ? 0 : y.influence) + (r.kind === 'home' ? Math.floor(r.dev / 2) : 0) : 0;
-    const yieldTip = y ? `Produces per ${per} for its owner:\n⚙ ${y.industry} × development ${mult}${mine ? ` + ${mine} from mines` : ''} = ${yi}\n¢ ${y.credits} × development ${mult}${hub ? ` + ${hub} from trade hubs` : ''} = ${yc}\n✦ ${yf}${r.kind === 'home' ? ' (capitals: +1 per 2 development)' : ''}` : 'Produces nothing.';
+    // world trait, vein & supply (the same terms as incomeDetail; empire-wide law/tech multipliers are in the top bar)
+    const conn = emp && r.owner !== null ? connected(st, r.owner) : null;
+    const cutOff = !!conn && !conn.has(r.id);
+    const forge = emp && r.trait === 'forge' ? E.forgePerDev * mult : 0, gas = emp && r.trait === 'gas' ? E.gasCredits : 0;
+    const extOn = emp && !!r.vein && (r.buildings.extractor ?? 0) > 0, extCr = extOn && !cutOff ? E.extractorCredits : 0;
+    const half = cutOff ? E.cutOffYield : 1;
+    const yi = y ? Math.round((y.industry * mult + mine + forge) * half) : 0, yc = y ? Math.round((y.credits * mult + hub + gas + extCr) * half) : 0, yf = y ? Math.round(((r.kind === 'void' ? 0 : y.influence) + (r.kind === 'home' ? Math.floor(r.dev / 2) : 0)) * half) : 0;
+    const yieldTip = y ? `Produces per ${per} for its owner:\n⚙ ${y.industry} × development ${mult}${mine ? ` + ${mine} from mines` : ''}${forge ? ` + ${forge} Forge World` : ''}${cutOff ? ' × ½' : ''} = ${yi}\n¢ ${y.credits} × development ${mult}${hub ? ` + ${hub} from trade hubs` : ''}${gas ? ` + ${gas} Gas Giant` : ''}${extCr ? ` + ${extCr} Extractor` : ''}${cutOff ? ' × ½' : ''} = ${yc}\n✦ ${yf}${r.kind === 'home' ? ' (capitals: +1 per 2 development)' : ''}${cutOff ? '\nCut off from the capital: half yield.' : ''}\nEmpire-wide laws and technologies apply on top (see the top bar).` : 'Produces nothing.';
+    const T = emp && r.trait ? WORLD_TRAITS[r.trait] : null, V = emp && r.vein ? VEINS[r.vein] : null;
+    const traitSpan = T ? `<span class="nt"${tip(`${T.name}: ${T.desc}`)}>${T.icon} ${T.name}</span>` : '';
+    const veinTip = V ? `${V.name} vein: ${V.desc}\nExtractor: ${extOn ? 'yes' : 'no'}${extOn ? `\nConnected to ${r.owner === you ? 'your' : 'its owner\'s'} capital: ${cutOff ? 'NO (dark until reconnected)' : 'yes'}` : ''}${r.owner === you && you !== null && !extOn ? '\nDevelop an Extractor here: +' + E.extractorCredits + '¢ a ' + per + ' and access to ' + V.name + '.' : ''}` : '';
+    const veinSpan = V ? `<span class="nt"${tip(veinTip)}><span style="color:${V.color}">${V.icon}</span> ${V.name}${extOn ? (cutOff ? ' <span class="bad">· dark</span>' : ' <span class="good">· mined</span>') : ' <span class="faint">· no extractor</span>'}</span>` : '';
     const armor = R.garrison.armor + (r.buildings.fortress ?? 0) * R.garrison.armorPerFortress;
     const gmax = r.owner !== null && r.garrison >= 0 ? maxGarrison(st, r.id) : null;
     const garTip = r.garrison < 0 ? 'Unknown: outside your sensors. Scan it, or bring a fleet closer.'
       : `Defenders: ${r.garrison}${gmax !== null ? ` (max ${gmax})` : ''}. They fire on hostile fleets here; a Seize must defeat them.\nArmor ${armor}: absorbs ${armor} damage per hit (siege damage ignores it; bring bombards).${r.owner !== null ? `\nRegrows each ${per} toward the max (${R.garrison.ownedBase} + ${R.garrison.perDev}/development + ${R.garrison.perFortress}/fortress${R.garrison.kindBonus[r.kind] ? ` + ${R.garrison.kindBonus[r.kind]} ${r.kind}` : ''}).` : ''}`;
-    const stat = `<div class="stat"><span class="nt"${tip(garTip)}>Garrison <b>${r.garrison < 0 ? '?' : r.garrison}</b>${r.buildings.fortress ? ` · fort ${r.buildings.fortress}` : ''}</span>${y && r.kind !== 'void' ? `<span class="nt"${tip(yieldTip)}>Yield <b>${yi}⚙ ${yc}¢ ${yf}✦</b></span>` : ''}${r.kind !== 'void' ? `<span>Dev <b>${r.dev}</b></span>` : ''}</div>`;
+    const stat = `<div class="stat"><span class="nt"${tip(garTip)}>Garrison <b>${r.garrison < 0 ? '?' : r.garrison}</b>${r.buildings.fortress ? ` · fort ${r.buildings.fortress}` : ''}</span>${y && r.kind !== 'void' ? `<span class="nt"${tip(yieldTip)}>Yield <b>${yi}⚙ ${yc}¢ ${yf}✦</b></span>` : ''}${r.kind !== 'void' ? `<span>Dev <b>${r.dev}</b></span>` : ''}${traitSpan}${veinSpan}</div>`;
     const statuses: string[] = [];
+    if (cutOff && r.owner === you) statuses.push(`<div class="status cut">✂ Cut off from your capital: half yield${extOn ? ', Extractor dark' : ''}.${ip('Your regions must link back to your capital through your own territory, with no hostile warships sitting in them. Retake or clear the regions in between.')}</div>`);
+    else if (cutOff && r.owner !== null) statuses.push(`<div class="status cut">✂ Cut off from ${esc(this.pname(r.owner))}'s capital: half yield.</div>`);
+    if (owned && V && !extOn && !(r.project?.key === 'extractor')) statuses.push(`<div class="status vein" style="border-left-color:${V.color}"><span style="color:${V.color}">${V.icon}</span> ${V.name} vein: build an <b>Extractor</b> (Develop) for +${E.extractorCredits}¢ and access to ${V.name}.</div>`);
     if (r.project) statuses.push(`<div class="status">▲ ${esc(R.projects[r.project.key]?.name ?? r.project.key)} under way: ${r.project.progress}/${R.projects[r.project.key]?.turns} ${per}s</div>`);
     if (r.relic === 'unclaimed') statuses.push(`<div class="status" style="border-left-color:#7ff7ff">✧ Unexcavated relic: ${owned ? 'a fleet of yours here can Excavate it' : 'own the region, then Excavate with a fleet'} (+${R.victory.vpPerRelic} VP).</div>`);
     const agents = you !== null && owned ? st.players.filter(p => p.id !== you && (r.loyalty[p.id] ?? 0) > 0) : [];
@@ -996,23 +1100,32 @@ export class GameScreen {
       if (owned) {
         const yard = r.buildings.shipyard ?? 0;
         const left = this.live ? st.players[you].res : (() => { const sp = this.plannedSpend(), p = st.players[you].res; return { industry: p.industry - sp.industry, credits: p.credits - sp.credits, influence: p.influence - sp.influence }; })();
+        const ps = this.projectedState(this.nextSlot() ?? 0);
         const builds = Object.entries(R.ships).map(([k, d]) => {
-          const why = block ?? (yard < d.needsShipyard ? `Needs shipyard level ${d.needsShipyard} (this one: ${yard}).` : null);
+          const cb = classBlock(ps, you, k);
+          const why = block ?? (cb ? capFirst(cb) : null) ?? (yard < d.needsShipyard ? `Needs shipyard level ${d.needsShipyard} (this one: ${yard}).` : null);
           const cost = orderCost(st, { type: 'build', region: r.id, cls: k, fleet: null }, you);
-          const short = !canAfford(left, cost, R);
-          return `<span class="lbl"${tip(`${d.name}: ${d.role}\nHP ${d.hp} · attack ${d.attack}×${d.shots} · shields ${d.shields} · speed ${d.speed}${d.siege ? ` · siege +${d.siege}` : ''} · upkeep ${d.upkeep}¢/${per}${short ? '\nYou can\'t afford it with your other orders: it will fail unless you free up resources.' : ''}`)}>${esc(d.name)} <span class="${short ? 'short' : 'faint'}">${yard < d.needsShipyard ? `yard ${d.needsShipyard}` : costText(cost)}</span></span>
+          const short = !canAfford(left, cost, creditRate(st, you));
+          const m = emp ? MODULE[blueprintFor(ps, you, k) ?? 'armor'] : null;
+          return `<span class="lbl"${tip(`${d.name}: ${d.role}\nHP ${d.hp} · attack ${d.attack}×${d.shots} · shields ${d.shields} · speed ${d.speed}${d.siege ? ` · siege +${d.siege}` : ''} · upkeep ${d.upkeep}¢/${per}${m ? `\nModule: ${m.icon} ${m.name} (${m.desc}). Change it under Empire → Ship designs.` : ''}${cb ? `\n${capFirst(cb)}` : ''}${short ? '\nYou can\'t afford it with your other orders: it will fail unless you free up resources.' : ''}`)}>${esc(d.name)}${m ? ` <span class="faint">${m.icon}</span>` : ''} <span class="${short || cb ? 'short' : 'faint'}">${cb ? esc(cb.replace(/ \(.*\)$/, '')) : yard < d.needsShipyard ? `yard ${d.needsShipyard}` : costText(cost)}</span></span>
             <button data-a="build" data-cls="${k}" ${dis(why)}>Build</button>`;
         }).join('');
-        const projects = Object.entries(R.projects).map(([k, p]) => {
+        // projects a technology would unlock fold into one line (they say which research opens them)
+        const lockedP = Object.entries(R.projects).filter(([, p]) => !!p.tech && !hasTech(ps, you, p.tech));
+        const projects = Object.entries(R.projects).filter(([k, p]) => !(p.vein && !r.vein) && !lockedP.some(([x]) => x === k)).map(([k, p]) => {
           const lvl = k === 'develop' ? r.dev : (r.buildings[k] ?? 0);
-          const err = block ?? capFirst(validateOrder(st, you, { type: 'develop', region: r.id, project: k }));
-          return `<span class="lbl"${tip(`${p.desc}\nTakes ${p.turns} ${per}${p.turns > 1 ? 's' : ''}. Max level ${p.max}.`)}>${esc(p.name)} ${lvl ? `<span class="faint">(lvl ${lvl})</span>` : ''} <span class="faint">${costText(p.cost)}</span></span>
+          const max = k === 'develop' ? maxDevAt(st, r.id) : p.max;
+          const o: Order = { type: 'develop', region: r.id, project: k };
+          const err = block ?? capFirst(validateOrder(ps, you, o));
+          const cost = orderCost(st, o, you);
+          return `<span class="lbl"${tip(`${p.desc}\nTakes ${p.turns} ${per}${p.turns > 1 ? 's' : ''}. Max level ${max}.${err && !block ? `\n${err}` : ''}`)}>${esc(p.name)} ${lvl ? `<span class="faint">(lvl ${lvl}/${max})</span>` : ''} <span class="faint">${costText(cost)}</span></span>
             <button data-a="develop" data-proj="${k}" ${dis(err)}>Start</button>`;
-        }).join('');
+        }).join('') + (lockedP.length ? `<span class="note" style="grid-column:1/-1;margin:3px 0 0">Research unlocks: ${lockedP.map(([, p]) => `<span class="nt"${tip(`${p.name}: ${p.desc}\nNeeds ${TECH[p.tech!]?.name ?? p.tech} (Empire tab).`)}>${esc(p.name)}</span>`).join(', ')}.</span>` : '');
         const purge = agents.length ? `<div class="acts1"><button data-a="influence" ${dis(block)} title="Purge rival agents (−${R.influenceLimits.purgeAmount} loyalty each)">✦ Purge agents · ${costText(orderCost(st, { type: 'influence', target: r.id }, you))}</button></div>` : '';
         const yardErr = !yard && R.projects.shipyard ? block ?? capFirst(validateOrder(st, you, { type: 'develop', region: r.id, project: 'shipyard' })) : null;
         actions = `${purge}${yard ? `<h3>Build a ship</h3><div class="buildlist">${builds}</div>`
-          : `<div class="note">No shipyard here, so no ships.</div>${R.projects.shipyard ? `<div class="acts1"><button data-a="develop" data-proj="shipyard" ${dis(yardErr)}>▲ Start a Shipyard · ${costText(R.projects.shipyard.cost)}</button></div>` : ''}`}
+          : `<div class="note">No shipyard here, so no ships.</div>${R.projects.shipyard ? `<div class="acts1"><button data-a="develop" data-proj="shipyard" ${dis(yardErr)}>▲ Start a Shipyard · ${costText(orderCost(st, { type: 'develop', region: r.id, project: 'shipyard' }, you))}</button></div>` : ''}`}
+          ${V && !extOn && R.projects.extractor ? (() => { const eo: Order = { type: 'develop', region: r.id, project: 'extractor' }; const ee = block ?? capFirst(validateOrder(ps, you, eo)); return `<div class="acts1"><button data-a="develop" data-proj="extractor" ${dis(ee)} title="${esc(R.projects.extractor.desc)}"><span style="color:${V.color}">${V.icon}</span> Build an Extractor · ${costText(orderCost(st, eo, you))}</button></div>`; })() : ''}
           ${block ? `<span class="why">${esc(block)}</span>` : ''}
           ${this.sec('develop', 'Develop', `<div class="buildlist">${projects}</div>`, r.project ? 'busy' : 'projects & upgrades')}`;
       } else {
@@ -1075,10 +1188,16 @@ export class GameScreen {
     const pos = this.projected(k).get(f.id) ?? f.region;
     const per = this.live ? 'cycle' : 'turn';
     const speed = fleetSpeed(st, f), power = fleetPower(st, f);
+    const emp = R.empire?.enabled !== false;
+    const ps = mine ? this.projectedState(k) : st;
     const ships = f.ships.map(s => {
       const def = R.ships[s.cls];
+      const m = emp && s.mod ? MODULE[s.mod] : null;
+      const bp = emp && f.owner >= 0 ? blueprintFor(ps, f.owner, s.cls) : null;
+      const outdated = mine && bp && bp !== s.mod ? MODULE[bp] : null;
+      const modTag = m ? `<span class="modt ${outdated ? 'old' : ''}"${tip(`Module: ${m.name}: ${m.desc}${outdated ? `\nYour ${def?.name ?? s.cls} design now uses ${outdated.name}: Refit at a shipyard to upgrade.` : ''}`)}>${m.icon}${outdated ? `→${outdated.icon}` : ''}</span>` : '';
       return `<div class="ship"><span title="${esc(def?.role ?? '')}">${glyph(s.cls)}</span>
-        <div><b>${esc(s.name)}</b>${s.title ? ` <span class="gold">${esc(s.title)}</span>` : ''} <span class="faint">${esc(def?.name ?? s.cls)}${s.kills ? ` · ${s.kills} kills` : ''}${s.battles ? ` · ${s.battles} battles` : ''}</span>
+        <div><b>${esc(s.name)}</b>${modTag}${s.title ? ` <span class="gold">${esc(s.title)}</span>` : ''} <span class="faint">${esc(def?.name ?? s.cls)}${s.kills ? ` · ${s.kills} kills` : ''}${s.battles ? ` · ${s.battles} battles` : ''}</span>
           <div class="bar" title="Hull ${s.hp}/${s.maxHp}"><i style="width:${(s.hp / s.maxHp) * 100}%;background:${s.hp / s.maxHp < 0.4 ? 'var(--bad)' : 'var(--good)'}"></i></div></div>
         <div class="sys"><i class="${s.sys.engines ? '' : 'off'}" title="Engines${s.sys.engines ? '' : ' knocked out: speed 1, can\'t retreat'}">E</i><i class="${s.sys.weapons ? '' : 'off'}" title="Weapons${s.sys.weapons ? '' : ' knocked out: can\'t fire'}">W</i><i class="${s.sys.shields ? '' : 'off'}" title="Shields${s.sys.shields ? '' : ' knocked out'}">S</i>${mine ? `<input type="checkbox" data-split="${s.id}" title="Select for Split" aria-label="Select ${esc(s.name)} for split">` : ''}</div></div>`;
     }).join('');
@@ -1096,6 +1215,14 @@ export class GameScreen {
     if (f.siege === f.region) statuses.push(`<div class="status war">⚔ Besieging ${esc(st.regions[f.region].name)}${war ? ` · round ${war.rounds}` : ''}${ip('A siege keeps fighting the garrison every pulse, across turns, with no new orders, until it falls or this fleet leaves.')}</div>`);
     if (f.fatigued) statuses.push(`<div class="status war">Fatigued${ip('After an Overdrive: weaker attacks and no Overdrive this turn.')}</div>`);
     if (f.fortified) statuses.push(`<div class="status">⛨ Fortified: hits harder and is harder to hit until it moves.</div>`);
+    if (emp && f.owner >= 0 && f.ships.length && (mine || this.you === null)) {
+      const sup = supplied(st, f.owner);
+      const E = R.empire;
+      if ((f.oos ?? 0) > 0 || !sup.has(f.region)) {
+        const n = f.oos ?? 0, wearing = n > E.oosGraceTurns;
+        statuses.push(`<div class="status cut">⛽ Out of supply${n ? ` (${n} ${per}${n > 1 ? 's' : ''})` : ''}: no repairs${wearing ? `, wearing down (−${E.oosAttrition} hp per ship each ${per})` : `; after ${E.oosGraceTurns} ${per}${E.oosGraceTurns > 1 ? 's' : ''} it wears down`}.${ip(`Fleets are in supply in or next to territory connected to their capital (${E.depotRange} away from a Depot). Move back, or build a Depot.`)}</div>`);
+      }
+    }
     if (this.live && f.route) statuses.push(`<div class="status">➤ To <b>${esc(st.regions[f.route.path[f.route.path.length - 1] ?? f.region]?.name ?? '?')}</b>${f.route.seize !== null ? ' to seize it' : ''} · arrives in ~${fmtDur((etaTicks(st, f.id) ?? 0) * tickMs(st))}${mine ? ' <button class="small" data-halt title="Stop where it is. Free.">Halt</button>' : ''}</div>`);
     let actions = '';
     if (mine && this.you !== null && this.st.winner === null) {
@@ -1106,11 +1233,21 @@ export class GameScreen {
       const dis = (why: string | null) => why ? `disabled title="${esc(why)}"` : '';
       const used = this.live ? this.queue.filter(o => 'fleet' in o && o.type !== 'build' && o.fleet === f.id).length
         : this.plan.orders.filter(o => o && 'fleet' in o && o.type !== 'build' && (o.fleet === f.id || (o.type === 'seize' && o.also?.includes(f.id)))).length;
+      // Refit: only offered where it can happen (one of your shipyards)
+      let refitBtn = '';
+      if (emp && here.owner === this.you && (here.buildings.shipyard ?? 0) > 0 && f.ships.some(s => s.mod !== blueprintFor(ps, this.you!, s.cls) || s.hp < s.maxHp)) {
+        const ro: Order = { type: 'refit', fleet: f.id };
+        const rc = orderCost(ps, ro, this.you);
+        const n = f.ships.filter(s => s.mod !== blueprintFor(ps, this.you!, s.cls)).length;
+        const rwhy = block ?? (this.live ? null : capFirst(this.validateAt(ro, k)));
+        refitBtn = `<button data-a="refit" ${dis(rwhy)} title="${esc(`${ORDER_INFO.refit.help}${n ? `\n${n} ship${n > 1 ? 's' : ''} get the current design (${costText(rc)}).` : '\nModules are up to date: repairs only (free).'}`)}">⚒ Refit${n ? ` <small class="faint">${costText(rc)}</small>` : ''}</button>`;
+      }
       actions = `<div class="acts1">
         <button class="go" data-a="move" ${dis(block)} title="${esc(ORDER_INFO.move.help)}">➤ Move<span class="kbd kh">M</span></button>
         <button class="go" data-a="seize" ${dis(block ?? (canSeize ? null : 'Nothing to seize: every region next to it is already yours.'))} title="${esc(ORDER_INFO.seize.help)}">⚔ Seize<span class="kbd kh">S</span></button>
         <button data-a="fortify" ${dis(block)} title="${esc(ORDER_INFO.fortify.help)}">⛨ Fortify<span class="kbd kh">F</span></button>
         ${relic ? `<button data-a="excavate" ${dis(block ?? (here.owner === this.you ? null : 'You must own the region first: Seize it.'))} title="${esc(ORDER_INFO.excavate.help)}">✧ Excavate</button>` : ''}
+        ${refitBtn}
       </div>
       ${block ? `<span class="why">${esc(block)}</span>` : used ? `<span class="note">Already has ${used} order${used > 1 ? 's' : ''} this ${per}. Max ${R.orders.maxPerFleet}${this.live ? '' : `; the next costs +${R.orders.repeatFleetCredits}¢`}.</span>` : ''}`;
     }
@@ -1170,6 +1307,7 @@ export class GameScreen {
         case 'seize': this.mode = { type: 'seize', fleet: f.id }; break;
         case 'fortify': this.addOrder({ type: 'fortify', fleet: f.id }); break;
         case 'excavate': this.addOrder({ type: 'excavate', fleet: f.id }); break;
+        case 'refit': this.addOrder({ type: 'refit', fleet: f.id }); break;
         case 'merge': {
           const into = Number(this.el.left.querySelector<HTMLSelectElement>('[data-mergeinto]')?.value);
           if (!this.fleet(into)) return;
@@ -1258,7 +1396,8 @@ export class GameScreen {
       else if (e.k === 'battle' || e.k === 'clash') push(1100, e);
       else if (e.k === 'retreat') push(600, e);
       else if (e.k === 'capture' || e.k === 'excavate' || e.k === 'destroyed') push(650, e);
-      else if (e.k === 'build' || e.k === 'project' || e.k === 'betrayal' || e.k === 'pact') push(450, e);
+      else if (e.k === 'build' || e.k === 'project' || e.k === 'betrayal' || e.k === 'pact' || e.k === 'refit') push(450, e);
+      else if (e.k === 'tech' || e.k === 'law') push(e.k === 'tech' && TECH[e.tech]?.tier === 4 ? 1100 : 600, e);
       else if (e.k === 'fail' || e.k === 'note' || e.k === 'blocked' || e.k === 'influence' || e.k === 'fortify' || e.k === 'scan') push(e.k === 'fail' ? 500 : 350, e);
     }
     if (!beats.length) return;
@@ -1329,6 +1468,8 @@ export class GameScreen {
         }
         case 'excavate': this.fx.push({ kind: 'excavate', pos: st.regions[e.region].site, color: '#7ff7ff', t0: now, dur: 1200, text: 'RELIC FOUND' }); break;
         case 'betrayal': this.banner('BETRAYAL'); break;
+        case 'tech': case 'law': this.empireFx(e, now); break;
+        case 'refit': if (st.regions[e.region]) this.fx.push({ kind: 'build', pos: st.regions[e.region].site, color: this.color(e.owner), t0: now, dur: 700 }); break;
         case 'blocked': this.fx.push({ kind: 'text', pos: st.regions[e.at].site, color: '#ffd86b', t0: now, dur: 900, text: 'blocked' }); break;
       }
     }
@@ -1365,6 +1506,38 @@ export class GameScreen {
     this.renderAll();
     this.maybeShowVictory();
     if (this.autoPlay && this.src instanceof LocalSource && this.st.winner === null) this.later(() => { if (this.autoPlay && !this.replay) (this.src as LocalSource).advance(); }, 900);
+  }
+
+  /** A technology bought or a law enacted: its name rises over the owner's capital; a ★ gets the big banner. */
+  empireFx(e: Extract<GameEvent, { k: 'tech' | 'law' }>, now = performance.now()) {
+    const st = this.st;
+    const cap = st.regions[st.players[e.owner]?.capital];
+    if (e.k === 'tech') {
+      const t = TECH[e.tech];
+      if (!t) return;
+      if (cap) this.fx.push({ kind: 'text', pos: cap.site, color: BRANCHES[t.branch].color, t0: now, dur: 1800, text: `${t.icon} ${t.name}` });
+      if (t.tier === 4) this.banner(`★ ${t.name.toUpperCase()}`);
+    } else {
+      const l = LAW[e.law];
+      if (l && cap) this.fx.push({ kind: 'text', pos: cap.site, color: e.revoked ? '#a59ccc' : '#ffd86b', t0: now, dur: 1600, text: `${l.icon} ${e.revoked ? 'repeals' : ''} ${l.name}`.replace('  ', ' ') });
+    }
+  }
+  /** Public empire changes since the last view (techs bought, laws enacted/revoked). The per-player view filters these
+   *  events out of turn results, so they are rebuilt here by comparing what everyone owned before and after. */
+  empSnap: { techs: string[][]; laws: string[][] } | null = null;
+  empireNews(): Extract<GameEvent, { k: 'tech' | 'law' }>[] {
+    const st = this.st;
+    const cur = { techs: st.players.map(p => [...(p.techs ?? [])]), laws: st.players.map(p => [...(p.laws ?? [])]) };
+    const prev = this.empSnap;
+    this.empSnap = cur;
+    if (!prev || prev.techs.length !== cur.techs.length) return [];
+    const out: Extract<GameEvent, { k: 'tech' | 'law' }>[] = [];
+    st.players.forEach((p, i) => {
+      for (const t of cur.techs[i]) if (!prev.techs[i].includes(t)) out.push({ k: 'tech', pulse: 0, owner: i, tech: t });
+      for (const l of cur.laws[i]) if (!prev.laws[i].includes(l)) out.push({ k: 'law', pulse: 0, owner: i, law: l });
+      for (const l of prev.laws[i]) if (!cur.laws[i].includes(l) && !cur.laws[i].includes(opposite(l) ?? '')) out.push({ k: 'law', pulse: 0, owner: i, law: l, revoked: true });
+    });
+    return out;
   }
 
   banner(t: string) {
@@ -1539,6 +1712,7 @@ export class GameScreen {
       highlight, plannedArrows, pathPreview,
       signals: this.replay ? [] : this.st.last?.signals ?? [], showSignals: this.showSignals,
       fx: this.fx, now,
+      ...this.supplyOverlay(),
     });
     this.fx = this.fx.filter(f => now - f.t0 < f.dur);
     // mode hint
@@ -1557,6 +1731,21 @@ export class GameScreen {
     } else if (!this.mode) { hint.classList.add('hidden'); hint.dataset.key = ''; }
   }
 
+  /** Map overlays for your supply network (memoized per state): cut-off regions, and where a selected fleet would starve. */
+  supplyOverlay(): { cutOff: Set<number> | null; unsupplied: Set<number> | null } {
+    const st = this.st, you = this.you;
+    if (you === null || st.rules.empire?.enabled === false || this.replay) return { cutOff: null, unsupplied: null };
+    const m = this.memo;
+    if (m.supSrc !== st) {
+      m.supSrc = st;
+      const conn = connected(st, you), sup = supplied(st, you, conn);
+      const cut = new Set(st.regions.filter(r => r.owner === you && !conn.has(r.id)).map(r => r.id));
+      m.cut = cut.size ? cut : null;
+      m.unsup = new Set(st.regions.filter(r => !sup.has(r.id)).map(r => r.id));
+    }
+    const f = this.sel?.kind === 'fleet' ? this.fleet(this.sel.id) : this.mode && 'fleet' in this.mode ? this.fleet(this.mode.fleet) : undefined;
+    return { cutOff: m.cut ?? null, unsupplied: f && f.owner === you ? m.unsup ?? null : null };
+  }
   objKey(o: object): number { let v = objIds.get(o); if (v === undefined) { v = nextObjId++; objIds.set(o, v); } return v; }
   visibleSet(): Set<number> {
     const v = this.src.view.visible;
@@ -1917,6 +2106,9 @@ export function eventText(st: GameState, e: GameEvent, you: number | null): stri
     case 'betrayal': return `<span class="bad">BETRAYAL:</span> ${pn(e.by)} attacks ${pn(e.victim)} at ${rn(e.region)}`;
     case 'fail': return e.owner === you ? `<span class="bad">${esc(e.text)}</span>` : '';
     case 'note': return esc(e.text);
+    case 'tech': { const t = TECH[e.tech]; return e.stolen ? `${pn(e.owner)} steals <b>${esc(t?.name ?? e.tech)}</b> from a captured Academy` : `${pn(e.owner)} researched ${t?.icon ?? ''} <b>${esc(t?.name ?? e.tech)}</b>${t?.tier === 4 ? ' <span class="gold">★</span>' : ''}`; }
+    case 'law': { const l = LAW[e.law]; return `${pn(e.owner)} ${e.revoked ? 'revokes' : 'enacts'} ${l?.icon ?? ''} <b>${esc(l?.name ?? e.law)}</b>`; }
+    case 'refit': return `${pn(e.owner)} ${fn(e.fleet)} refits at ${rn(e.region)}`;
   }
 }
 

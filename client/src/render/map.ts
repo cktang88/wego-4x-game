@@ -4,6 +4,7 @@ import type { GameState, Region, Fleet, Pt, Signal, Order } from '../../../share
 import { NEUTRAL_COLOR } from '../../../shared/config/content.ts';
 import { Rng, hashString } from '../../../shared/sim/rng.ts';
 import { pointInPoly } from '../../../shared/sim/mapgen.ts';
+import { TRAITS as WORLD_TRAITS, VEINS } from '../../../shared/config/empire.ts';
 
 export interface FleetDraw { id: number; owner: number; ships: number; pos: Pt; alpha: number; name: string; fortified?: boolean; selected?: boolean; ghost?: boolean; cls?: string[]; idle?: boolean }
 export interface Fx {
@@ -40,6 +41,10 @@ export interface DrawInput {
   showSignals: boolean;
   fx: Fx[];
   now: number;
+  /** your owned regions that are cut off from your capital (half yield): red dashed borders */
+  cutOff?: Set<number> | null;
+  /** while one of your fleets is selected: regions where it would be out of supply (faint red) */
+  unsupplied?: Set<number> | null;
 }
 
 const TAU = Math.PI * 2;
@@ -200,7 +205,7 @@ export class MapRenderer {
     this.stepCam(now);
     this.trackOwners(I);
     // hover & selection live in the dynamic pass (faded), so they don't force a rebuild of the static layer
-    const base = [this.objId(st), this.objId(I.visible), I.you, I.owners.join(','), W, H, this.dpr].join('|');
+    const base = [this.objId(st), this.objId(I.visible), I.you, I.owners.join(','), W, H, this.dpr, I.cutOff ? this.objId(I.cutOff) : 0].join('|');
     const cam = this.cam;
     if (!this.lastCam || cam.x !== this.lastCam.x || cam.y !== this.lastCam.y || cam.z !== this.lastCam.z) { this.camMovedAt = now; this.lastCam = { ...cam }; }
     if (!this.layer || this.layer.width !== W || this.layer.height !== H) {
@@ -254,6 +259,11 @@ export class MapRenderer {
         if (!r) continue;
         path(ctx, r.poly); ctx.fillStyle = hexA(col, a); ctx.fill();
       }
+    }
+    if (I.unsupplied?.size) {
+      ctx.save();
+      for (const rid of I.unsupplied) { const r = st.regions[rid]; if (!r || r.kind === 'void') continue; path(ctx, r.poly); ctx.fillStyle = 'rgba(255,70,100,0.07)'; ctx.fill(); }
+      ctx.restore();
     }
     this.drawRegionSelection(I);
     // animated parts of sites
@@ -314,6 +324,31 @@ export class MapRenderer {
         ctx.fillStyle = 'rgba(0,0,0,0.25)'; path(ctx, r.poly); ctx.fill();
       }
       if (I.you !== null && !I.visible.has(r.id)) { path(ctx, r.poly); ctx.fillStyle = 'rgba(3,2,8,0.42)'; ctx.fill(); }
+    }
+
+    // ---------------------------------------------------------------- empire overlays: cut-off regions, warp-gate links
+    if (I.cutOff?.size) {
+      ctx.save();
+      ctx.setLineDash([this.px(7), this.px(5)]); ctx.lineJoin = 'round';
+      for (const rid of I.cutOff) {
+        const r = st.regions[rid];
+        if (!r) continue;
+        path(ctx, r.poly);
+        ctx.fillStyle = 'rgba(255,60,90,0.07)'; ctx.fill();
+        ctx.strokeStyle = 'rgba(255,93,122,0.85)'; ctx.lineWidth = this.px(2); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    {
+      const gates = new Map<number, Region[]>();
+      for (const r of st.regions) if (r.buildings.gate && r.owner !== null && I.owners[r.id] === r.owner) { const a = gates.get(r.owner) ?? []; a.push(r); gates.set(r.owner, a); }
+      ctx.save();
+      ctx.setLineDash([this.px(2), this.px(6)]); ctx.lineCap = 'round';
+      for (const [o, gs] of gates) {
+        ctx.strokeStyle = hexA(colorOf(o), o === I.you ? 0.55 : 0.3); ctx.lineWidth = this.px(o === I.you ? 2 : 1.4);
+        for (let i = 0; i < gs.length; i++) for (let j = i + 1; j < gs.length; j++) { ctx.beginPath(); ctx.moveTo(gs[i].site.x, gs[i].site.y); ctx.lineTo(gs[j].site.x, gs[j].site.y); ctx.stroke(); }
+      }
+      ctx.restore();
     }
 
     // ---------------------------------------------------------------- sites & labels
@@ -881,6 +916,28 @@ export class MapRenderer {
     } else {
       planet(ctx, p, size, c);
     }
+    // planetary defences and gates
+    const b = r.buildings;
+    if (b.battery) {
+      ctx.save(); ctx.strokeStyle = hexA(c, 0.8); ctx.lineWidth = Math.max(1, k * 1.2); ctx.setLineDash([k * 2, k * 3]);
+      for (let i = 0; i < b.battery; i++) { ctx.beginPath(); ctx.arc(p.x, p.y, size * (1.55 + i * 0.3), 0, TAU); ctx.stroke(); }
+      ctx.restore();
+    }
+    if (b.pshield) {
+      const R2 = size * (1.6 + (b.battery ?? 0) * 0.3 + 0.35);
+      const sg = ctx.createRadialGradient(p.x, p.y, R2 * 0.6, p.x, p.y, R2);
+      sg.addColorStop(0, 'rgba(111,243,255,0)'); sg.addColorStop(1, 'rgba(111,243,255,0.22)');
+      ctx.fillStyle = sg; ctx.beginPath(); ctx.arc(p.x, p.y, R2, 0, TAU); ctx.fill();
+      ctx.strokeStyle = 'rgba(150,245,255,0.75)'; ctx.lineWidth = Math.max(1, k * 1.3); ctx.stroke();
+    }
+    if (b.gate) {
+      const gp = { x: p.x - size * 1.9 - k * 6, y: p.y + size * 1.2 };
+      ctx.save(); ctx.translate(gp.x, gp.y);
+      ctx.strokeStyle = hexA(c, 0.95); ctx.lineWidth = k * 2.2;
+      ctx.beginPath(); ctx.ellipse(0, 0, k * 6, k * 7.5, 0, 0, TAU); ctx.stroke();
+      ctx.fillStyle = hexA('#ffffff', 0.25); ctx.beginPath(); ctx.ellipse(0, 0, k * 3, k * 4.5, 0, 0, TAU); ctx.fill();
+      ctx.restore();
+    }
     // buildings pips
     const pips: string[] = [];
     if (r.buildings.shipyard) pips.push('⚙'.repeat(r.buildings.shipyard));
@@ -888,6 +945,8 @@ export class MapRenderer {
     if (r.buildings.mine) pips.push('⛏'.repeat(r.buildings.mine));
     if (r.buildings.tradehub) pips.push('¢'.repeat(r.buildings.tradehub));
     if (r.buildings.sensor) pips.push('◎'.repeat(r.buildings.sensor));
+    if (r.buildings.academy) pips.push('⚗'.repeat(r.buildings.academy));
+    if (r.buildings.depot) pips.push('⊞');
 
     // labels (with simple collision avoidance: try above, then below, then shifted)
     const fs = this.compact ? 11 : Math.max(11, Math.min(15, 13 * Math.sqrt(k)));
@@ -925,7 +984,29 @@ export class MapRenderer {
     if (pips.length) sub.push(pips.join(' '));
     if (r.project) sub.push(`⏳${I.state.rules.projects[r.project.key]?.name ?? r.project.key}`);
     if (r.memorials.length) sub.push(`✝${r.memorials.length}`);
-    if (sub.length) { ctx.fillStyle = 'rgba(200,195,230,0.7)'; ctx.fillText(sub.join('  '), below ? spot.x : p.x, below ? spot.y + this.px(13) : p.y + size * 1.9 + this.px(14)); }
+    // world trait (hidden on phones to keep labels short) and the vein, in its colour (lit when an Extractor mines it)
+    const emp = I.state.rules.empire?.enabled !== false;
+    const T = emp && r.trait ? WORLD_TRAITS[r.trait] : null, V = emp && r.vein ? VEINS[r.vein] : null;
+    if (T && !this.compact) sub.unshift(T.icon);
+    const txt = sub.join('  '), vtxt = V ? V.icon : '';
+    if (txt || vtxt) {
+      const sx = below ? spot.x : p.x, sy = below ? spot.y + this.px(13) : p.y + size * 1.9 + this.px(14);
+      const gap = txt && vtxt ? ctx.measureText('  ').width : 0;
+      const w1 = txt ? ctx.measureText(txt).width : 0, w2 = vtxt ? ctx.measureText(vtxt).width : 0;
+      const x0 = sx - (w1 + gap + w2) / 2;
+      ctx.textAlign = 'left';
+      if (txt) { ctx.fillStyle = 'rgba(200,195,230,0.7)'; ctx.fillText(txt, x0, sy); }
+      if (V) {
+        const mined = (r.buildings.extractor ?? 0) > 0;
+        ctx.save();
+        if (mined) { ctx.shadowColor = V.color; ctx.shadowBlur = 8; }
+        ctx.fillStyle = hexA(V.color, mined ? 1 : 0.6);
+        ctx.font = `700 ${this.px(this.compact ? 11 : 12.5)}px "Rajdhani", system-ui, sans-serif`;
+        ctx.fillText(vtxt, x0 + w1 + gap, sy);
+        ctx.restore();
+      }
+      ctx.textAlign = 'center';
+    }
     // influence progress (your loyalty)
     if (I.you !== null && r.owner !== I.you && (r.loyalty[I.you] ?? 0) > 0) {
       const thr = r.owner === null ? I.state.rules.influence.flipThreshold : I.state.rules.influence.rivalFlipThreshold;

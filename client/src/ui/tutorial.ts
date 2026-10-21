@@ -21,8 +21,8 @@ function setDone(live: boolean, done: boolean) {
   try { if (done) localStorage.setItem(key(live), 'done'); else localStorage.removeItem(key(live)); } catch { /* */ }
 }
 
-const WEGO = ['fleet', 'action', 'target', 'slots', 'capital', 'build', 'seal', 'end'];
-const LIVE = ['fleet', 'action', 'target', 'bank', 'capital', 'build', 'end'];
+const WEGO = ['fleet', 'action', 'target', 'slots', 'capital', 'build', 'seal', 'empire', 'end'];
+const LIVE = ['fleet', 'action', 'target', 'bank', 'capital', 'build', 'empire', 'end'];
 
 export class Coach {
   box: HTMLElement;
@@ -204,6 +204,13 @@ export class Coach {
         id: 'seal', title: 'Seal your orders',
         text: `${used < g.plan.orders.length ? `You've used ${used} of ${g.plan.orders.length}. Add more, or` : 'All set:'} <b>Seal</b>. When everyone has sealed, the turn plays out as a replay.`,
         anchor: ph ? q('[data-d=seal]') : q('[data-submit]'),
+      };
+    }
+    if (st.rules.empire?.enabled !== false && !this.acked.has('empire')) {
+      return {
+        id: 'empire', title: 'Invest for later',
+        text: `The <b>Empire</b> tab: research (one technology a ${live ? 'cycle' : 'turn'}, no order needed), laws, and ship designs. Everyone can see what you pick.`,
+        anchor: q('[data-tab=empire]') ?? (ph ? q('.dock [data-d=sheet]') : null), next: 'Got it',
       };
     }
     return {

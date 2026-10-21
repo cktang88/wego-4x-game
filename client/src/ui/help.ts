@@ -43,6 +43,15 @@ export function helpHtml(st: GameState): string {
     <li><b>Economy</b>: builds, projects, excavations.</li>
   </ol>
   <p class="dim">After pulse ${R.orders.pulses}: the Warden acts, then income and upkeep, then pacts. Then VP is scored on the <b>final</b> state.</p>
+  <h2>Building an empire</h2>
+  <p class="dim">A few big, public decisions, all in the <b>Empire</b> tab. Nothing needs tending every turn.</p>
+  <ul>
+    <li><b>Research</b>: four branches (⚔ Warfare, ⛨ Bulwark, ➤ Logistics, ✦ Statecraft), each I → II → III → ★. Buy <b>${R.empire.researchPerTurn} technology per ${st.live ? 'cycle' : 'turn'}</b> as a free action (it costs ⚙ and ¢, not an order). Tier III is a fork: pick one of two, forever. A ★ technology belongs to whoever buys it first. Prices grow with your empire; an <b>Academy</b> cuts them, and capturing a rival's Academy steals a technology.</li>
+    <li><b>Laws</b> (the Charter): four pairs of opposites. Enacting one costs an order and ${R.empire.lawCost}✦ (double to switch sides); revoking is free. You start with ${R.empire.lawSlotsStart} slot, +1 at turn ${R.empire.lawSlotTurns.join(', ')}, +1 with Bureaucracy.</li>
+    <li><b>Ship designs</b>: each class carries one module (Armor, or researched Railguns, Deflectors, Ion Drives). New ships get it; a <b>Refit</b> order at one of your shipyards upgrades and repairs a whole fleet (${R.empire.refitIndustryPerShip}⚙ per ship).</li>
+    <li><b>Worlds</b>: some planets have a trait (⚒ Forge, ❀ Garden, ▣ Bulwark Moon, ◍ Gas Giant). A few hold <b>veins</b>: ⚛ Antimatter (Cruisers, Dreadnoughts) and ◆ Crystals (Planetary Shields, Warp Gates). Build an <b>Extractor</b> on a vein you own for +${R.empire.extractorCredits}¢ and access.</li>
+    <li><b>Supply</b>: your regions must link back to your capital through your own territory. Cut-off regions (red dashed on the map) yield half and their Extractors go dark. Fleets in or next to connected territory are in supply; beyond it they don't repair and soon wear down. Depots extend supply; Warp Gates link your space.</li>
+  </ul>
   <h2>Combat</h2>
   <ul>
     <li><b>Battles take time.</b> Every pulse, each battle fights ${R.combat.roundsPerPulse} round${R.combat.roundsPerPulse > 1 ? 's' : ''}, so a fight lasts through the turn and often into the next ones. Only part of a big fleet can fire at once (${R.combat.frontageBase} ships + 1 per ${Math.round(1 / R.combat.frontagePerShip)} ships), so <b>bigger battles last longer</b>. Ships that arrive mid-battle, whether moved in, guarding, or newly built, <b>join it</b>. A ⚔ marker shows battles in progress.</li>

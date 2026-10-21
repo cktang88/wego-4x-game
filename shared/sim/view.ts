@@ -153,6 +153,8 @@ function filterResult(s: GameState, r: TurnResult, p: PlayerId, endCov: Set<Regi
       case 'scan': return e.owner === p;
       case 'excavate': return true;
       case 'pact': case 'betrayal': return true;
+      case 'tech': case 'law': return true;   // research and laws are public
+      case 'refit': return e.owner === p || sees(e.region);
       case 'fail': return e.owner === p;
       case 'note': return e.owner === null || e.owner === p;
       default: return false;

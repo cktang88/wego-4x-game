@@ -8,6 +8,10 @@ A **3-player competitive WEGO space 4X** you can play with friends asynchronousl
 - **Memorable fleets.** Named commanders earn traits through deeds. Rivals who meet again get vengeance bonuses. Veteran ships earn titles. Engines, weapons and shields get knocked out individually. Battles leave wreckage and memorials on the map.
 - **Light diplomacy and deception.** Intel signals come from rivals' actual orders. Feints, scans, conceal, influence and pacts are breakable, but betrayal costs VP.
 
+## The Empire layer
+
+Underneath the five orders sits a small 4X spine: invest now, pay off later, without micromanagement. In the **Empire** tab you research one technology per turn across four branches (with an exclusive fork and a one-per-game ★ at the top of each), enact laws from a Charter of opposed pairs, and pick the module each ship class carries. On the map, world traits and Antimatter / Crystal veins make some planets worth fighting for, and supply lines matter: regions cut off from your capital yield half, and fleets beyond supply wear down. Design and numbers: [docs/EMPIRE.md](docs/EMPIRE.md).
+
 ## Quick start
 
 ```bash
