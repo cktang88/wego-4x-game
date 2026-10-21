@@ -33,6 +33,7 @@ import { postureMap } from './hud/signature.ts';
 import { FATE_USES, POSTURES, WORLD_POSTURES } from '../../shared/config/content.ts';
 import { maybeHerald, openHerald, heraldOpen, closeHerald } from './ui/herald.ts';
 import { openSaga, sagaOpen, closeSaga } from './ui/saga.ts';
+import { audio } from './audio/audio.ts';
 // the chrome theme and the Soul layer's styles load after every other sheet (shell.css, modals.css)
 import './theme.css';
 import './soul.css';
@@ -154,6 +155,8 @@ export class GameScreen {
     this.lastSeenTurn = this.readSeenTurn();
     this.prunePlans();
     this.onSourceChange('view');
+    // the board's music and ambient bed (they wait for the first gesture if audio is still locked)
+    audio.scene(this.st.winner === null ? 'board' : 'lobby');
     this.bindTips();
     this.teach = new Teach(this);
     this.renderAll();
@@ -182,6 +185,8 @@ export class GameScreen {
     this.hud.destroy();
     this.tipEl?.remove();
     this.root.remove();
+    audio.me = null;
+    audio.scene('lobby');
   }
   /** Info popovers for any [data-tip] element: hover with a mouse, long-press / tap on touch screens. */
   bindTips() {
@@ -490,6 +495,7 @@ export class GameScreen {
       const err = this.orderWhy(o);
       if (err) { toast(`⊘ ${shortWhy(err)}`); return false; }
       this.src.liveOrder?.(o);
+      audio.ui('order');
       this.flashOrder = performance.now();
       this.afterAction();
       return true;
@@ -509,6 +515,7 @@ export class GameScreen {
     this.targetSlot = null;
     this.replacing = null;
     this.savePlan();
+    audio.ui('order');
     this.afterAction();
     return true;
   }
@@ -553,6 +560,7 @@ export class GameScreen {
     for (const fa of it.free ?? []) this.pushFree(fa, true);
     this.plan.orders[slot] = it.order;
     this.savePlan();
+    audio.ui('order');
     this.afterAction();
     return true;
   }
@@ -593,6 +601,7 @@ export class GameScreen {
     // full view
     backfillRules(this.st);
     if (this.you !== null) this.lastYou = this.you;
+    audio.me = this.you ?? this.mySeat();
     if (!this.map.fitted && this.map.w > 0) {
       const cap = this.you !== null ? this.st.regions[this.st.players[this.you]?.capital]?.site : undefined;
       this.map.fit(this.st, cap);
@@ -628,6 +637,8 @@ export class GameScreen {
         const first = this.lastSeenTick === -1;
         this.lastSeenTick = tick;
         const interesting = last.events.some(e => e.k === 'move' || e.k === 'battle' || e.k === 'capture' || e.k === 'destroyed' || e.k === 'build' || e.k === 'clash');
+        // one short phrase per tick (at most one sound per kind of event), never a burst; ticks in a hidden tab stay silent
+        if (!first && !document.hidden) audio.onTick(last.events);
         if (!first && news.length && !document.hidden) {
           // live: research and laws land between ticks; announce them (yours as confirmation, rivals' as intel)
           for (const e of news.slice(0, 3)) { toast(eventText(this.st, e, this.you).replace(/<[^>]+>/g, '')); this.empireFx(e); }
@@ -638,6 +649,8 @@ export class GameScreen {
     } else if (last && last.turn > this.lastSeenTurn && this.st.turn > 1) {
       this.lastSeenTurn = last.turn;
       try { localStorage.setItem(seenKey, String(last.turn)); } catch { /* */ }
+      // a beat after the seal (a local game resolves at once)
+      audio.turnResolved({ delay: 0.25 });
       // empire news (bought before pulse I) opens the replay; spectators already get the real events
       const known = new Set(last.events.filter(e => e.k === 'tech' || e.k === 'law').map(e => JSON.stringify([e.k, (e as { owner: number }).owner, e.k === 'tech' ? e.tech : e.law])));
       const extra = news.filter(e => !known.has(JSON.stringify([e.k, e.owner, e.k === 'tech' ? e.tech : e.law])));
@@ -688,6 +701,7 @@ export class GameScreen {
 
   handoff(seat: number) {
     const name = this.st.players[seat]?.name ?? '?';
+    audio.me = seat;
     // the previous player is still looking: hide everything until the next player confirms
     this.sel = null; this.mode = null; this.targetSlot = null; this.hoverRegion = null; this.empFocus = null;
     this.gest.cancel();
@@ -707,7 +721,12 @@ export class GameScreen {
     o.querySelector('[data-x]')!.addEventListener('click', () => {
       o.remove();
       if (this.curtain === o) this.curtain = null;
-      if (this.replay) { this.replay.playing = true; this.replay.last = performance.now(); }
+      if (this.replay) {
+        this.replay.playing = true; this.replay.last = performance.now();
+        // the beat that started behind the curtain was kept quiet: voice it now
+        const b = this.replay.beats[this.replay.i];
+        if (b && !this.replay.preview && !this.live) audio.onGameEvents(b.events, { stagger: 0.04, delay: 0.2 });
+      }
       this.renderAll();
       this.maybeShowVictory();
       this.heraldCheck();
@@ -802,6 +821,7 @@ export class GameScreen {
       this.undoStack = [];
       // a running Preview shows this plan: never let it play on (hotseat: behind the next player's curtain)
       if (this.replay?.preview) this.endReplay();
+      audio.ui('seal');
       this.src.submit(structuredClone(this.plan));
       if (this.src.kind === 'remote' && 'Notification' in window && Notification.permission === 'default') void Notification.requestPermission();
     };
@@ -885,6 +905,9 @@ export class GameScreen {
     R.prog = 0;
     R.last = performance.now();
     R.moving.clear();
+    // each beat's events, as the replay reaches them. Not for a Preview (nothing happened), not behind the hotseat
+    // curtain (it would tell the next player what's coming), and not for LIVE ticks (onSourceChange voices them once)
+    if (!R.preview && !this.live && !this.curtain) audio.onGameEvents(beat.events, { stagger: 0.04, delay: R.i === 0 ? 0.45 : 0 });
     const st = this.st;
     const live = () => [...R.fleets.values()].filter(f => f.alpha > 0);
     R.startLayout = regionLayout(st, live().map(f => ({ id: f.id, region: f.region })), this.map.px(1));
@@ -1456,6 +1479,7 @@ export class GameScreen {
     // a finished game is shown fully revealed (you === null): remember whose seat this screen was
     // flourish (fx.css): light rays and embers in the winner's colour behind the card, a crown that drops in, ranks that rise in turn
     const sparks = reducedMotion() ? '' : Array.from({ length: 18 }, (_, i) => `<i style="--x:${(i * 37) % 100}%;--d:${(i * 0.23) % 2.4}s;--s:${0.6 + ((i * 7) % 5) / 5}"></i>`).join('');
+    { const seat = this.mySeat(); audio.gameOver(seat === null || st.winner === seat); }
     const o = overlay(`<div class="vic-rays" aria-hidden="true"></div><div class="vic-sparks" aria-hidden="true">${sparks}</div><div class="dialog vic-card" data-victory style="text-align:center"><div class="vic-crown" aria-hidden="true">♛</div><h1 class="vic-name" style="color:${w.color};font-size:1.875rem">${esc(w.name)}</h1><h2>${w.id === this.mySeat() ? 'Victory' : 'has won'}</h2>
       <p class="dim">${esc(st.winReason)}</p>${ranks.map((p, i) => `<div class="vic-rank" style="color:${p.color};--i:${i}">${esc(p.name)}: ${p.vp} VP</div>`).join('')}
       <p class="dim" style="margin-top:0.75rem">The whole map is now revealed. Browse the Chronicle to relive it.</p><div class="row" style="justify-content:center"><button data-x>Look around</button>${this.st.soul ? '<button class="primary" data-saga>⚜ The Saga</button>' : ''}<button ${this.st.soul ? '' : 'class="primary" '}data-l>Lobby</button></div></div>`);

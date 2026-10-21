@@ -164,7 +164,9 @@ export class AudioEngine {
         // iOS: play one silent sample inside the gesture to fully unlock output.
         const b = ctx.createBuffer(1, 1, 22050); const s = ctx.createBufferSource();
         s.buffer = b; s.connect(ctx.destination); s.start(0);
-        void this.preload(['ui_click', 'ui_hover', 'ui_open', 'ui_close']);
+        // the small UI set first; the rest of the SFX (~0.6 MB, never the music) a moment later, in the background
+        void this.preload(['ui_click', 'ui_hover', 'ui_open', 'ui_close', 'ui_error', 'game_order']);
+        setTimeout(() => void this.preload(), 700);
       }
       if (this.ctx.state !== 'running') void this.ctx.resume().catch(() => {});
       // Start whatever was requested before the unlock.
@@ -275,6 +277,7 @@ export class AudioEngine {
       src.connect(gain); tail.connect(buses.sfx);
       const at = ctx.currentTime + Math.max(0, o.delay ?? 0);
       src.start(at);
+      dbg(name);
       const end = at + buf.duration / src.playbackRate.value;
       const v: Voice = { src, gain, t: end };
       pool.push(v); this.voices.set(name, pool);
@@ -325,6 +328,7 @@ export class AudioEngine {
       gain.gain.linearRampToValueAtTime(TRACK_VOL[name], t0 + fade);
       src.connect(gain).connect(buses[bus]);
       src.start(t0);
+      dbg(`${bus}:${name}`);
       this.slots[bus] = { name, src, gain };
     });
   }
@@ -380,8 +384,29 @@ export class AudioEngine {
     }
   }
   /** A batch (e.g. all events of one replay pulse); the voice pools keep stacks tidy. */
-  onGameEvents(evs: readonly GameEvent[], o: { stagger?: number } = {}): void {
-    evs.forEach((e, i) => this.onGameEvent(e, { delay: (o.stagger ?? 0) * i }));
+  onGameEvents(evs: readonly GameEvent[], o: { stagger?: number; delay?: number } = {}): void {
+    evs.forEach((e, i) => this.onGameEvent(e, { delay: (o.delay ?? 0) + (o.stagger ?? 0) * i }));
+  }
+
+  /**
+   * LIVE: one tick's events as a short phrase instead of a burst. Keeps at most one event per kind (a posture's
+   * outcome counts as its own kind), the most dramatic first, capped at `max` sounds, lightly staggered.
+   */
+  onTick(evs: readonly GameEvent[], o: { max?: number } = {}): void {
+    const rank: Partial<Record<GameEvent['k'], number>> = {
+      posture: 0, betrayal: 1, destroyed: 2, capture: 3, battle: 4, clash: 5, soul: 6, fate: 7, tech: 8, law: 9,
+      excavate: 10, project: 11, rout: 12, retreat: 13, move: 14, build: 15, pact: 16, blocked: 17, fail: 18, fortify: 19, refit: 20,
+    };
+    const seen = new Set<string>();
+    const pick: GameEvent[] = [];
+    for (const e of evs) {
+      if (rank[e.k] === undefined || (e.k === 'posture' && e.outcome === 'none')) continue;
+      const key = e.k === 'posture' ? `posture:${e.outcome}` : e.k;
+      if (seen.has(key)) continue;
+      seen.add(key); pick.push(e);
+    }
+    pick.sort((a, b) => rank[a.k]! - rank[b.k]!);
+    this.onGameEvents(pick.slice(0, o.max ?? 4), { stagger: 0.09 });
   }
 
   /** Battle viewer: one shot from a BattleReport round. `pan` -1..1 from the shooter's screen x if handy. */
@@ -397,7 +422,7 @@ export class AudioEngine {
   }
 
   /** The turn finished resolving (replay starts / new plan phase). */
-  turnResolved(): void { this.sfx('game_turn'); }
+  turnResolved(o: { delay?: number } = {}): void { this.sfx('game_turn', { delay: o.delay }); }
   /** End of game. Swaps to the theme after the sting. */
   gameOver(won: boolean): void {
     this.sfx(won ? 'st_victory' : 'st_defeat');
@@ -411,6 +436,14 @@ export class AudioEngine {
     else if (s === 'battle') { this.ambient('amb_drone'); this.music('mus_board', { fade: 1 }); }
     else this.stopAll();
   }
+}
+
+/** Test hook: when a page sets `window.__tcAudioLog = []`, every sound that actually starts is appended to it. */
+function dbg(n: string) {
+  try {
+    const l = (window as unknown as { __tcAudioLog?: { n: string; t: number }[] }).__tcAudioLog;
+    if (Array.isArray(l)) l.push({ n, t: Math.round(performance.now()) });
+  } catch { /* */ }
 }
 
 function pickExt(): 'ogg' | 'm4a' {
@@ -430,7 +463,8 @@ export const onGameEvent = (ev: GameEvent) => audio.onGameEvent(ev);
 
 /**
  * A minimal settings block (mute + four sliders), unstyled except for class names, for the menu/help modal.
- * Classes: .audio-settings, .audio-row, .audio-mute. Keeps itself in sync with the engine.
+ * Classes: .audio-settings (.muted), .audio-row, .audio-val, .audio-mute; styled in audio.css. Keeps itself in sync
+ * with the engine.
  */
 export function audioSettingsPanel(): HTMLElement {
   const root = document.createElement('div');
@@ -446,14 +480,23 @@ export function audioSettingsPanel(): HTMLElement {
     const span = document.createElement('span'); span.textContent = label;
     const inp = document.createElement('input');
     inp.type = 'range'; inp.min = '0'; inp.max = '100'; inp.step = '1';
-    inp.addEventListener('input', () => audio.setVolume(bus, Number(inp.value) / 100));
-    if (bus === 'sfx') inp.addEventListener('change', () => audio.sfx('ui_click'));
-    row.append(span, inp); root.append(row); inputs.set(bus, inp);
+    inp.setAttribute('aria-label', `${label} volume`);
+    inp.addEventListener('input', () => { audio.unlock(); audio.setVolume(bus, Number(inp.value) / 100); });
+    // a sample at the new level when you let go (effects / master); music and ambience are heard directly
+    if (bus === 'sfx' || bus === 'master') inp.addEventListener('change', () => audio.sfx('ui_click'));
+    const val = document.createElement('b'); val.className = 'audio-val';
+    row.append(span, inp, val); root.append(row); inputs.set(bus, inp);
   }
   const sync = (s: AudioSettings) => {
     mute.textContent = s.muted ? 'Sound: off' : 'Sound: on';
     mute.setAttribute('aria-pressed', String(!s.muted));
-    for (const [bus, inp] of inputs) inp.value = String(Math.round(s[bus] * 100));
+    root.classList.toggle('muted', s.muted);
+    for (const [bus, inp] of inputs) {
+      const v = Math.round(s[bus] * 100);
+      inp.value = String(v);
+      inp.style.setProperty('--pct', `${v}%`);
+      const out = inp.nextElementSibling; if (out) out.textContent = `${v}%`;
+    }
   };
   sync(audio.getSettings());
   const off = audio.subscribe(sync);

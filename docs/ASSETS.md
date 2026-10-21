@@ -106,6 +106,14 @@ The check covers:
 
 The engine is in `client/src/audio/audio.ts`. Import it with `import { audio } from '../audio/audio.ts';`.
 
+**Status: wired.** Every hook below is in place. Beyond the table:
+
+- `client/src/audio/hooks.ts` holds the app-wide pieces: the delegated hover tick (mouse only), Shift+M, `openSoundSettings()` (the Sound dialog: menu → *Sound settings*, Help → *Sound settings*, lobby → *Sound*) and the speaker icon. The dialog styles are in `audio/audio.css`.
+- Refused actions get `ui_error` from `toast()` itself (`ui/dom.ts`: any toast starting `⊘`, `⏱ No orders banked` or `No slot free`), so `verbs.ts` / `soul.ts` needed no edits.
+- LIVE ticks are not voiced beat by beat. `onSourceChange` calls `audio.onTick(events)` once per tick: at most one sound per kind of event, the most dramatic first, capped at 4.
+- After the unlock, the engine preloads the small UI set and then every SFX in the background (about 0.6 MB). Music loads only when a scene asks for it. Nothing is fetched before the first gesture.
+- Test hook: when a page sets `window.__tcAudioLog = []`, every sound that starts is appended to it. `window.tcAudio` is the engine. See `scripts/audio-e2e.mjs`.
+
 | hook | file / place | call |
 |---|---|---|
 | boot | `client/src/main.ts`, top level, before `lobby()` | `audio.install();` (arms unlock on the first gesture) then `audio.scene('lobby')` |

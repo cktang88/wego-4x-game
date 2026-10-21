@@ -2,6 +2,7 @@
 import type { GameState } from '../../../shared/sim/types.ts';
 import { type Ctx } from './modal-util.ts';
 import { ic } from '../art/icons.ts';
+import { openSoundSettings, soundIcon } from '../audio/hooks.ts';
 
 const A = (href: string, text: string) => `<a href="${href}" target="_blank" rel="noopener">${text}</a>`;
 
@@ -80,12 +81,14 @@ export function helpBody(c: Ctx): string {
     <li>Sound effects by <b>Kenney</b> (${A('https://kenney.nl', 'kenney.nl')}), ${A('https://creativecommons.org/publicdomain/zero/1.0/', 'CC0')}.</li>
     <li>Music from ${A('https://opengameart.org', 'OpenGameArt.org')}, CC0: <b>cynicmusic</b>, <b>SRG774</b>, <b>congusbongus</b>, <b>RandomMind</b>.</li>
     <li>Textures by <b>ambientCG</b> (${A('https://ambientcg.com', 'ambientcg.com')}), CC0. Fonts: Google Fonts, SIL OFL 1.1.</li></ul></section>` : '';
-  const keys = c.tab === 'win' ? `<section class="hc keys"><h3><span>⌨</span>Keys</h3><div class="kgrid"><kbd>E</kbd><span>Empire</span><kbd>Q</kbd><span>Score</span><kbd>C</kbd><span>Chronicle</span><kbd>?</kbd><span>Help</span><kbd>Esc</kbd><span>Close</span><kbd>1–7</kbd><span>Tabs</span><kbd>Tab</kbd><span>Idle fleet</span><kbd>Enter</kbd><span>Seal</span><kbd>Space</kbd><span>Peek / skip</span></div></section>` : '';
+  const keys = c.tab === 'win' ? `<section class="hc keys"><h3><span>⌨</span>Keys</h3><div class="kgrid"><kbd>E</kbd><span>Empire</span><kbd>Q</kbd><span>Score</span><kbd>C</kbd><span>Chronicle</span><kbd>?</kbd><span>Help</span><kbd>Esc</kbd><span>Close</span><kbd>1–7</kbd><span>Tabs</span><kbd>Tab</kbd><span>Idle fleet</span><kbd>Enter</kbd><span>Seal</span><kbd>Space</kbd><span>Peek / skip</span><kbd>Shift+M</kbd><span>Mute sound</span></div></section>` : '';
   const restart = c.g.you !== null && (c.g.restartTips || c.g.restartTour) ? `<button class="mbtn m-ghost" data-a="tips">↻ Restart tips</button>` : '';
-  return `<div class="m-help"><div class="hgrid">${cs.map(x => `<section class="hc"><h3><span>${x.ic}</span>${x.t}</h3><ul>${x.b.map(b => `<li>${b}</li>`).join('')}</ul></section>`).join('')}${keys}${credits}</div>${restart ? `<div class="help-foot">${restart}</div>` : ''}</div>`;
+  const sound = `<button class="mbtn m-ghost" data-a="sound">${soundIcon(false)} Sound settings</button>`;
+  return `<div class="m-help"><div class="hgrid">${cs.map(x => `<section class="hc"><h3><span>${x.ic}</span>${x.t}</h3><ul>${x.b.map(b => `<li>${b}</li>`).join('')}</ul></section>`).join('')}${keys}${credits}</div><div class="help-foot">${sound}${restart}</div></div>`;
 }
 
 export function helpAct(c: Ctx, a: string): boolean {
+  if (a === 'sound') { openSoundSettings(); return true; }
   if (a !== 'tips') return false;
   c.close();
   if (c.g.restartTips) c.g.restartTips(); else c.g.restartTour?.();

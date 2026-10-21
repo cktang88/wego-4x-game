@@ -23,6 +23,7 @@ import { postureRow, fateRow, postureStatus, worldSigRows, sigAction } from './s
 import { systemRows, tributeRows, tributeAction } from './systems.ts';
 import { starIndustry, sysOn, systemCostMult, worldFx } from '../../../shared/sim/systems.ts';
 import { ic, icFor } from '../art/icons.ts';
+import { audio } from '../audio/audio.ts';
 
 const PROJ_ICON = new Proxy({} as Record<string, string>, { get: (_t, k: string) => ic(icFor('structure', k)) });
 const MOD_COLOR: Record<string, string> = { armor: '#c9c3e6', railgun: '#ff9b6b', deflector: '#6fd0ff', ion: '#9dff8a' };
@@ -310,7 +311,9 @@ export function bindCard(g: GameScreen, el: HTMLElement) {
     const t = e.target as HTMLElement;
     const b = t.closest<HTMLElement>('[data-a]');
     if (!b || !el.contains(b)) return;
-    if (b.getAttribute('aria-disabled') === 'true') { b.classList.remove('nope'); void b.offsetWidth; b.classList.add('nope'); return; }
+    if (b.getAttribute('aria-disabled') === 'true') { audio.ui('error'); b.classList.remove('nope'); void b.offsetWidth; b.classList.add('nope'); return; }
+    // Fate makes its own sounds (arm click, coin on the spend)
+    if (b.dataset.a !== 'fate') audio.ui('click');
     cardAction(g, b.dataset.a!, b.dataset, e.shiftKey);
   });
   el.addEventListener('change', e => {

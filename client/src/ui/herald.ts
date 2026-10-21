@@ -8,6 +8,7 @@ import { soulOn, SR } from '../../../shared/sim/soul.ts';
 import { esc, toast } from './dom.ts';
 import { sigilSvg } from '../art/sigils.ts';
 import { iconizeDom, ic, icFor } from '../art/icons.ts';
+import { audio } from '../audio/audio.ts';
 
 const KIND_ICON: Record<string, string> = {
   rout: '⤺', caught: '✝', destroyed: '✝', broken: '✝', death: '✝', vengeance: '⚔', debt: '✠', vow_broken: '✗', vow_kept: '✦',
@@ -45,6 +46,7 @@ export function closeHerald() {
   const o = open;
   open = null;
   if (!o) return;
+  if (o.el.isConnected) audio.ui('close');
   o.el.classList.add('out');
   setTimeout(() => o.el.remove(), 220);
 }
@@ -61,6 +63,7 @@ export function openHerald(g: GameScreen, turn?: number) {
   el.innerHTML = `<div class="herald-back" data-h="close"></div><article class="herald" role="dialog" aria-label="The Herald"></article>`;
   document.body.appendChild(el);
   open = { el, turn: ed.turn };
+  audio.ui('page');
   render(g, ed);
   requestAnimationFrame(() => el.classList.add('show'));
   el.addEventListener('click', e => {
@@ -68,7 +71,7 @@ export function openHerald(g: GameScreen, turn?: number) {
     if (!b) return;
     const a = b.dataset.h!;
     if (a === 'close') { closeHerald(); g.renderAll(); return; }
-    if (a === 'ed') { const t = Number(b.dataset.t); const e2 = editions(g).find(x => x.turn === t); if (e2 && open) { open.turn = t; render(g, e2); } return; }
+    if (a === 'ed') { const t = Number(b.dataset.t); const e2 = editions(g).find(x => x.turn === t); if (e2 && open) { open.turn = t; audio.ui('page'); render(g, e2); } return; }
     if (a === 'as') { asWho = b.dataset.v === 'source' ? 'source' : 'house'; render(g, edNow(g)); return; }
     if (a === 'file') { file(g); return; }
     if (a === 'unfile') { if (!g.live) { g.plan.free = g.plan.free.filter(x => x.type !== 'dispatch'); g.savePlan(); g.renderAll(); } render(g, edNow(g)); return; }
@@ -110,6 +113,7 @@ function file(g: GameScreen) {
   if (g.live) g.src.liveFree?.({ type: 'dispatch', text: t, as: asWho });
   else { g.plan.free = g.plan.free.filter(x => x.type !== 'dispatch'); g.plan.free.push({ type: 'dispatch', text: t, as: asWho }); g.savePlan(); }
   draft = '';
+  audio.ui('confirm');
   toast('✒ Filed for the next edition');
   g.renderAll();
   render(g, edNow(g));

@@ -17,6 +17,8 @@ import * as M from '../ui/modals.ts';
 import { fmtClock, plus, shortName, tip } from './util.ts';
 import { fatePill, fatePop } from './signature.ts';
 import { ic, icFor } from '../art/icons.ts';
+import { audio } from '../audio/audio.ts';
+import { openSoundSettings, soundIcon } from '../audio/hooks.ts';
 
 type ModalName = 'empire' | 'score' | 'chronicle' | 'help';
 interface ModalsModule {
@@ -65,7 +67,7 @@ export class Hud {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
       if (!b) return;
       const a = b.dataset.act!;
-      if (a === 'menu') this.togglePop('menu', b);
+      if (a === 'menu') { audio.ui('click'); this.togglePop('menu', b); }
       else if (a === 'lens') this.togglePop('lens', b);
       else this.modal(a as ModalName);
     });
@@ -241,6 +243,8 @@ export class Hud {
         ${item('replaylast', '⟲', g.live ? 'Replay tick' : 'Replay turn')}
         ${last >= 1 ? `<label class="mrep"><span>${g.live ? 'Tick' : 'Turn'}</span><input type="number" min="1" max="${last}" value="${Math.max(1, last)}" data-rt><button data-m="replayturn">▶</button></label>` : ''}
         ${item('signals', '◎', `Signals ${g.showSignals ? 'on' : 'off'}`)}
+        ${(() => { const m = audio.getSettings().muted; return item('sound', soundIcon(m), `Sound ${m ? 'off' : 'on'}`, `${m ? ' class="off"' : ''} aria-pressed="${!m}"${tip('Mute or unmute · Shift+M')}`); })()}
+        ${item('soundset', soundIcon(false), 'Sound settings')}
         ${item('help', ic('help'), 'Help')}
         ${g.you !== null ? item('teach', ic('replay'), 'Teach again') : ''}
         ${local ? item('save', '⤓', 'Save file') : ''}
@@ -263,6 +267,12 @@ export class Hud {
     if (x === 'reveal') { if (e.type === 'change' && g.src instanceof LocalSource) g.src.setReveal((m as HTMLInputElement).checked); return; }
     if (e.type !== 'click') return;
     if (x === 'signals') { g.toolbar('signals'); return; }
+    if (x === 'sound') {
+      audio.unlock();
+      if (!audio.toggleMute()) audio.ui('click');
+      if (this.pop) this.showPop(this.pop.kind, this.pop.anchor);
+      return;
+    }
     this.closePopovers();
     switch (x) {
       case 'empire': case 'score': case 'chronicle': case 'help': this.modal(x); break;
@@ -274,6 +284,7 @@ export class Hud {
         if (g.st.live) void g.replayTurn(g.turnOfTick(v), v); else void g.replayTurn(v);
         break;
       }
+      case 'soundset': openSoundSettings(); break;
       case 'teach': g.restartTeach(); break;
       case 'save': g.exportSave(); break;
       case 'exit': g.onExit(); break;

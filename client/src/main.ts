@@ -10,10 +10,17 @@ import { LocalSource, RemoteSource, api, tokens, type LocalSave } from './net.ts
 import { esc, toast, overlay } from './ui/dom.ts';
 import { ic } from './art/icons.ts';
 import { openTweaks, loadOverrides } from './ui/tweaks.ts';
+import { audio } from './audio/audio.ts';
+import { installAudioHooks, openSoundSettings, soundIcon } from './audio/hooks.ts';
 import type { GameMeta } from '../../shared/protocol.ts';
 import { LIVE_SPEEDS } from '../../shared/sim/live.ts';
 
 const app = document.getElementById('app')!;
+
+// Audio: nothing is created or fetched until the first gesture (iOS unlock); the lobby theme waits for it.
+audio.install();
+installAudioHooks();
+(window as unknown as { tcAudio: typeof audio }).tcAudio = audio;
 
 /** localStorage that never throws: with site data blocked (or a full quota) the lobby must still work.
  *  Saves also live in memory for the session, so a local game can still be started and played. */
@@ -164,6 +171,8 @@ function joinDialog(meta: GameMeta) {
 
 // ===================================================================== lobby
 function lobby() {
+  audio.me = null;
+  audio.scene('lobby');
   const hasSave = !!store.get('tc.local.autosave');
   const name = store.get('tc.name') ?? '';
   const tw = Object.keys(loadOverrides()).length;
@@ -195,7 +204,7 @@ function lobby() {
       </div>
       <div class="card"><h2>Fiddle</h2>
         <p class="dim" style="font-size:var(--fs-sm);margin-top:0">Everything is a knob. Change any rule (orders per turn, ship stats, VP values, combat odds…) and start a new game to try it.</p>
-        <div class="row"><button data-l="tweaks">${ic('industry')} Tweaks${tw ? ` (${tw} groups changed)` : ''}</button><button data-l="help">How to play</button></div>
+        <div class="row"><button data-l="tweaks">${ic('industry')} Tweaks${tw ? ` (${tw} groups changed)` : ''}</button><button data-l="help">How to play</button><button data-l="sound">${soundIcon(false)} Sound</button></div>
         <p class="faint" style="font-size:var(--fs-xs)">Dev tips: <code>npm run sim -- --games 50</code> runs headless AI-vs-AI balance tests. The <i>Menu</i> in a local game can reveal the whole map. All rules: <code>shared/config/rules.ts</code>.</p>
       </div>
     </div></div></div>`;
@@ -252,6 +261,7 @@ function lobby() {
     inp.click();
   });
   q('[data-l="tweaks"]').addEventListener('click', () => openTweaks());
+  q('[data-l="sound"]').addEventListener('click', () => openSoundSettings());
   q('[data-l="help"]').addEventListener('click', async () => {
     const { helpHtml } = await import('./ui/help.ts');
     const { createGame } = await import('../../shared/sim/setup.ts');

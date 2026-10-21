@@ -10,6 +10,7 @@ import { esc, toast, uiScale } from '../ui/dom.ts';
 import { tip, shortWhy } from './util.ts';
 import { setFree, dropFree } from './soul.ts';
 import { ic, icFor } from '../art/icons.ts';
+import { audio } from '../audio/audio.ts';
 
 /** Turn from which the posture selector appears (progressive disclosure: learn to move first). */
 export const POSTURE_FROM_TURN = 3;
@@ -174,10 +175,11 @@ export function sigAction(g: GameScreen, a: string, data: DOMStringMap): boolean
   if (a === 'fate') {
     const use = data.use as FateUse, key = data.key ?? '';
     // scarce: the first tap arms the button ("Spend?"), the second spends
-    if (!armed || armed.key !== key || performance.now() - armed.at > 4000) { armed = { key, at: performance.now() }; g.renderAll(); g.later(() => { if (armed?.key === key) { armed = null; g.renderAll(); } }, 4100); return true; }
+    if (!armed || armed.key !== key || performance.now() - armed.at > 4000) { audio.ui('click'); armed = { key, at: performance.now() }; g.renderAll(); g.later(() => { if (armed?.key === key) { armed = null; g.renderAll(); } }, 4100); return true; }
     armed = null;
     const fa: FreeAction = use === 'surge' ? { type: 'fate', use, region: sel.id } : { type: 'fate', use, fleet: sel.id };
     setFree(g, fa, x => x.type === 'fate' && (use === 'surge' ? x.region === sel.id : x.fleet === sel.id));
+    audio.ui('coin');
     fateFlourish(g, use);
     return true;
   }
@@ -188,6 +190,8 @@ export function sigAction(g: GameScreen, a: string, data: DOMStringMap): boolean
 export function fateFlourish(g: GameScreen, use: FateUse | 'bonus') {
   const pill = g.hud.h.res.querySelector<HTMLElement>('[data-k=fate]');
   if (pill) { pill.classList.remove('flip'); void pill.offsetWidth; pill.classList.add('flip'); }
+  // the coin lands, then the banner's flourish
+  audio.sfx('ui_banner', { delay: 0.14 });
   g.banner(use === 'bonus' ? '✪ FORTUNE' : `✪ ${(FATE_USES[use]?.name ?? use).toUpperCase()}`);
   toast(use === 'bonus' ? '✪ A Fate token, for the fallen' : `✪ ${FATE_USES[use]?.name ?? use}: spent when the turn resolves`);
 }

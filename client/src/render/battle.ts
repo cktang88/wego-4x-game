@@ -14,6 +14,7 @@ import { fbm2, rand as artRand, mix as artMix, css as artCss, rgb as artRgb } fr
 import { drawStructure } from '../art/structures.ts';
 import { uiScale } from '../ui/dom.ts';
 import { iconizeDom, iconizeHtml, ic, drawIcon, fillIconText } from '../art/icons.ts';
+import { audio } from '../audio/audio.ts';
 
 export interface BattleViewerCtx {
   rules: Rules;
@@ -742,7 +743,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     }
     const ang = angleOf(u, tt) + Math.PI / 2;
     const gp = gunPoints(u.cls, u.owner, sides[u.side].color, p.x, p.y, shipLen(u), ang);
-    const q = gp[idx % gp.length];
+    // a hull without gun points (scouts) fires from its centre; gp[NaN] crashed the frame
+    const q = gp.length ? gp[idx % gp.length] : [p.x, p.y];
     return [q[0], q[1]];
   }
 
@@ -1362,14 +1364,27 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     if (playing) {
+      const prevT = T;
       T += dt * speed;
       if (T >= END) { T = END; playing = false; }
+      // sound follows the playhead while it plays; seeking (scrubber, skip, next round) stays silent
+      shotSounds(prevT, T);
     }
     render();
     sync();
     raf = requestAnimationFrame(frame);
   }
 
+  const HEAVY = new Set(['cruiser', 'dread', 'bombard', '__garrison']);
+  /** Each shot whose start the playhead crossed in (a, b]: panned by where the shooter sits on the stage. */
+  function shotSounds(a: number, b: number) {
+    if (b <= a) return;
+    for (const sh of shots) {
+      if (sh.t0 <= a) continue;
+      if (sh.t0 > b) continue;
+      audio.onShot(sh.rec, { pan: W > 0 ? clamp(sh.from.hx / W, 0, 1) * 1.2 - 0.6 : 0, heavy: HEAVY.has(sh.from.cls) });
+    }
+  }
   const seek = (v: number) => { T = clamp(v, 0, END); };
   const nextRound = () => {
     if (T < INTRO) { seek(INTRO); return; }
@@ -1425,11 +1440,13 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   canvas.addEventListener('pointerdown', setMouse);
   canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') mouse = null; });
   [bPlay, bRestart, bNext, bSkip, xBtn, ...speedBtns].forEach(b => b.addEventListener('keydown', e => { if (e.key === ' ') e.preventDefault(); }));
+  [bPlay, bRestart, bNext, bSkip, ...speedBtns].forEach(b => b.addEventListener('click', () => audio.ui('click')));
 
   function close() {
     if (closed) return;
     closed = true;
     if (closeOpen === close) closeOpen = null;
+    if (overlay.isConnected) audio.ui('close');
     cancelAnimationFrame(raf);
     ro.disconnect();
     window.removeEventListener('keydown', onKey, true);
@@ -1440,6 +1457,9 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   }
 
   closeOpen = close;
+  // warm the battle sounds (cached after the first battle; the opening INTRO covers the decode)
+  void audio.preload(['bt_laser', 'bt_laser_heavy', 'bt_cannon', 'bt_explosion', 'bt_shield', 'bt_destroyed']);
+  audio.ui('open');
   layout();
   last = performance.now();
   raf = requestAnimationFrame(frame);

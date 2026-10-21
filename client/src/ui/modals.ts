@@ -17,6 +17,7 @@ import { scoreHead, scoreBody, scoreAct, sendChat } from './modal-score.ts';
 import { CHRON_FILTERS, chronicleHead, chronicleBody, chronicleAct } from './modal-chronicle.ts';
 import { HELP_TABS, helpBody, helpAct } from './modal-help.ts';
 import { iconizeHtml, ic } from '../art/icons.ts';
+import { audio } from '../audio/audio.ts';
 
 export type { ModalName } from './modal-util.ts';
 
@@ -62,10 +63,11 @@ export function openModal(screen: GameScreen, name: ModalName, tab?: string): vo
   if (tab && META[name].tabs.some(x => x[0] === tab)) ui.tabs[name] = tab;
   if (cur && cur.g !== g) { teardown(cur, true); cur = null; }
   if (cur) {
-    if (cur.name !== name) { cur.name = name; cur.body.scrollTop = 0; }
+    if (cur.name !== name) { cur.name = name; cur.body.scrollTop = 0; audio.ui('page'); }
     render(true);
     return;
   }
+  audio.ui('open');
   build(g, name);
 }
 
@@ -73,6 +75,7 @@ export function closeModal(): void {
   const o = cur;
   if (!o) return;
   cur = null;
+  audio.ui('close');
   teardown(o, reduced());
   try { o.g.renderAll(); } catch { /* the shell may be gone */ }
 }
@@ -200,8 +203,8 @@ function onClick(e: MouseEvent) {
   const c = ctx(o);
   switch (a) {
     case 'close': closeModal(); return;
-    case 'modal': if (id === o.name) closeModal(); else { o.name = id as ModalName; o.body.scrollTop = 0; render(true); } return;
-    case 'tab': ui.tabs[o.name] = id; ui.tech = null; o.body.scrollTop = 0; render(true); return;
+    case 'modal': if (id === o.name) closeModal(); else { o.name = id as ModalName; o.body.scrollTop = 0; audio.ui('page'); render(true); } return;
+    case 'tab': if (ui.tabs[o.name] !== id) audio.ui('click'); ui.tabs[o.name] = id; ui.tech = null; o.body.scrollTop = 0; render(true); return;
     case 'region': {
       const r = o.g.st.regions[Number(id)];
       if (!r) return;
@@ -240,14 +243,14 @@ function onKey(e: KeyboardEvent) {
   const m = KEY_MODAL[k];
   if (m) {
     e.preventDefault();
-    if (m === o.name) closeModal(); else { o.name = m; o.body.scrollTop = 0; render(true); }
+    if (m === o.name) closeModal(); else { o.name = m; o.body.scrollTop = 0; audio.ui('page'); render(true); }
     return;
   }
   if (/^[1-9]$/.test(k)) {
     const i = Number(k) - 1;
     if (o.name === 'chronicle') { const f = CHRON_FILTERS[i]; if (f) { ui.chronFilter = f[0] as typeof ui.chronFilter; render(); } return; }
     const tabs = META[o.name].tabs;
-    if (tabs[i]) { e.preventDefault(); ui.tabs[o.name] = tabs[i][0]; ui.tech = null; o.body.scrollTop = 0; render(true); }
+    if (tabs[i]) { e.preventDefault(); if (ui.tabs[o.name] !== tabs[i][0]) audio.ui('click'); ui.tabs[o.name] = tabs[i][0]; ui.tech = null; o.body.scrollTop = 0; render(true); }
   }
 }
 

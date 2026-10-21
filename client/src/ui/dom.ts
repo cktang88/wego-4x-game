@@ -1,4 +1,5 @@
 import { ic, glyphHtml, iconizeHtml } from '../art/icons.ts';
+import { audio } from '../audio/audio.ts';
 
 export function h(tag: string, attrs: Record<string, string> = {}, html = ''): HTMLElement {
   const e = document.createElement(tag);
@@ -40,7 +41,10 @@ function ghostOut(el: HTMLElement, cls: string, ms: number) {
   setTimeout(() => g.remove(), ms);
 }
 
+/** Toasts that say "you can't do that" (an order or action refused) get the error blip. */
+const REFUSED = /^(⊘|⏱ No orders banked|No slot free)/;
 export function toast(msg: string) {
+  if (REFUSED.test(msg)) audio.ui('error');
   // a newer toast replaces the old one at once (it slides in on top); an expiring one fades up and away
   document.querySelectorAll('.toast').forEach(t => t.remove());
   const t = h('div', { class: 'toast' });
@@ -73,11 +77,13 @@ export function overlay(html: string, closable = true): HTMLElement {
   // The hotseat curtain is excluded: it must vanish instantly and never linger over the next player's view.
   const remove = o.remove.bind(o);
   o.remove = () => {
+    if (o.isConnected) audio.ui('close');
     if (o.isConnected && !o.classList.contains('curtain')) ghostOut(o, 'overlay-ghost', 200);
     o.dispatchEvent(new Event('fx-removed'));
     remove();
   };
   document.body.appendChild(o);
+  audio.ui('open');
   return o;
 }
 
