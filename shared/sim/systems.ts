@@ -151,7 +151,7 @@ export function systemsBlock(s: GameState, key: string, r: Region): string | nul
   const Y = SY(s);
   if (key === 'develop') {
     const cap = citizenCap(s, r)!;
-    return r.dev >= cap ? `citizens at the cap (${r.dev}/${cap})${(r.buildings.station ?? 0) ? '' : ': a Station raises it'}` : null;
+    return r.dev >= cap ? `citizens at the cap (${r.dev}/${cap})${(r.buildings.station ?? 0) || cap >= Y.maxCitizens ? '' : ': a Station raises it'}` : null;
   }
   if (key === 'station') return (r.buildings.station ?? 0) > 0 ? 'already has a Station' : null;
   if (key === 'mine' && !r.bodies.some(b => b.kind === 'belt' || b.kind === 'barren') && !r.vein)
@@ -344,8 +344,13 @@ export const aiSiteBonus = (s: GameState, r: Region, key: string): number => (1 
 // ------------------------------------------------------------------ step 3 support: tribute & orbital bodies
 /** An accepted Tribute between these two houses covers this system: they do not fight there. */
 export function tributeCovers(s: GameState, a: number, b: number, rid: RegionId): boolean {
-  const t = s.regions[rid]?.tribute;
-  return !!t && s.turn < t.until && ((t.from === a && t.to === b) || (t.from === b && t.to === a));
+  const t = tributeInForce(s, s.regions[rid]);
+  return !!t && ((t.from === a && t.to === b) || (t.from === b && t.to === a));
+}
+/** The system's Tribute while it runs (not lapsed, paid by its current owner, to a house still in the game), or null. */
+export function tributeInForce(s: GameState, r: Region | undefined): NonNullable<Region['tribute']> | null {
+  const t = r?.tribute;
+  return t && s.turn < t.until && t.from === r!.owner && s.players[t.to] && !s.players[t.to].eliminated ? t : null;
 }
 /** Index of the Station in body-tagged records (bodies hold at most 3). */
 export const BODY_STATION = 3;

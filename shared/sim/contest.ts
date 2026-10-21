@@ -25,7 +25,7 @@ import { hostile } from './combat.ts';
 import { fleetPower } from './graph.ts';
 import { soulOn, beat, headline } from './soul.ts';
 import { wpostureOf } from './signature.ts';
-import { SY, sysOn, sysAt, citizenBody, citizenCap, ledgerAdd, bodyName, tributeCovers } from './systems.ts';
+import { SY, sysOn, sysAt, citizenBody, citizenCap, ledgerAdd, bodyName, tributeCovers, tributeInForce } from './systems.ts';
 import type { Fleet, GameEvent, GameState, PlayerId, Region, RegionId } from './types.ts';
 
 type Emit = (e: GameEvent) => void;
@@ -100,7 +100,7 @@ export function systemShares(s: GameState, r: Region): Shares | null {
   if (!contestOn(s) || r.owner === null || !sysAt(s, r)) return null;
   const c = contestOf(s, r);
   const occ = r.occupied && r.occupied.by === r.owner && s.turn < r.occupied.until ? r.occupied : null;
-  const trib = r.tribute && r.tribute.from === r.owner && s.turn < r.tribute.until && s.players[r.tribute.to] && !s.players[r.tribute.to].eliminated ? r.tribute : null;
+  const trib = tributeInForce(s, r);
   if (!c && !occ && !trib) return null;
   const Y = SY(s);
   const own: Share = { o: frac(1), s: frac(1) };
@@ -145,7 +145,7 @@ export function systemStatus(s: GameState, r: Region) {
     besiegers: sh?.contest?.besiegers ?? [],
     contestedTurns: turns,
     /** Contested turns until the next refugees leave (null: not contested, or too few citizens to lose). */
-    refugeesIn: sh?.contest && r.dev > Y.refugeeMinCitizens ? Y.refugeeTurns - (turns % Y.refugeeTurns) : null,
+    refugeesIn: sh?.contest && Y.refugeeTurns > 0 && r.dev > Y.refugeeMinCitizens ? Y.refugeeTurns - (turns % Y.refugeeTurns) : null,
     occupiedLeft: sh?.occupied ? sh.occupied.until - s.turn : 0,
     occupiedScorched: !!sh?.occupied?.scorched,
     tribute: sh?.tribute ?? null,
@@ -248,7 +248,8 @@ export function tributeBlock(s: GameState, p: PlayerId, rid: unknown, phase: Off
   const r = Number.isInteger(rid) ? s.regions[rid as number] : undefined;
   if (!r || !sysAt(s, r)) return 'not a star system';
   if (r.owner === null || r.owner === p) return 'only a rival house’s system can pay tribute';
-  if (r.tribute && s.turn < r.tribute.until) return r.tribute.to === p ? 'it already pays you tribute' : 'it already pays tribute';
+  const t = tributeInForce(s, r);
+  if (t) return t.to === p ? 'it already pays you tribute' : 'it already pays tribute';
   if (!hostile(s, p, r.owner, r.id)) return 'you are at peace with them';
   const c = contestOf(s, r);
   if (!c || !c.besiegers.includes(p)) return 'you need warships in the system';
@@ -276,7 +277,7 @@ export function acceptBlock(s: GameState, q: PlayerId, rid: unknown, phase: Offe
   const r = Number.isInteger(rid) ? s.regions[rid as number] : undefined;
   if (!r) return 'no such system';
   if (r.owner !== q) return 'not your system';
-  if (r.tribute && s.turn < r.tribute.until) return 'it already pays tribute';
+  if (tributeInForce(s, r)) return 'it already pays tribute';
   if (tributeOfferer(s, r.id, phase) === null) return `no terms are on the table for ${r.name}`;
   return null;
 }
@@ -299,8 +300,10 @@ export function acceptTribute(s: GameState, q: PlayerId, rid: RegionId, pulse: n
   const a = tributeOfferer(s, rid, 'resolve')!;
   const Y = SY(s);
   r.tribute = { from: q, to: a, since: s.turn, until: s.turn + Math.max(1, Y.tributeTurns) };
+  // the siege lifts: its fleets there stop besieging, and none of its Seize routes on the system carries on (a fleet
+  // still on its way would otherwise arrive and break the terms it was just granted)
   for (const f of s.fleets) {
-    if (f.owner !== a || f.region !== rid) continue;
+    if (f.owner !== a) continue;
     if (f.siege === rid) f.siege = null;
     if (f.route?.seize === rid) f.route = null;
   }
@@ -346,6 +349,8 @@ export function contestEndTurn(s: GameState, pulse: number, emit: Emit) {
   const Y = SY(s);
   for (const r of s.regions) {
     if (r.kind === 'lane' || !r.bodies) continue;
+    // a battle winner who has left no longer holds space (also over neutral systems: a stale holder would linger)
+    if (r.spaceWon && !s.fleets.some(f => f.region === r.id && f.owner === r.spaceWon!.p && f.ships.length && !f.limping)) r.spaceWon = null;
     if (r.owner === null) { if (r.contested) delete r.contested; if (r.occupied) r.occupied = null; if (r.tribute) r.tribute = null; continue; }
     const c = contestOf(s, r);
     if (c) {
@@ -356,16 +361,16 @@ export function contestEndTurn(s: GameState, pulse: number, emit: Emit) {
       }
     } else if (r.contested) delete r.contested;
     if (r.occupied && (r.occupied.by !== r.owner || s.turn + 1 >= r.occupied.until)) r.occupied = null;
-    if (r.tribute && (r.tribute.from !== r.owner || s.turn + 1 >= r.tribute.until)) {
+    // (a Tribute to a house that has been eliminated ends quietly: nobody is left to collect it)
+    if (r.tribute && (!tributeInForce(s, r) || s.turn + 1 >= r.tribute.until)) {
       const t = r.tribute;
       r.tribute = null;
-      if (t.from === r.owner && s.players[t.to]) {
+      if (t.from === r.owner && s.players[t.to] && !s.players[t.to].eliminated && s.turn + 1 >= t.until) {
         ledgerAdd(s, r, { turn: s.turn, kind: 'paid', text: `The tribute to ${s.players[t.to].name} is paid in full.`, players: [t.from, t.to] });
         emit({ k: 'note', pulse, owner: t.from, text: `${r.name} has paid its tribute to ${s.players[t.to].name} in full.`, region: r.id });
         emit({ k: 'note', pulse, owner: t.to, text: `${r.name}'s tribute is paid in full: the terms end.`, region: r.id });
       }
     }
-    if (r.spaceWon && !s.fleets.some(f => f.region === r.id && f.owner === r.spaceWon!.p && f.ships.length && !f.limping)) r.spaceWon = null;
   }
 }
 
