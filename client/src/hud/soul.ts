@@ -232,6 +232,10 @@ export function worldSoulRows(g: GameScreen, r: Region): string {
     html += `<div class="choice"><div class="choice-h"><span>◈ Calling</span><small>choose one</small></div><div class="picks">${pc.options.map(id => {
       const c = CALLINGS[id];
       return `<button class="bigpick ${pid === id ? 'on' : ''}" data-a="calling" data-pick="${esc(id)}"${g.canPlan ? '' : ' aria-disabled="true"'}><i>${esc(c?.icon ?? '◇')}</i><b>${esc(c?.name ?? id)}</b><small>${esc(CALLING_SHORT[id] ?? '')}</small><em>${c?.from === 'mark' ? 'its history' : 'its nature'}</em></button>`;
+    }).join('')}${(pc.gated ?? []).map(x => {
+      // star systems: a calling this world would have been offered but can't take (the bodies or history it lacks)
+      const c = CALLINGS[x.id];
+      return `<button class="bigpick gated" aria-disabled="true"${tip(`${c?.name ?? x.id} ${x.why}`)}><i>${esc(c?.icon ?? '◇')}</i><b>${esc(c?.name ?? x.id)}</b><small>⊘ ${esc(x.why)}</small></button>`;
     }).join('')}</div></div>`;
   }
   // deeds (max 2), engrave

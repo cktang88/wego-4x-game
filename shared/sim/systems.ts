@@ -1,13 +1,15 @@
-// Star systems (docs/SYSTEMS.md, steps 1-2): stars and bodies, the citizens cap and growth, civil and
-// military slots, build gates, the waystation discount and the black hole's gravity well.
+// Star systems (docs/SYSTEMS.md, steps 1-4): stars and bodies, the citizens cap and growth, civil and
+// military slots, build gates, the waystation discount and the black hole's gravity well; (step 4) bodies in the
+// story: battlefields, the body-tagged ledger, body tags and Calling gates. Step 3 (Contested, Occupied,
+// Tribute) lives in contest.ts.
 // Pure helpers used by mapgen, the resolver, orders, the AI and the UI.
 //
 // Everything here is off (old behaviour) when the rules have no `systems` group, when it is disabled, or
 // when the map was generated before systems existed (no star on the Throne): see sysOn.
 import { SYSTEMS_DEFAULTS } from '../config/rules.ts';
-import { BELT_NAMES, GIANT_NAMES, HAB_ADJ, MOON_NAMES, RUIN_NAMES, type BodyKind, type BodyQuality, type StarKind, type SystemRole } from '../config/systems.ts';
+import { BELT_NAMES, BODY_TAGS, BODY_TAG_ORDER, GIANT_NAMES, HAB_ADJ, MOON_NAMES, ORBITAL, RUIN_NAMES, type BodyKind, type BodyQuality, type StarKind, type SystemRole } from '../config/systems.ts';
 import { Rng, hashString } from './rng.ts';
-import type { Body, Feature, GameEvent, GameState, PlayerId, Region, RegionId, RegionKind } from './types.ts';
+import type { Body, Feature, GameEvent, GameState, LedgerEntry, PlayerId, Region, RegionId, RegionKind } from './types.ts';
 
 export type SysRules = typeof SYSTEMS_DEFAULTS.systems;
 const cache = new WeakMap<object, SysRules>();
@@ -24,7 +26,7 @@ export function SY(s: GameState): SysRules {
   return c;
 }
 /** Systems on, and this region is a real system with a star (not a lane waypoint). */
-const sysAt = (s: GameState, r: Region | undefined): r is Region & { bodies: Body[] } =>
+export const sysAt = (s: GameState, r: Region | undefined): r is Region & { bodies: Body[] } =>
   !!r && sysOn(s) && r.kind !== 'lane' && Array.isArray(r.bodies);
 
 // ------------------------------------------------------------------ building classes
@@ -338,3 +340,118 @@ export function stationUnblocks(s: GameState, key: string, r: Region): boolean {
 }
 /** AI: value multiplier for a military/logistics project here (the waystation discount and pulsar gates make it cheaper). */
 export const aiSiteBonus = (s: GameState, r: Region, key: string): number => (1 - systemCostMult(s, r, key)) * 2;
+
+// ------------------------------------------------------------------ step 3 support: tribute & orbital bodies
+/** An accepted Tribute between these two houses covers this system: they do not fight there. */
+export function tributeCovers(s: GameState, a: number, b: number, rid: RegionId): boolean {
+  const t = s.regions[rid]?.tribute;
+  return !!t && s.turn < t.until && ((t.from === a && t.to === b) || (t.from === b && t.to === a));
+}
+/** Index of the Station in body-tagged records (bodies hold at most 3). */
+export const BODY_STATION = 3;
+const stem = (r: Region) => r.name.replace(/^The /, '');
+const hasStation = (r: Region) => (r.buildings.station ?? 0) > 0;
+/** The kind of a body index (3 = the Station), or null. */
+export function bodyKindAt(r: Region, idx: number | undefined): BodyKind | 'station' | null {
+  if (idx === undefined) return null;
+  if (idx === BODY_STATION) return hasStation(r) ? 'station' : null;
+  return r.bodies?.[idx]?.kind ?? null;
+}
+/** Is this body orbital (gas giant, belt, Station)? An index with no body (`undefined`) is open space: orbital. */
+export const isOrbitalAt = (r: Region, idx: number | undefined): boolean => { const k = bodyKindAt(r, idx); return k === null ? true : ORBITAL[k]; };
+/** A body's name ("Vel II", "the Ashen Belt", "Vel Station"), or null. */
+export function bodyName(r: Region, idx: number | undefined): string | null {
+  const k = bodyKindAt(r, idx);
+  if (k === null) return null;
+  return k === 'station' ? `${stem(r)} Station` : r.bodies![idx!].name;
+}
+const firstOf = (r: Region, kinds: BodyKind[]): number | undefined => {
+  for (const k of kinds) { const i = (r.bodies ?? []).findIndex(b => b.kind === k); if (i >= 0) return i; }
+  return undefined;
+};
+/**
+ * Where a system's people live (its citizens' output, refugees, captures, tribute): the habitable world, else a
+ * barren world or moon, else the Station, else open space (undefined).
+ */
+export function citizenBody(r: Region): number | undefined {
+  return firstOf(r, ['habitable', 'barren', 'moon', 'ruin']) ?? (hasStation(r) ? BODY_STATION : undefined);
+}
+/** The body each kind of output comes from (for the blockade split and the card's per-body rows). */
+export function outputBodies(r: Region) {
+  const vi = (r.bodies ?? []).findIndex(b => !!b.vein);
+  const vein = vi >= 0 ? vi : undefined;
+  return {
+    cit: citizenBody(r),
+    forge: firstOf(r, ['barren']),
+    mine: firstOf(r, ['belt', 'barren']) ?? vein,
+    hub: firstOf(r, ['habitable', 'gas']),
+    gas: firstOf(r, ['gas']),
+    vein,
+    depot: hasStation(r) ? BODY_STATION : undefined,
+  };
+}
+
+// ------------------------------------------------------------------ step 4: bodies in the story
+/**
+ * The deterministic battlefield of a new engagement: a siege is fought over the habitable world (else the
+ * Station); an ambush or interception at the belt; otherwise a body picked by hash. undefined when systems are off.
+ */
+export function battleBody(s: GameState, r: Region, siege: boolean): number | undefined {
+  if (!sysAt(s, r)) return undefined;
+  const pick = siege ? firstOf(r, ['habitable']) ?? (hasStation(r) ? BODY_STATION : undefined) : firstOf(r, ['belt']);
+  if (pick !== undefined) return pick;
+  const all = [...r.bodies.map((_, i) => i), ...(hasStation(r) ? [BODY_STATION] : [])];
+  return all.length ? all[hashString(`${s.seed}:${r.id}:${r.battles}:field`) % all.length] : undefined;
+}
+/** "Battle of the Ashen Belt (Vel)" (null when the battle has no body). */
+export function battleName(r: Region, body: number | undefined, kind: string, ord: string): string | null {
+  const n = bodyName(r, body);
+  return n ? `${ord}${kind} of ${n} (${r.name})` : null;
+}
+/** Add an entry to a system's ledger (needs the Soul layer's story) and count it on its body for body tags. */
+export function ledgerAdd(s: GameState, r: Region, e: LedgerEntry) {
+  if (!sysAt(s, r) || !r.story) return;
+  const L = (r.story.ledger ??= []);
+  const entry: LedgerEntry = { ...e };
+  if (entry.body === undefined) delete entry.body;
+  L.push(entry);
+  const keep = Math.max(1, SY(s).ledgerKeep);
+  if (L.length > keep) L.splice(0, L.length - keep);
+  if (e.body !== undefined && bodyKindAt(r, e.body)) {
+    const m = (r.story.bodyMarks ??= {});
+    const x = (m[String(e.body)] ??= {});
+    x[e.kind] = (x[e.kind] ?? 0) + 1;
+  }
+}
+/** A body's tag ("the Burned World"), earned after bodyTagEvents events there; at most one per body. */
+export function bodyTag(s: GameState, r: Region, idx: number): string | null {
+  if (!sysAt(s, r)) return null;
+  const k = bodyKindAt(r, idx);
+  const m = r.story?.bodyMarks?.[String(idx)];
+  if (!k || !m) return null;
+  const total = BODY_TAG_ORDER.reduce((a, k) => a + (m[k] ?? 0), 0);
+  if (total < Math.max(1, SY(s).bodyTagEvents)) return null;
+  let best: string | null = null;
+  for (const kind of BODY_TAG_ORDER) if ((m[kind] ?? 0) > 0 && (best === null || m[kind] > m[best])) best = kind;
+  return best ? BODY_TAGS[best]?.[k] ?? null : null;
+}
+/** "Vel II, the Burned World" (or just the name). */
+export function taggedBodyName(s: GameState, r: Region, idx: number): string {
+  const n = bodyName(r, idx) ?? '?';
+  const t = bodyTag(s, r, idx);
+  return t ? `${n}, ${t}` : n;
+}
+
+/** Why this world can't take that Calling (star systems: the bodies or history it lacks), or null. */
+export function callingGate(s: GameState, r: Region, id: string): string | null {
+  if (!sysAt(s, r) || SY(s).callingGates === false) return null;
+  const B = r.bodies;
+  switch (id) {
+    case 'granary': return B.some(b => b.kind === 'habitable') ? null : 'needs a habitable world';
+    case 'refinery': return B.some(b => b.kind === 'belt' || b.kind === 'gas') || r.vein ? null : 'needs a belt, gas giant or vein';
+    case 'oracle': return B.some(b => b.kind === 'ruin') || r.star === 'pulsar' ? null : 'needs a ruin or a pulsar';
+    case 'arsenal': return (r.buildings.shipyard ?? 0) > 0 ? null : 'needs a shipyard';
+    case 'cenotaph': { const n = SY(s).cenotaphBattles; return r.battles >= n ? null : `needs ${n} battles fought here (${r.battles} so far)`; }
+  }
+  return null;
+}

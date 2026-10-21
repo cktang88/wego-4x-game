@@ -1,6 +1,8 @@
 // Chronicle modal (☰): a timeline, newest turn first. Each turn: ▶ replay, its battles (open the
 // battle viewer), and its entries as icon + first sentence (click to read the rest).
 import type { BattleReport, ChronicleEntry } from '../../../shared/sim/types.ts';
+import { BODIES, STATION } from '../../../shared/config/systems.ts';
+import { bodyKindAt, taggedBodyName } from '../../../shared/sim/systems.ts';
 import { openBattleViewer } from '../render/battle.ts';
 import { type Ctx, ui, esc } from './modal-util.ts';
 
@@ -13,6 +15,8 @@ function clip(t: string, words = 10): { short: string; more: boolean } {
 }
 function entryIcon(e: ChronicleEntry): string {
   const t = e.text;
+  if (/^Refugees/.test(t)) return '⇢';
+  if (/tribute/i.test(t)) return '⚖';
   if (/battle|ends after|ships destroyed|held the field|defenders held|razes/i.test(t)) return '⚔';
   if (/takes .* from|claims|breaks its pact|is no more/i.test(t)) return '⚔';
   if (/defects|joins .* without/i.test(t)) return '✦';
@@ -73,7 +77,11 @@ export function chronicleBody(c: Ctx): string {
       const open = ui.chronOpen.has(k);
       const { short, more } = clip(e.text);
       const col = e.players.length === 1 ? g.color(e.players[0]) : e.players.length === 2 ? g.color(e.players[0]) : 'var(--m-line2)';
-      return `<div class="ce ${e.major ? 'major' : ''} ${open ? 'open' : ''}" style="--pc:${esc(col)}"><button class="ce-b" data-a="chron-x" data-id="${k}"${more ? '' : ' data-static'}><span class="ce-ic">${entryIcon(e)}</span><span class="ce-t">${esc(open ? e.text : short)}</span>${more ? `<span class="ce-more">${open ? '−' : '+'}</span>` : ''}</button>${e.region !== undefined ? `<button class="ce-go" data-a="region" data-id="${e.region}" title="Show on map" aria-label="Show on map">◎</button>` : ''}</div>`;
+      // star systems: the body it happened on, with its tag once earned ("Vel II, the Burned World")
+      const reg = e.region !== undefined ? st.regions[e.region] : undefined;
+      const bk = reg && e.body !== undefined ? bodyKindAt(reg, e.body) : null;
+      const bodyChip = reg && bk ? `<span class="ce-body" title="${esc(`${taggedBodyName(st, reg, e.body!)} (${reg.name})`)}"><i>${bk === 'station' ? STATION.icon : BODIES[bk].icon}</i>${esc(taggedBodyName(st, reg, e.body!))}</span>` : '';
+      return `<div class="ce ${e.major ? 'major' : ''} ${open ? 'open' : ''}" style="--pc:${esc(col)}"><button class="ce-b" data-a="chron-x" data-id="${k}"${more ? '' : ' data-static'}><span class="ce-ic">${entryIcon(e)}</span><span class="ce-t">${esc(open ? e.text : short)}${bodyChip}</span>${more ? `<span class="ce-more">${open ? '−' : '+'}</span>` : ''}</button>${e.region !== undefined ? `<button class="ce-go" data-a="region" data-id="${e.region}" title="Show on map" aria-label="Show on map">◎</button>` : ''}</div>`;
     }).join('');
     return `<section class="ct"><header class="ct-h"><span class="ct-n"><small>${T}</small><b>${turn}</b></span><button class="mbtn m-ghost sm" data-a="replay" data-id="${turn}" title="Replay ${T.toLowerCase()} ${turn}">▶ Replay</button><span class="ct-bs">${battles}</span></header>
       ${entries ? `<div class="ct-es">${entries}</div>` : bsShown.length ? '' : `<div class="ct-es"><div class="dim ce-quiet">Quiet</div></div>`}</section>`;

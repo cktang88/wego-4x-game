@@ -3,6 +3,7 @@
 //   npm run sim -- --games 60 --suite      (runs the three standard skill matchups)
 import { createGame, resolveTurn, planTurn, type GameState } from '../shared/index.ts';
 import { styleOf } from '../shared/sim/ai-empire.ts';
+import { systemStatus } from '../shared/sim/contest.ts';
 
 const args = process.argv.slice(2);
 const arg = (k: string, d: string) => { const i = args.indexOf(`--${k}`); return i >= 0 ? args[i + 1] : d; };
@@ -58,6 +59,9 @@ for (const lvStr of suite) {
   const postureN: Record<string, Record<string, number>> = {}, fleetTurns: Record<string, number> = {};
   const outcomeN: Record<string, Record<string, number>> = {}, fateN: Record<string, Record<string, number>> = {};
   const bumpL = (m: Record<string, Record<string, number>>, l: string, k: string, n = 1) => { (m[l] ??= {})[k] = (m[l][k] ?? 0) + n; };
+  // ---- star systems step 3: contested / occupied / tribute
+  const sysN: Record<string, number> = {};
+  const bumpSys = (k: string, n = 1) => { sysN[k] = (sysN[k] ?? 0) + n; };
   const t0 = Date.now();
   for (let g = 0; g < games; g++) {
     // rotate seats so map position doesn't bias the level comparison
@@ -72,6 +76,7 @@ for (const lvStr of suite) {
         for (const fa of subs[p.id].free) {
           if (fa.type === 'posture') bumpL(postureN, p.aiLevel, fa.posture);
           if (fa.type === 'wposture') bumpL(postureN, p.aiLevel, `w:${fa.posture}`);
+          if (fa.type === 'tribute') bumpSys(fa.accept ? 'tribute accepts sent' : 'tribute offers');
         }
         for (const o of subs[p.id].orders) { const k = o ? o.type : 'none'; (orderMix[p.aiLevel] ??= {})[k] = (orderMix[p.aiLevel][k] ?? 0) + 1; }
       }
@@ -103,6 +108,20 @@ for (const lvStr of suite) {
         if (e.k === 'build') { const l = s.players[e.owner].aiLevel; (builds[l] ??= {})[e.cls] = (builds[l][e.cls] ?? 0) + 1; }
       }
       for (const b of s.last!.battles) shipsLost += Object.values(b.losses).reduce((a, x) => a + x, 0);
+      for (const e of s.last!.events) {
+        if (e.k === 'note' && e.text.startsWith('Refugees')) bumpSys('refugees');
+        if ((e.k === 'soul' || e.k === 'note') && e.owner === null && e.text.includes('paid tribute to')) bumpSys('tributes accepted');
+        if (e.k === 'soul' && e.kind === 'oath' && e.text.includes('tribute')) bumpSys('tributes broken');
+      }
+      for (const r of s.regions) {
+        if (r.owner === null || !r.bodies) continue;
+        const st = systemStatus(s, r);
+        if (st.contested) bumpSys('contested system-turns');
+        if (st.blockaded) bumpSys('blockaded system-turns');
+        if (st.plunderers.length) bumpSys('plundered system-turns');
+        if (st.occupiedLeft > 0) bumpSys('occupied system-turns');
+        if (st.tribute) bumpSys('tribute system-turns');
+      }
       if (s.turn - 1 === 6) {
         const srt = s.players.slice().sort((a, b) => b.vp - a.vp);
         if (srt[0].vp - srt[1].vp >= 6) leaderT6 = srt[0].id;
@@ -178,5 +197,6 @@ for (const lvStr of suite) {
   console.log(`soul (combos=${combos}) per game:`, Object.fromEntries(Object.entries(soulN).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, +(v / games).toFixed(2)])));
   console.log('boon seats & win% (fair share 33%):', Object.entries(boonSeats).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}:${Math.round(100 * (boonWins[k] ?? 0) / n)}%`).join(' | '));
   if (verbose || args.includes('--traits')) console.log('ship traits by yard world:', JSON.stringify(Object.fromEntries(Object.entries(traitDist).map(([k, m]) => [k, Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([t, n]) => `${t}:${n}`).join(' ')]))));
+  console.log('systems (step 3) per game:', Object.fromEntries(Object.entries(sysN).map(([k, v]) => [k, +(v / games).toFixed(2)])));
   console.log(`relics/game ${(relics / games).toFixed(1)} | warden woke ${warden}/${games} (killed ${wardenKilled}) | pacts ${pacts} | betrayals ${betrayals} | margin ${avg(vpSpread)} VP | decided-by-T6 ${earlyDecided}/${games}`);
 }

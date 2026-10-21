@@ -55,7 +55,19 @@ export interface Region {
   bodies?: Body[];
   /** Turns of uncontested growth banked toward the next citizen (public). */
   growth?: number;
+  // ---- Contested / Occupied / Tribute (docs/SYSTEMS.md step 3; shared/sim/contest.ts). Public. Absent = none.
+  /** Consecutive contested turns so far (an enemy fleet in the system, the system not yet fallen). */
+  contested?: number;
+  /** Who won the last battle fought here (space control while they still have ships here). */
+  spaceWon?: { p: PlayerId | -1; turn: number } | null;
+  /** Just captured: the new owner gets `occupiedShare` of the output while s.turn < until (0 if scorched). */
+  occupied?: { by: PlayerId; until: number; scorched?: boolean } | null;
+  /** Accepted Tribute: `to` takes `tributeShare` of the output while s.turn < until; the two don't fight here. */
+  tribute?: Tribute | null;
 }
+
+/** Tribute terms in force over one system: `from` (its owner) pays `to` (the besieger it bought off). */
+export interface Tribute { from: PlayerId; to: PlayerId; since: number; until: number }
 
 /** A body in a star system: economy and story, never a movement target. */
 export interface Body {
@@ -215,13 +227,21 @@ export interface RegionStory {
   owners: { p: PlayerId | null; turn: number; how: string }[];   // chronicle of hands it passed through
   epithet: string | null;              // automatic, from the strongest mark
   calling: { id: string; since: number; dormantUntil?: number } | null;
-  /** A calling waiting to be chosen (private to the owner): FreeAction {type:'calling'}. */
-  pendingCalling?: { options: string[]; since: number; owner: PlayerId } | null;
+  /** A calling waiting to be chosen (private to the owner): FreeAction {type:'calling'}. `gated`: callings this
+   *  world would have been offered but can't take (star systems: the bodies or history it lacks), for the picker. */
+  pendingCalling?: { options: string[]; since: number; owner: PlayerId; gated?: { id: string; why: string }[] } | null;
+  /** Star systems: what happened here, newest last (capped), each optionally on a body. */
+  ledger?: LedgerEntry[];
+  /** Star systems: events per body (key: body index, 3 = the Station) and kind, for body tags. */
+  bodyMarks?: Record<string, Record<string, number>>;
   tenureFrom: number;                  // the current owner's continuous tenure counts from this turn
   deeds: Deed[];
   lost?: { p: PlayerId; turn: number; tenure: number; calling: { id: string; since: number } | null } | null;  // for Liberation
   captured?: { by: PlayerId; from: PlayerId | null; turn: number } | null;   // for Razing
 }
+
+/** A system ledger entry. `body`: index into Region.bodies, or 3 for the Station (BODY_STATION). */
+export interface LedgerEntry { turn: number; kind: string; text: string; body?: number; players?: PlayerId[] }
 
 export interface BloodDebt { id: number; turn: number; debtor: PlayerId; creditor: PlayerId; killer: string; victim: string; fleet: string; region: RegionId; cleared?: number | null }
 export interface Headline { text: string; kind: string; region?: RegionId; players: PlayerId[]; drama: number; public: boolean; seenBy?: PlayerId[] }
@@ -263,6 +283,10 @@ export interface Engagement {
   joined?: Record<number, number>;      // fleet id -> engagement round count when it joined (its first round is the next)
   /** Signature: owners who spent a battle Fate (Last Stand / Twist of Fate) in this engagement (one per side). */
   fate?: number[];
+  /** Star systems: the body it is fought over (index into Region.bodies, 3 = the Station). */
+  body?: number;
+  /** Star systems: it began as a siege (a besieger was present). */
+  siege?: boolean;
 }
 
 /** LIVE mode: a fleet in transit. It gains `speed` movement points per tick and steps one region per `stepCost`. */
@@ -316,6 +340,9 @@ export interface Player {
   fateSpent?: { turn: number; n: number } | null;
   /** Postures of this house that rivals have seen revealed (public history: how often it braces, charges, lies in wait...). */
   postureLog?: Record<string, number>;
+  // ---- Star systems (Tribute): systems this house offered terms over this turn / last turn (answerable this turn)
+  tributeOffers?: RegionId[];
+  prevTributeOffers?: RegionId[];
 }
 
 export interface Edict {
@@ -365,7 +392,8 @@ export type FreeAction =
   | { type: 'dispatch'; text: string; as?: 'house' | 'source' }  // Soul: plant one dispatch in the next Herald
   | { type: 'posture'; fleet: FleetId; posture: Posture }        // Signature: this turn's fleet posture (secret)
   | { type: 'wposture'; region: RegionId; posture: WorldPosture } // Signature: this turn's posture for a system you own (secret)
-  | { type: 'fate'; use: FateUse; fleet?: FleetId; region?: RegionId };  // Signature: spend a Fate token (public)
+  | { type: 'fate'; use: FateUse; fleet?: FleetId; region?: RegionId }  // Signature: spend a Fate token (public)
+  | { type: 'tribute'; region: RegionId; accept?: boolean };            // Star systems: offer terms over a system you besiege / accept them for your own
 
 export interface Submission {
   orders: OrderSlots;
@@ -441,7 +469,7 @@ export interface Signal {
   confidence: 'confirmed' | 'inferred';
 }
 
-export interface ChronicleEntry { turn: number; text: string; players: PlayerId[]; region?: RegionId; major?: boolean }
+export interface ChronicleEntry { turn: number; text: string; players: PlayerId[]; region?: RegionId; major?: boolean; body?: number }
 
 // ------------------------------------------------------------------- state
 export interface GameState {

@@ -50,6 +50,10 @@ function cards(st: GameState, tab: string): Card[] {
       ...(R.systems?.enabled !== false && st.regions[0]?.star ? [
         { ic: '☉', t: 'Star systems', b: ['Each world is a system: a star and up to 3 bodies.', `<b>Citizens</b> cap comes from bodies + star (max ${R.systems.maxCitizens}).`, `A quiet <b>Core</b> grows a citizen every ${R.systems.growthEvery} turns.`, 'Civil slots come from bodies; a <b>Station</b> adds one.'] },
         { ic: '⛯', t: 'Gates & slots', b: [`Shipyard: ${R.systems.shipyardCitizens} citizens or a Station. Academy: ${R.systems.academyCitizens}.`, `Military slots: ${R.systems.milSlots}, +${R.systems.chokeSlots} at chokepoints.`, `Waystations (≤${R.systems.waystationCitizens} citizen): forts and depots −${Math.round(R.systems.waystationDiscount * 100)}%.`, 'A black hole stops every fleet entering it.'] },
+        ...(R.systems.contested !== false ? [
+          { ic: '⛓', t: 'Contested', b: ['An enemy warship in your system: <b>contested</b>, no growth.', `Whoever holds space takes the <b>orbitals</b> (gas giant, belt, Station): an attacker plunders ${Math.round((R.systems.plunderShare ?? 0.5) * 100)}%.`, `Lose space and the <b>surface</b> is blockaded: ⚙¢ ${Math.round((R.systems.blockadeIndustry ?? 0.5) * 100)}%, no ✦.`, `Every ${R.systems.refugeeTurns ?? 3} contested turns a citizen flees as <b>refugees</b>.`] },
+          { ic: '⚖', t: 'Occupied & Tribute', b: [`Just taken from a house: <b>Occupied</b>, ${Math.round((R.systems.occupiedShare ?? 0.5) * 100)}% for ${R.systems.occupiedTurns ?? 3} turns.`, 'A capture’s lost citizen flees to its old owner.', `A besieger may <b>offer terms</b>: accept next turn, pay ⅓ for ${R.systems.tributeTurns ?? 5} turns, the siege lifts.`, 'Attacking it after: <b>Oathbreaker</b>.'] },
+        ] : []),
       ] : []),
       { ic: '⚛', t: 'Veins & supply', b: ['⚛ Antimatter: Cruisers, Dreadnoughts. ◆ Crystals: Shields, Gates.', 'An <b>Extractor</b> on a connected vein gives access.', '<b>Cut off</b> from your capital: half yield, veins dark.', 'Out of supply, fleets stop repairing and wear down.'] },
     ];

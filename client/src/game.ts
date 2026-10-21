@@ -755,6 +755,7 @@ export class GameScreen {
       case 'calling': return `${this.st.regions[x.region]?.name ?? '?'}: calling`;
       case 'raze': return `Raze ${this.st.regions[x.region]?.name ?? '?'}`;
       case 'dispatch': return `Dispatch: “${x.text.slice(0, 40)}”`;
+      case 'tribute': return `${x.accept ? 'Accept terms over' : 'Offer terms over'} ${this.st.regions[x.region]?.name ?? '?'}`;
       default: return empireFreeText(x, cls => this.st.rules.ships[cls]?.name ?? cls) ?? (x as { type: string }).type;
     }
   }

@@ -43,7 +43,7 @@ if (!liveTicks) {
       for (const p of s.players) {
         subs[p.id] = plan(s, p.id);
         for (const o of subs[p.id].orders) if (o) bump(issued, p.aiLevel, o.type);
-        for (const f of subs[p.id].free) if (['research', 'posture', 'wposture', 'fate'].includes(f.type)) bump(issued, p.aiLevel, f.type);
+        for (const f of subs[p.id].free) if (['research', 'posture', 'wposture', 'fate', 'tribute'].includes(f.type)) bump(issued, p.aiLevel, f.type);
       }
       s = resolveTurn(s, subs);
       for (const e of s.last!.events) if (e.k === 'fail' && e.owner >= 0) {

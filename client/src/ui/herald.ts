@@ -13,6 +13,7 @@ const KIND_ICON: Record<string, string> = {
   vow_sworn: '✠', oath: '✗', coronation: '♛', relic: '✧', capital: '♜', capture: '⚑', razed: '♨', liberated: '☼', battle: '⚔',
   honour: '❖', legend: '★', retired: '⚑', eliminated: '✝', founded: '⚑', quiet: '☾', calling: '◈', deed: '◆', fate: '✪', fate_bonus: '✪',
   p_called: '✓', p_caught: '✗', p_ambush: '◉', p_broken: '⚡', p_exposed: '◌', p_scorched: '♨', p_levies: '⚑',
+  tribute: '⚖', tribute_offer: '⚖', refugees: '⇢',
 };
 export const headlineIcon = (k: string) => KIND_ICON[k] ?? (k.startsWith('p_') ? '◉' : '•');
 

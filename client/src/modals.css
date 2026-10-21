@@ -374,6 +374,8 @@
 .ce-b[data-static] { cursor: default !important; }
 .ce-ic { flex: none; width: 24px; text-align: center; font-size: 17px; color: var(--m-dim); }
 .ce-t { flex: 1; font-size: 15.5px; line-height: 1.3; }
+.ce-body { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; padding: 0 7px; border-radius: 9px; font-size: 12px; font-style: italic; color: #e6c98a; background: rgba(214, 173, 98, 0.1); border: 1px solid rgba(214, 173, 98, 0.3); white-space: nowrap; vertical-align: 1px; }
+.ce-body i { font-style: normal; }
 .ce-more { color: var(--m-faint); font-weight: 700; font-size: 18px; }
 .ce.major .ce-t { font-weight: 700; color: #fff; }
 .ce.major .ce-ic { color: var(--m-gold); }

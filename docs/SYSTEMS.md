@@ -163,9 +163,9 @@ a wanted project (`stationUnblocks`), and values military/logistics projects hig
   it, so their Develop costs are unchanged.
 - The antimatter vein's gas giant pays the gas giant's +4¢ (a small new income on that contested border system).
 - Not built (deliberately): red dwarf "dim" (fog change), black hole relic magnet, gas giant fuel/Depot/repair,
-  belt hiding evasive fleets, Ruin/Oracle gates, per-pip role yields (yield is still the old per-development
-  multiplier), fleet crews, capture refugees / raze cap −1 (step 3), Contested/Occupied/Tribute (step 3), body-tagged
-  ledger and Calling gates (step 4). Role badges are on the card, not on the map.
+  belt hiding evasive fleets, per-pip role yields (yield is still the old per-development multiplier), fleet crews,
+  raze cap −1. Role badges are on the card, not on the map. (Refugees, Contested/Occupied/Tribute, the body-tagged
+  ledger and the Calling gates: built in steps 3 and 4, below.)
 
 **Balance** (`scripts/simulate.ts`, 45 games per run; before → after).
 - expert/standard/novice (seed 1000): expert wins 29 → 36 of 45; game length 23.0 → 21.5 turns; styles turtle 25% → 41%,
@@ -175,3 +175,100 @@ a wanted project (`stationUnblocks`), and values military/logistics projects hig
 - Projects per game (expert×3): Develop 9 → 4 plus ~21 free growth citizens; Stations ~1; Depots 1.4 → 3.4–4.1 (the
   waystation discount); Mines and Trade Hubs about the same.
 - `scripts/ai-audit.ts`: wasted orders 0.2% expert / 0.5% standard / 0.3% novice (fogged view the same).
+
+## As built (steps 3 and 4)
+Code: `shared/sim/contest.ts` (Contested, Occupied, Tribute, refugees), step-4 helpers in `shared/sim/systems.ts`
+(`battleBody`, `battleName`, `ledgerAdd`, `bodyTag`, `callingGate`, `outputBodies`, `tributeCovers`), `callingOffer` in
+`shared/sim/soul.ts`, `regionYield` in `shared/sim/resolve.ts`. Knobs: `rules.systems` (`contested`, `plunderShare`,
+`blockadeIndustry/Credits/Influence`, `refugeeTurns`, `refugeeMinCitizens`, `occupiedTurns`, `occupiedShare`,
+`tributeTurns`, `tributeShare`, `bodyTagEvents`, `callingGates`, `cenotaphBattles`, `ledgerKeep`). Client:
+`client/src/hud/systems.ts` (status line, per-body output, Tribute controls, notes), the blockade ring and tags in
+`drawSystemMarks`, gated callings in the picker, body chips in the Chronicle, Herald icons.
+
+**Switch.** Step 3 runs when `contestOn(s)` = `sysOn(s)` and `rules.systems.contested !== false`; step 4 when `sysOn(s)`
+(Calling gates also need `callingGates !== false`). Old saves, old maps (no stars), rules without `systems`, and
+`contested: false` + `callingGates: false` play exactly as before (the sim with both off reproduces the step-2
+numbers to the VP).
+
+**Contested** (`contestOf`): an owned system with a hostile warship in it (armed, not a lone scout, not limping; the
+same test as supply blockades). Space holder: the winner of the last finished battle there (`Region.spaceWon`) if it
+still has ships there; else the larger fleet strength (fleets only; the garrison holds the surface, not space; ties go
+to the owner if it has ships there); two mutually hostile besiegers and no other holder: nobody. Shares
+(`systemShares`, per resource, applied in `incomeDetail`):
+- Orbital output (gas giant, belt, Station, and output with no body such as a Depot) goes to the holder. Attacker:
+  `plunderShare` (50%) split between it and its allied (pact) besiegers present; the rest is lost. Nobody: all lost.
+  The Warden takes nothing.
+- Surface output: the owner's. While the owner does **not** hold space it is blockaded: industry ×50%, credits ×50%
+  ("credits can't leave": half reach the treasury), influence 0. Holding space yourself means no blockade.
+- The contested system's own supply cut-off halving is replaced by this split (no double halving); its vein already
+  goes dark through the existing supply rule. No citizen growth (as before).
+- `Region.contested` counts consecutive contested turns; every `refugeeTurns` (3) a citizen flees (never below
+  `refugeeMinCitizens`).
+
+**Output attribution** (`regionYield().parts`): citizens' yield, callings and laws on the habitable world (else
+barren, moon, ruin, Station, open space); Mines and the blue-giant bonus on the belt (else barren world or vein);
+Trade Hubs on the habitable world (else gas giant); the gas giant's credits on it; an Extractor on its vein's body;
+a Depot on the Station (else open space). Held systems keep the old totals exactly; only the split uses the parts.
+
+**Refugees** (`resettle`): the citizen goes to the old owner's nearest system (BFS over links, ties by id) with room
+(citizens < cap) that isn't contested; else it is lost. Both ledgers record it, the chronicle names the haven, and the
+Herald prints `refugees` / `refugees_lost`.
+
+**Capture** (`onCaptureContest`): the existing war-scar citizen (force captures, not Crowns/Throne/Thrice-Taken) **is**
+the refugee pip: no second loss. Occupied: `{ by, until: turn + occupiedTurns }`, the owner gets `occupiedShare` (50%)
+of everything while `turn < until` (0% after a Scorched Earth capture). It lasts as long as the Calling's dormancy
+(both 3), so the two end together; no Occupation on a Liberation, an influence defection or a neutral capture. A
+capture ends any Tribute and gives the taker space control.
+
+**Tribute.** Free action `{type:'tribute', region}` (offer) and `{type:'tribute', region, accept:true}`. Offers live in
+`Player.tributeOffers` / `prevTributeOffers`, rotated at the start of a turn exactly like pact offers; views show them
+only to the besieged owner. Offer (`tributeBlock`): a rival house's system your warships contest, no Tribute in
+force. Accept (`acceptBlock`): the next turn (WEGO resolution reads last turn's list; LIVE either), while the offerer
+still has warships there (largest force wins if several). Then: `Region.tribute = { from, to, since, until: turn +
+tributeTurns }`; the besiegers' siege flags and Seize routes clear; the two houses are not hostile **in that system**
+(`hostile(s, a, b, rid)`; combat, blocking, guards, captures and contest checks pass the region) and the recipient
+takes `tributeShare` (⅓) of the system's output (after any other split) for 5 turns. Ledger: "Vel paid tribute to
+Kith."; chronicle; public Herald `tribute`. A Seize on it by the recipient breaks it (`breakTribute`): −`pactBreakVp`,
+Oathbreaker with the terms as the words, a `betrayal` event, the Herald's `tribute_broken`. It ends early if the system
+changes hands; when paid in full the ledger says so.
+
+**Interactions.** Scorched Earth (the owner's world posture this turn) denies plunder that turn and makes a capture's
+Occupation pay nothing; its bet settles as before. Levies called in vain idle the whole system (nobody gets
+anything). Postures, dug-in and exposed fleets are untouched.
+
+**Step 4.** `Engagement.body` / `siege`: a siege is fought over the habitable world, else the Station; any other battle
+(ambush, interception) at the belt; otherwise a body by hash of seed, system and battle count. Names: "Battle of the
+Ashen Belt (Vel)", "2nd Siege of Vel II (Vel)" (border clashes and old maps keep their names); the Herald's battle
+headline uses the same field. `RegionStory.ledger` (capped at `ledgerKeep`) gets battles/sieges (on their body),
+captures, refugees, refuge, tribute, betrayal and paid entries; `ChronicleEntry.body` tags battle, refugee and
+tribute lines. `RegionStory.bodyMarks` counts events per body (3 = the Station); a body with `bodyTagEvents` (2)+
+events earns one tag from its commonest kind (`BODY_TAGS`: battle → "the Burned World", "the Graveyard Belt"...;
+siege, capture, refugees, refuge, tribute), shown as "Vel II, the Burned World". Calling gates (`callingGate`):
+Granary a habitable world; Refinery a belt, gas giant or vein; Oracle a ruin or pulsar; Arsenal a shipyard; Cenotaph
+`cenotaphBattles` (2) battles fought here (`Region.battles`). `callingOffer` keeps both natural options when valid,
+lists blocked ones in `pendingCalling.gated` (shown greyed with the reason), and replaces each with the first valid
+fallback (trait side: Refinery, Granary, Arsenal, Bastion; history side: Oracle, Cenotaph, Proving Ground, Bulwark),
+so there are always two valid choices. Existing callings are grandfathered. The AI picks from `options` only.
+
+**AI.** Offers terms where it holds space but its assault odds are under 50% (not novice); accepts when the assault
+would likely win (≥ 45%) or it is blockaded with no relief within two jumps (≥ 1.1× the besieger) on a Core or a
+system with citizens to lose; never Seizes a system that pays it tribute. Experts add half the target's orbital
+output as plunder value to a Seize (and take sieges of rich orbitals at 55% odds instead of 60%); moving to break a
+blockade on its own system (a fight it wins) gains value, most on Cores.
+
+**Deviations.**
+- Occupation applies to captures from a house only (neutral colonies would slow early expansion); influence
+  defections and Liberations are never occupied.
+- The garrison doesn't hold space; the owner needs ships there. A contested system that the owner holds is not
+  blockaded (a blockade needs space control): only growth pauses and the refugee count runs.
+- "Credits can't leave" is read as: blockaded surface credits at 50% (knob), influence 0.
+- Tribute makes the two houses non-hostile only in that system; it doesn't touch house-level pacts.
+
+**Balance** (`scripts/simulate.ts`, 45 games per run, before → after).
+- expert/standard/novice: seed 1000 expert 36 → 27 wins, seed 4000 26 → 35 (seed noise); pooled 90 games
+  expert 62 → 62, standard 25 → 23, novice 3 → 5. Game length 21.5 → 21.6 and 20.7 → 20.7 turns.
+- expert×3, seeds 1000 + 7000 pooled (90 games): warlord 35% → 36%, turtle 28% → 33%, trader 36% → 29%, raider
+  35% → 35%; game length 21.6 → 22.2 turns.
+- Per expert×3 game: ~6.5 contested system-turns (4.5 blockaded, 3.6 plundered), ~23 occupied system-turns,
+  ~2.4 refugee moves, ~1.1 tribute offers, ~0.08 accepted.
+- `scripts/ai-audit.ts --games 20`: wasted orders 0.6% expert / 0.5% standard / 0.3% novice.

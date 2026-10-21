@@ -34,6 +34,9 @@ export function helpHtml(st: GameState): string {
     <li>Every world is a <b>star system</b>: a star and up to three bodies (habitable worlds, gas giants, belts, moons, barren worlds, ruins). Its <b>role</b> (Core, Forge, Harbor, Waystation) is read from its bodies, never chosen.</li>
     <li><b>Citizens</b> (development) have a cap from the bodies and the star. An uncontested Core grows a citizen every few turns; Develop still buys one. A Shipyard needs 2 citizens (or a Station), an Academy 3.</li>
     <li>Civil buildings take a slot from a body (a Mine needs a belt, barren world or vein; a Trade Hub a habitable world or gas giant); a <b>Station</b> adds a slot and a citizen. Military buildings have 2 slots (3 at chokepoints) and cost 30% less at a Waystation. Black holes stop fleets passing through; pulsars see further and make Warp Gates cheaper.</li>
+    <li>An enemy warship in your system makes it <b>contested</b>: no growth, and whoever holds space (the last battle's winner if still there, else the bigger fleet) takes the orbital output (gas giants, belts, a Station): an attacker plunders half. Without space your surface is <b>blockaded</b> (half industry and credits, no influence), and every 3 contested turns a citizen flees as <b>refugees</b> to your nearest system with room.</li>
+    <li>A system just taken from a house is <b>Occupied</b>: half its output for 3 turns. A besieger can <b>offer terms</b>; accept them the next turn and the siege lifts while you pay a third of its output for 5 turns. Attacking it afterwards breaks the terms: Oathbreaker.</li>
+    <li>Battles are fought over a body (“Battle of the Ashen Belt”); a body that sees two or more events earns a name (“Vel II, the Burned World”). A <b>Calling</b> needs the right ground: Granary a habitable world, Refinery a belt, gas giant or vein, Oracle a ruin or pulsar, Arsenal a shipyard, Cenotaph two battles.</li>
   </ul>
   <h2>Worlds with a story</h2>
   <ul>

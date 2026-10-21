@@ -51,6 +51,9 @@ export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
     pl.res = { industry: -1, credits: -1, influence: -1 };
     pl.pactOffers = (pl.pactOffers ?? []).filter(x => x === p);
     pl.prevPactOffers = (pl.prevPactOffers ?? []).filter(x => x === p);
+    // star systems: Tribute terms are for the besieged system's owner only
+    if (pl.tributeOffers) pl.tributeOffers = pl.tributeOffers.filter(rid => s.regions[rid]?.owner === p);
+    if (pl.prevTributeOffers) pl.prevTributeOffers = pl.prevTributeOffers.filter(rid => s.regions[rid]?.owner === p);
     pl.reserveCommanders = [];
     // sworn words on a pact offer are for its addressee only
     if (pl.pactWords) pl.pactWords = Object.fromEntries(Object.entries(pl.pactWords).filter(([k]) => Number(k) === p));

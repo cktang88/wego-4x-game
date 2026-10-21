@@ -21,6 +21,7 @@ import { researchBlock, techCost, opposite, blueprintFor, baseHp, hasTech, moveN
 import { MODULE } from '../config/empire.ts';
 import { postureBlock, wpostureBlock, fateBlock, SG } from './signature.ts';
 import type { FreeAction, GameState, LiveState, Order, PlayerId, Ship, TurnResult } from './types.ts';
+import { acceptBlock, tributeBlock } from './contest.ts';
 
 export const LIVE_SPEEDS: Record<string, { label: string; mult: number; desc: string }> = {
   normal: { label: 'Normal', mult: 1, desc: 'A tick every 30 min, an order every 4 h. Plays out over days.' },
@@ -249,7 +250,7 @@ export function queueFree(s: GameState, pid: PlayerId, fa: FreeAction): string |
     x.type === fa.type && (
       fa.type === 'doctrine' || fa.type === 'rename' || fa.type === 'honour' || fa.type === 'vow' || fa.type === 'posture' ? (x as { fleet: number }).fleet === fa.fleet
       : fa.type === 'blueprint' ? (x as { cls: string }).cls === fa.cls
-      : fa.type === 'calling' || fa.type === 'raze' || fa.type === 'wposture' ? (x as { region: number }).region === fa.region
+      : fa.type === 'calling' || fa.type === 'raze' || fa.type === 'wposture' || fa.type === 'tribute' ? (x as { region: number }).region === fa.region
       : fa.type === 'fate' ? (x as { fleet?: number; region?: number }).fleet === fa.fleet && (x as { region?: number }).region === fa.region
       : fa.type === 'dispatch');   // a newer dispatch replaces the queued one
   const i = list.findIndex(same);
@@ -280,6 +281,11 @@ export function queueFree(s: GameState, pid: PlayerId, fa: FreeAction): string |
     }
     case 'wposture': {
       const b = wpostureBlock(s, pid, fa.region, fa.posture);
+      if (b) return b;
+      break;
+    }
+    case 'tribute': {
+      const b = fa.accept ? acceptBlock(s, pid, fa.region) : tributeBlock(s, pid, fa.region);
       if (b) return b;
       break;
     }
@@ -356,7 +362,7 @@ export function runTick(s0: GameState, isAI: (pid: PlayerId) => boolean): GameSt
       const pref = L.tick % 3 === 2 ? Math.min(opts.length - 1, 1 + ((L.tick / 3) | 0) % Math.max(1, opts.length - 1)) : 0;
       for (const o of [opts[pref], ...opts.filter((_, i) => i !== pref)]) if (queueOrder(s1, p.id, o, tickTime) === null) break;
     }
-    for (const fa of plan.free) if (['doctrine', 'research', 'blueprint', 'vow', 'honour', 'calling', 'raze', 'dispatch', 'posture', 'wposture', 'fate'].includes(fa.type)) queueFree(s1, p.id, fa);
+    for (const fa of plan.free) if (['doctrine', 'research', 'blueprint', 'vow', 'honour', 'calling', 'raze', 'dispatch', 'posture', 'wposture', 'fate', 'tribute'].includes(fa.type)) queueFree(s1, p.id, fa);
   }
   const ticks = ticksPerCycle(s1);
   const t = L.tick;

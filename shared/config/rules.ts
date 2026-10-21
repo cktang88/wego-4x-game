@@ -550,9 +550,10 @@ export const SIGNATURE_DEFAULTS = {
   },
 };
 
-// ---------------------------------------------------------------- star systems (docs/SYSTEMS.md, steps 1-2)
+// ---------------------------------------------------------------- star systems (docs/SYSTEMS.md, steps 1-4)
 // Stars and up to 3 bodies per system; citizens (the old `dev`) with a cap from the bodies, growth at Cores,
-// civil/military slots, build gates, the waystation discount. Rules without this group (older games) and maps
+// civil/military slots, build gates, the waystation discount; Contested / Occupied / Tribute output sharing;
+// the body-tagged ledger and Calling gates. Rules without this group (older games) and maps
 // generated without bodies play exactly as before (see shared/sim/systems.ts sysOn).
 export const SYSTEMS_DEFAULTS = {
   systems: {
@@ -586,5 +587,22 @@ export const SYSTEMS_DEFAULTS = {
     pulsarGateDiscount: 0.3,     // pulsar: Warp Gate -30%
     blueMineIndustry: 1,         // blue giant: +industry per Mine / Extractor level
     gravityWell: true,           // black hole: fleets entering stop there
+    // ---- step 3: Contested, Occupied, Tribute (shared/sim/contest.ts)
+    contested: true,             // off: a besieged system pays its owner in full, as before
+    plunderShare: 0.5,           // attacker holding space: this share of the orbital output (the rest is lost)
+    blockadeIndustry: 0.5,       // surface output of a blockaded system (the owner doesn't hold space)...
+    blockadeCredits: 0.5,        // ...credits can't leave: half reach the treasury...
+    blockadeInfluence: 0,        // ...and influence doesn't grow
+    refugeeTurns: 3,             // every this many consecutive contested turns: -1 citizen (refugees)
+    refugeeMinCitizens: 1,       // refugees never take a system below this
+    occupiedTurns: 3,            // a just-captured system pays its new owner occupiedShare for this many turns
+    occupiedShare: 0.5,
+    tributeTurns: 5,             // accepted Tribute: the attacker takes tributeShare of the system's output this long
+    tributeShare: 1 / 3,
+    // ---- step 4: the body-tagged ledger and Calling gates
+    bodyTagEvents: 2,            // a body earns its tag after this many events there
+    callingGates: true,          // Granary/Refinery/Oracle/Arsenal/Cenotaph need the right bodies or history
+    cenotaphBattles: 2,          // Cenotaph: battles fought here
+    ledgerKeep: 12,              // ledger entries kept per system
   },
 };

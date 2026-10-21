@@ -20,6 +20,7 @@ import { pointInPoly } from '../../../shared/sim/mapgen.ts';
 import { TRAITS as WORLD_TRAITS, VEINS } from '../../../shared/config/empire.ts';
 import { connected, supplied, maxDevAt } from '../../../shared/sim/empire.ts';
 import { citizenCap, sysOn } from '../../../shared/sim/systems.ts';
+import { contestOn, systemStatus } from '../../../shared/sim/contest.ts';
 import { STARS } from '../../../shared/config/systems.ts';
 import { battleViewerOpen } from './battle.ts';
 import {
@@ -1079,6 +1080,31 @@ export class MapRenderer {
         if (i < r.dev) { ctx.fillStyle = i < cap ? '#f4dc9c' : '#ffb0a0'; ctx.fill(); ctx.strokeStyle = 'rgba(40,24,4,0.9)'; ctx.lineWidth = 0.7 * S * k; ctx.stroke(); }
         else { ctx.strokeStyle = 'rgba(244,220,156,0.6)'; ctx.lineWidth = 0.8 * S * k; ctx.stroke(); }
       }
+    }
+    // ---- step 3: a contested system wears a dashed blockade ring in the colour of whoever holds space (grey: nobody)
+    //      and a ⛓ tag with its contested turns; an Occupied one a ⚑ tag, a Tribute-paying one a ⚖ tag (turns left)
+    if (contestOn(st) && r.owner !== null && r.bodies) {
+      const cs = systemStatus(st, r);
+      const tag = (deg: number, txt: string, col: string) => {
+        const p = at(deg, ring + 6 * S * k);
+        ctx.font = `700 ${Math.round(7.5 * S * k)}px system-ui, sans-serif`;
+        const w = ctx.measureText(txt).width + 6 * S * k, h = 10 * S * k;
+        ctx.beginPath(); ctx.roundRect(p.x - w / 2, p.y - h / 2, w, h, h / 2);
+        ctx.fillStyle = 'rgba(8,4,16,0.92)'; ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 1.1 * S * k; ctx.stroke();
+        ctx.fillStyle = '#f6ead0'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, p.x, p.y + 0.5 * S * k);
+        ctx.textBaseline = 'alphabetic';
+      };
+      if (cs.contested) {
+        const hc = cs.holder === null ? '#bdb6d6' : this.colorOf(st, cs.holder);
+        const rr = ring + 2.5 * S * k;
+        ctx.setLineDash([3.2 * S * k, 2.4 * S * k]);
+        ctx.beginPath(); ctx.arc(x, y, rr, 0, TAU); ctx.strokeStyle = 'rgba(5,3,12,0.85)'; ctx.lineWidth = 2.6 * S * k; ctx.stroke();
+        ctx.beginPath(); ctx.arc(x, y, rr, 0, TAU); ctx.strokeStyle = hc; ctx.lineWidth = 1.3 * S * k; ctx.stroke();
+        ctx.setLineDash([]);
+        tag(32, `⛓${cs.contestedTurns}${cs.refugeesIn === 1 ? '!' : ''}`, hc);
+      }
+      if (cs.occupiedLeft > 0) tag(cs.contested ? 62 : 32, `⚑${cs.occupiedLeft}`, this.colorOf(st, r.owner));
+      if (cs.tribute) tag(cs.contested || cs.occupiedLeft > 0 ? 92 : 32, `⚖${cs.tributeLeft}`, this.colorOf(st, cs.tribute.to));
     }
     ctx.restore();
   }

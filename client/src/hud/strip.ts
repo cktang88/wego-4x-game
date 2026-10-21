@@ -32,7 +32,7 @@ export function orderTarget(g: GameScreen, o: Order): string {
   return ORDER_INFO_NAME(any.type);
 }
 const ORDER_INFO_NAME = (t: string) => t[0].toUpperCase() + t.slice(1);
-const FREE_ICON: Record<string, string> = { doctrine: '⚔', split: '✂', merge: '+', rename: '✎', research: '✺', blueprint: '⚒', revoke: '⚑', halt: '■', posture: '⛉', wposture: '⚑', fate: '✪', vow: '✠', honour: '❖', calling: '◈', raze: '♨', dispatch: '✒' };
+const FREE_ICON: Record<string, string> = { doctrine: '⚔', split: '✂', merge: '+', rename: '✎', research: '✺', blueprint: '⚒', revoke: '⚑', halt: '■', posture: '⛉', wposture: '⚑', fate: '✪', tribute: '⚖', vow: '✠', honour: '❖', calling: '◈', raze: '♨', dispatch: '✒' };
 
 export function renderStrip(g: GameScreen, el: HTMLElement) {
   const st = g.st;

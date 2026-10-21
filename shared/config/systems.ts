@@ -44,3 +44,20 @@ export const BELT_NAMES = ['Ashen', 'Iron', 'Glass', 'Broken', 'Silent', 'Ember'
 export const GIANT_NAMES = ['Tyr', 'Ossa', 'Mammon', 'Baal', 'Orun', 'Hathor', 'Kessel', 'Vorn', 'Amaru', 'Typhon', 'Ilmar', 'Sabaoth', 'Nereid', 'Golgoth'];
 export const MOON_NAMES = ['Cinder', 'Lanthe', 'the Lantern', 'Pale Ama', 'Erebus', 'the Anvil', 'Thule', 'Small Mercy', 'Nyx', 'the Bastion', 'Corvid', 'Halcyon'];
 export const RUIN_NAMES = ['Drowned Spire', 'Old Choir', 'Sunken Gate', 'Hollow Crown', 'Last Archive', 'Glass Cathedral', 'Silent Forge', 'Broken Orrery', 'Ninth Vault'];
+
+/**
+ * Body tags (docs/SYSTEMS.md step 4): a body earns one after enough events there, named for the kind of
+ * event that happened there most ("Vel II, the Burned World"). Keyed by ledger kind, then body kind.
+ */
+export const BODY_TAGS: Record<string, Record<BodyKind | 'station', string>> = {
+  battle:   { habitable: 'the Burned World', barren: 'the Ash Rock', moon: 'the Scarred Moon', ruin: 'the Twice-Ruined', gas: 'the Pyre Giant', belt: 'the Graveyard Belt', station: 'the Broken Station' },
+  siege:    { habitable: 'the Besieged World', barren: 'the Anvil', moon: 'the Watchful Moon', ruin: 'the Last Redoubt', gas: 'the Blockaded Giant', belt: 'the Siege Belt', station: 'the Iron Station' },
+  capture:  { habitable: 'the Conquered World', barren: 'the Taken Rock', moon: 'the Captive Moon', ruin: 'the Plundered Ruin', gas: 'the Captive Giant', belt: 'the Taken Belt', station: 'the Seized Station' },
+  refugees: { habitable: 'the Emptied World', barren: 'the Abandoned Rock', moon: 'the Empty Moon', ruin: 'the Deserted Ruin', gas: 'the Abandoned Giant', belt: 'the Empty Belt', station: 'the Ghost Station' },
+  refuge:   { habitable: 'the Refuge', barren: 'the Refuge Rock', moon: 'the Refuge Moon', ruin: 'the Sanctuary', gas: 'the Harbour of Exiles', belt: 'the Refuge Belt', station: 'the Refuge Station' },
+  tribute:  { habitable: 'the Bought Peace', barren: 'the Bought Peace', moon: 'the Bought Peace', ruin: 'the Bought Peace', gas: 'the Bought Peace', belt: 'the Bought Peace', station: 'the Bought Peace' },
+};
+/** Which ledger kind wins a tie for a body's tag (most dramatic first). */
+export const BODY_TAG_ORDER = ['battle', 'siege', 'capture', 'refugees', 'tribute', 'refuge'];
+/** Orbital bodies hold space; surface ones are blockaded (step 3). The Station is orbital. */
+export const ORBITAL: Record<BodyKind | 'station', boolean> = { habitable: false, moon: false, barren: false, ruin: false, gas: true, belt: true, station: true };

@@ -14,14 +14,15 @@ import { EDICTS } from './edicts.ts';
 import { findPath, fleetPower, fleetSpeed, within } from './graph.ts';
 import { canAfford, orderCost, pay, validateOrder } from './orders.ts';
 import { Rng } from './rng.ts';
-import { emptySubmission, currentLeader, flipThreshold, creditRate } from './resolve.ts';
+import { emptySubmission, currentLeader, flipThreshold, creditRate, regionYield } from './resolve.ts';
+import { contestOn, contestOf, tributeBlock, acceptBlock, tributeOfferer } from './contest.ts';
 import { maxGarrison } from './setup.ts';
 import type { Fleet, FreeAction, GameState, Order, PlayerId, Region, RegionId, Submission } from './types.ts';
 import { coverage } from './visibility.ts';
 import { viewFor } from './view.ts';
 import { empireFree, empireCands, empireRegionValue, canField } from './ai-empire.ts';
 import { shipStats, hasTech, hasLaw, baseHp, blueprintFor, maxDevAt } from './empire.ts';
-import { stationUnblocks, aiSiteBonus } from './systems.ts';
+import { stationUnblocks, aiSiteBonus, tributeCovers, roleOf, SY } from './systems.ts';
 import { LAW, LAWS } from '../config/empire.ts';
 import { soulFree, soulCands, aiFoundSpec } from './ai-soul.ts';
 import { hasBane } from './soul.ts';
@@ -128,6 +129,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
 
   // -------------------------------------------------- the Empire layer: research & blueprints (free)
   sub.free.push(...empireFree({ s, pid, lvl, rng, threatened }));
+  // -------------------------------------------------- star systems: Tribute terms (free)
+  if (contestOn(s)) sub.free.push(...tributeFree());
   // -------------------------------------------------- the Soul layer: honours, callings, vows, razing, dispatches (free)
   sub.free.push(...soulFree({ s, pid, lvl, threatened, mainArmy: myFleets().filter(f => !isScoutFleet(f) && !f.limping).sort((a, b) => fleetPower(s, b) - fleetPower(s, a))[0] }));
 
@@ -190,6 +193,46 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
   return sub;
 
   // ====================================================================== helpers
+  /**
+   * Star systems (step 3): offer terms over a system we hold space at but can't take by assault; accept terms
+   * over one of ours we would otherwise lose (the assault would win, or a blockade nobody can come and lift).
+   */
+  function tributeFree(): FreeAction[] {
+    const out: FreeAction[] = [];
+    for (const r of s.regions) {
+      if (r.owner === null || r.kind === 'lane' || !r.bodies) continue;
+      if (r.owner !== pid) {
+        if (novice || tributeBlock(s, pid, r.id)) continue;
+        const c = contestOf(s, r);
+        if (!c || c.holder !== pid) continue;
+        const mine = myFleets().filter(f => f.region === r.id && !isScoutFleet(f) && !f.limping);
+        if (!mine.length) continue;
+        const odds = seizeOdds(mine.flatMap(f => uo(f)), r, 'trib:' + mine.map(f => unitsKey(f)).join('+')).p;
+        if (odds >= 0.5) continue;   // we can take it: no terms
+        out.push({ type: 'tribute', region: r.id });
+        continue;
+      }
+      const a = tributeOfferer(s, r.id);
+      if (a === null || acceptBlock(s, pid, r.id)) continue;
+      const foes = s.fleets.filter(f => f.region === r.id && f.owner === a && f.ships.length);
+      const def = s.fleets.filter(f => f.region === r.id && f.owner === pid && f.ships.length);
+      const lose = simBattle(s, r.id, foes.flatMap(f => uo(f)), def.flatMap(f => uo(f, true)), Math.max(0, r.garrison), r.buildings.fortress ?? 0, 0.4).p;
+      const c = contestOf(s, r);
+      const theirs = foes.reduce((x, f) => x + fleetPower(s, f), 0);
+      const near = within(s, r.id, 2);
+      const ours = myFleets().filter(f => near.has(f.region) && !isScoutFleet(f) && !f.limping).reduce((x, f) => x + fleetPower(s, f), 0);
+      const stuck = !!c && c.holder !== pid && ours < theirs * 1.1;   // a blockade nobody can lift
+      const valuable = roleOf(r) === 'core' || r.dev > SY(s).refugeeMinCitizens || r.kind !== 'colony';
+      if (lose >= 0.45 || (stuck && valuable)) out.push({ type: 'tribute', region: r.id, accept: true });
+    }
+    return out;
+  }
+  /** Star systems: what a rival's system yields in orbit (gas giant, belt, Station): plunder for whoever holds space. */
+  function orbitalOutput(t: Region): number {
+    if (!contestOn(s) || t.owner === null || t.owner === pid || !t.bodies) return 0;
+    const y = regionYield(s, t.owner, t, new Set([t.id]));
+    return y ? y.orbital.i + y.orbital.c : 0;
+  }
   function predictRivals(): { p: PlayerId; sub: Submission }[] {
     const view = perceive(s0, pid);
     const out: { p: PlayerId; sub: Submission }[] = [];
@@ -474,6 +517,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
         if (besieged.has(tid) && siegeHolds(tid)) continue;   // our other fleets are taking it already ("already yours")
         const pact = t.owner !== null && t.owner >= 0 && !hostile(s, pid, t.owner);
         if (pact && !(expert && leader === t.owner)) continue;
+        if (t.owner !== null && t.owner >= 0 && tributeCovers(s, pid, t.owner, tid)) continue;   // it pays us tribute: keep the terms
         if (isScout && t.garrison > 2) continue;
         let v: number;
         let also: number[] = [];
@@ -492,9 +536,11 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
               if (sim2.p > sim.p + 0.1) { sim = sim2; also = helpers.map(g => g.id); }
             }
           }
+          // star systems: a siege that holds space plunders the orbitals (gas giants, belts, a Station) while it lasts
+          const plunder = orbitalOutput(t) * SY(s).plunderShare;
           // never throw a fleet at a wall: battles are noisy, so demand a real margin unless the prize is huge
-          if (sim.p < (regionValue(t) >= 25 ? 0.45 : 0.6)) continue;
-          v = regionValue(t) * sim.p * aggr - sim.lost * 0.2 - (1 - sim.p) * unitsCost(units) * 0.05 - fatiguePenalty - leaveCost - also.length * 0.5;
+          if (sim.p < (regionValue(t) >= 25 ? 0.45 : plunder >= 2 ? 0.55 : 0.6)) continue;
+          v = regionValue(t) * sim.p * aggr - sim.lost * 0.2 - (1 - sim.p) * unitsCost(units) * 0.05 - fatiguePenalty - leaveCost - also.length * 0.5 + plunder * 0.4;
           if (pact) v -= R.influence.pactBreakVp * 2;
           if (edictsNow.includes('crown_battle') && t.kind === 'crown' && s.fleets.some(x => x.region === tid && x.owner !== pid && x.ships.length)) v += 3;
         } else {
@@ -678,7 +724,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
 
     // moving onto enemy ships (or into a rival's garrisoned region) means a battle: only if we win it convincingly
     const foes = hostileFleetsAt(dest);
-    const garFights = dr.owner !== null && dr.owner !== pid && dr.garrison > 0 && hostile(s, pid, dr.owner);
+    const garFights = dr.owner !== null && dr.owner !== pid && dr.garrison > 0 && hostile(s, pid, dr.owner, dest);
     if (garFights && !foes.length) {
       const b = simBattle(s, dest, units, [], dr.garrison, dr.buildings.fortress ?? 0, 0.35);
       if (b.p < 0.75) return -99;
@@ -708,6 +754,12 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
     }
     // (b) defend a threatened key world
     if (dr.owner === pid) {
+      // star systems: lift a blockade on our own system (the enemy holds space: orbitals plundered, the surface halved,
+      // refugees on the way); a Core matters most. Only reached when we would win the fight (b.p >= 0.65 above).
+      if (foes.length && contestOn(s)) {
+        const c = contestOf(s, dr);
+        if (c && c.holder !== pid) v += 1.5 + regionValue(dr) * (roleOf(dr) === 'core' ? 0.35 : 0.2);
+      }
       const p0 = threatened.get(dest) ?? 0;
       if (p0 > 0) {
         const p1 = threatTo(dest, units);
@@ -764,7 +816,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
   }
 
   function hostileFleetsAt(rid: number): Fleet[] {
-    return s.fleets.filter(x => x.region === rid && x.ships.length && x.owner !== pid && hostile(s, x.owner, pid));
+    return s.fleets.filter(x => x.region === rid && x.ships.length && x.owner !== pid && hostile(s, x.owner, pid, rid));
   }
 
   function enemyUnitsNear(rid: number): SimUnit[] {

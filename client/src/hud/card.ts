@@ -7,7 +7,8 @@ import type { GameScreen } from '../game.ts';
 import type { Doctrine, Fleet, Order, Region } from '../../../shared/sim/types.ts';
 import { fleetPower, fleetSpeed } from '../../../shared/sim/graph.ts';
 import { orderCost, costText, canAfford } from '../../../shared/sim/orders.ts';
-import { creditRate, flipThreshold } from '../../../shared/sim/resolve.ts';
+import { creditRate, flipThreshold, regionYield } from '../../../shared/sim/resolve.ts';
+import { contestOn, systemStatus } from '../../../shared/sim/contest.ts';
 import { maxGarrison } from '../../../shared/sim/setup.ts';
 import { TRAITS as CMD_TRAITS } from '../../../shared/config/content.ts';
 import { TECH, MODULE, TRAITS as WORLD_TRAITS, VEINS } from '../../../shared/config/empire.ts';
@@ -19,7 +20,7 @@ import { shipSvg, shortWhy, tip, fmtDur } from './util.ts';
 import { fleetBadge, fleetSubline, fleetSoulRows, honourChoice, sagaChips, fleetSoulActs, vowPicker, shipTraitBits, worldEpi, worldSoulRows, soulAction, openFounding, bannersLeft } from './soul.ts';
 import { bannerSvg } from '../art/sigils.ts';
 import { postureRow, fateRow, postureStatus, worldSigRows, sigAction } from './signature.ts';
-import { systemRows } from './systems.ts';
+import { systemRows, tributeRows, tributeAction } from './systems.ts';
 import { starIndustry, sysOn, systemCostMult, worldFx } from '../../../shared/sim/systems.ts';
 
 const PROJ_ICON: Record<string, string> = { station: '⬡', develop: '▲', shipyard: '⚒', fortress: '⛨', mine: '⚙', tradehub: '¢', sensor: '◎', academy: '✺', extractor: '⚛', battery: '⚔', pshield: '⛨', depot: '➤', gate: '◎' };
@@ -160,9 +161,24 @@ function regionStats(g: GameScreen, r: Region): string {
   const half = cut ? R.empire.cutOffYield : 1;
   const mult = Math.max(1, r.dev);
   const wf = worldFx(st, r);   // the old traits (star systems: carried by bodies)
-  const yi = y ? Math.round((y.industry * mult + (r.buildings.mine ?? 0) * R.economy.mineBonus + (wf.forge ? R.empire.forgePerDev * mult : 0) + starIndustry(st, r)) * half) : 0;
-  const yc = y ? Math.round((y.credits * mult + (r.buildings.tradehub ?? 0) * R.economy.tradeHubBonus + (wf.gas ? R.empire.gasCredits : 0)) * half) : 0;
-  const yf = y ? Math.round(((r.kind === 'void' ? 0 : y.influence) + (r.kind === 'home' ? Math.floor(r.dev / 2) : 0)) * half) : 0;
+  let yi = y ? Math.round((y.industry * mult + (r.buildings.mine ?? 0) * R.economy.mineBonus + (wf.forge ? R.empire.forgePerDev * mult : 0) + starIndustry(st, r)) * half) : 0;
+  let yc = y ? Math.round((y.credits * mult + (r.buildings.tradehub ?? 0) * R.economy.tradeHubBonus + (wf.gas ? R.empire.gasCredits : 0)) * half) : 0;
+  let yf = y ? Math.round(((r.kind === 'void' ? 0 : y.influence) + (r.kind === 'home' ? Math.floor(r.dev / 2) : 0)) * half) : 0;
+  let cutShown = cut;
+  // star systems step 3: a contested / occupied / tribute-paying system shows what its owner actually gets (a contested
+  // system's blockade replaces the cut-off halving)
+  const sh = r.owner !== null && contestOn(st) ? systemStatus(st, r).shares : null;
+  if (sh && r.owner !== null) {
+    const ry = regionYield(st, r.owner, r, conn, undefined, !!sh.contest);
+    const g0 = sh.get.get(r.owner);
+    if (ry && g0) {
+      const o = ry.orbital;
+      yi = Math.round(o.i * g0.o.i + (ry.industry - o.i) * g0.s.i);
+      yc = Math.round(o.c * g0.o.c + (ry.credits - o.c) * g0.s.c);
+      yf = Math.round(o.f * g0.o.f + (ry.influence - o.f) * g0.s.f);
+      cutShown = ry.cut;
+    }
+  }
   const T = r.trait ? WORLD_TRAITS[r.trait] : null, V = r.vein ? VEINS[r.vein] : null;
   let s = stat('⛨', r.garrison < 0 ? '?' : gmax !== null ? `${r.garrison}/${gmax}` : String(r.garrison), 'Garrison');
   if (r.kind !== 'void' && y) s += `<span class="st yld"${tip('Yield per turn')}><i>⚙</i><b>${yi}</b><i>¢</i><b>${yc}</b><i>✦</i><b>${yf}</b></span>`;
@@ -170,13 +186,13 @@ function regionStats(g: GameScreen, r: Region): string {
   if (r.kind !== 'void' && !sys) s += `<span class="st"${tip(`Development ${r.dev}/${maxDevAt(st, r.id)}`)}>${pips(r.dev, maxDevAt(st, r.id))}</span>`;
   if (T && !sys) s += `<span class="st"${tip(`${T.name}: ${T.desc}`)}><i>${T.icon}</i></span>`;
   if (V) s += `<span class="st"${tip(`${V.name}: ${V.desc}`)}><i style="color:${V.color}">${V.icon}</i></span>`;
-  if (cut) s += `<span class="st bad"${tip('Cut off: half yield')}><i>⚠</i><b>½</b></span>`;
+  if (cutShown) s += `<span class="st bad"${tip('Cut off: half yield')}><i>⚠</i><b>½</b></span>`;
   return s;
 }
 function regionStatus(g: GameScreen, r: Region): string {
   const st = g.st, out: string[] = [];
   const e = (st.engagements ?? []).find(x => x.region === r.id);
-  if (e) out.push(`<span class="war">⚔ ${esc(e.name.split(' ').slice(0, 3).join(' '))}</span>`);
+  if (e) out.push(`<span class="war"${tip(e.name)}>⚔ ${esc(e.name.replace(/ \(.*\)$/, '').split(' ').slice(0, 5).join(' '))}</span>`);
   else if (st.fleets.some(f => f.siege === r.id && f.region === r.id && f.ships.length)) out.push('<span class="war">⚔ Under siege</span>');
   if (r.project) out.push(`<span>${PROJ_ICON[r.project.key] ?? '▲'} ${esc(st.rules.projects[r.project.key]?.name ?? r.project.key)} ${r.project.progress}/${st.rules.projects[r.project.key]?.turns ?? '?'}</span>`);
   if (r.relic === 'unclaimed') out.push('<span class="gold">✧ Relic</span>');
@@ -229,7 +245,7 @@ function ownPlanet(g: GameScreen, r: Region): string {
     trays += `<div class="acts">${agents ? ib('influence', '✦', 'Purge', g.orderWhy({ type: 'influence', target: r.id }), '', 'Remove rival agents') : ''}${ib('scan', '◎', 'Scan', g.orderWhy({ type: 'scan', target: r.id }), '', 'Reveal this area')}</div>`;
   }
   const cap = st.players[you]?.capital === r.id ? ' <small class="tag">capital</small>' : '';
-  return `${head(g, r.name, g.color(r.owner), regionStats(g, r), cap, '', worldEpi(g, r))}${regionStatus(g, r)}${systemRows(g, r)}${worldSoulRows(g, r)}${worldSigRows(g, r)}${trays}`;
+  return `${head(g, r.name, g.color(r.owner), regionStats(g, r), cap, '', worldEpi(g, r))}${regionStatus(g, r)}${systemRows(g, r)}${tributeRows(g, r)}${worldSoulRows(g, r)}${worldSigRows(g, r)}${trays}`;
 }
 
 /** Which fleet a build at r goes into: a fleet already here, or a new banner (the founding sheet). Per region. */
@@ -284,7 +300,7 @@ function foreignPlanet(g: GameScreen, r: Region): string {
   }
   const foes = st.fleets.filter(f => f.region === r.id && f.owner !== g.you && f.ships.length);
   const fl = foes.length ? `<div class="fan foe">${foes.map(f => `<button class="cls" data-a="fleet" data-id="${f.id}"${tip(f.name)}>${shipSvg(f.ships[0]?.cls ?? 'frigate', g.color(f.owner), 26)}<b>⚔${fleetPower(st, f)}</b></button>`).join('')}</div>` : '';
-  return `${head(g, r.name, g.color(owner), regionStats(g, r), extra, '', worldEpi(g, r))}${regionStatus(g, r)}${systemRows(g, r)}${worldSoulRows(g, r)}${fl}${body}`;
+  return `${head(g, r.name, g.color(owner), regionStats(g, r), extra, '', worldEpi(g, r))}${regionStatus(g, r)}${systemRows(g, r)}${tributeRows(g, r)}${worldSoulRows(g, r)}${fl}${body}`;
 }
 
 // ---------------------------------------------------------------- events (bound once)
@@ -349,7 +365,7 @@ export function cardAction(g: GameScreen, a: string, data: DOMStringMap, shift =
   if (!sel) return;
   if (a === 'record' && soulAction(g, a, data)) return;
   if (a === 'into' && sel.kind === 'region') { intoChoice.set(sel.id, data.id === 'new' ? 'new' : Number(data.id)); g.renderAll(); return; }
-  if (g.canPlan && (sigAction(g, a, data) || soulAction(g, a, data))) return;
+  if (g.canPlan && (sigAction(g, a, data) || soulAction(g, a, data) || tributeAction(g, a))) return;
   if (a === 'fleet') { g.select({ kind: 'fleet', id: Number(data.id) }); return; }
   if (a === 'sib' && sel.kind === 'fleet') {
     const f = g.fleet(sel.id); if (!f) return;

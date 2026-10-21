@@ -6,6 +6,7 @@ import { connected, supplied } from '../../../shared/sim/empire.ts';
 import { esc } from '../ui/dom.ts';
 import { shortName } from './util.ts';
 import { soulNotes } from './soul.ts';
+import { systemNotes } from './systems.ts';
 
 export interface Note { key: string; icon: string; text: string; tone: 'bad' | 'good' | 'gold' | 'info'; p: number; go: () => void }
 
@@ -47,6 +48,7 @@ export function notes(g: GameScreen): Note[] {
     const dig = st.fleets.find(f => f.owner === you && st.regions[f.region]?.relic === 'unclaimed' && st.regions[f.region].owner === you);
     if (dig) out.push({ key: 'dig', icon: '✧', text: `Relic at ${rn(dig.region)}`, tone: 'gold', p: 3, go: () => { g.select({ kind: 'fleet', id: dig.id }); g.focus(st.regions[dig.region].site); } });
     for (const n of soulNotes(g)) out.push({ ...n, tone: 'gold', p: 1 });
+    for (const n of systemNotes(g)) out.push({ ...n, p: n.tone === 'bad' ? 0 : 1 });
     if (g.canResearchNow()) out.push({ key: 'res', icon: '✺', text: 'Research ready', tone: 'gold', p: 6, go: () => g.openModal('empire', 'research') });
     if (g.live && g.bank >= st.rules.live.bankCap) out.push({ key: 'bank', icon: '⏱', text: 'Order bank full', tone: 'gold', p: 2, go: () => g.nextIdle() });
     const ed = st.edicts.find(e => e.scoresTurn === st.turn);

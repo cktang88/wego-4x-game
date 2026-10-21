@@ -20,6 +20,7 @@
 import { BOONS, BANES, SIGILS, VOWS, SCARS, CALLINGS, TRAIT_CALLING, MARK_CALLING, DEEDS, WORLD_EPITHETS, FOUNDING_NAMES, LEGEND_EPITHETS, HERALD_TEMPLATES } from '../config/content.ts';
 import { SOUL_DEFAULTS } from '../config/rules.ts';
 import { hashString } from './rng.ts';
+import { callingGate } from './systems.ts';
 import type { Banner, Deed, Fleet, FleetRecord, FoundSpec, GameEvent, GameState, Headline, PlayerId, Region, RegionId, RegionStory, SoulState, Vow, VowKind } from './types.ts';
 
 export type SoulRules = typeof SOUL_DEFAULTS.soul;
@@ -566,6 +567,27 @@ export function callingOptions(s: GameState, r: Region): string[] {
   if (b === a) b = Object.keys(CALLINGS).filter(k => CALLINGS[k].from === 'mark' && k !== a)[r.id % 4];
   return [a, b];
 }
+/**
+ * The callings a world is offered now. Star systems (step 4): a calling needs the right bodies or history
+ * (systems.ts callingGate); one the world can't take is listed in `gated` (with why) and replaced by the first
+ * fitting fallback (trait side: Refinery, Granary, Arsenal, Bastion; history side: Oracle, Cenotaph, Proving Ground,
+ * Bulwark), so there are always two valid choices. Off: exactly callingOptions.
+ */
+export function callingOffer(s: GameState, r: Region): { options: string[]; gated: { id: string; why: string }[] } {
+  const base = callingOptions(s, r);
+  const gated: { id: string; why: string }[] = [];
+  const out: string[] = [];
+  base.forEach((id, i) => {
+    const why = callingGate(s, r, id);
+    if (!why) { if (!out.includes(id)) out.push(id); return; }
+    gated.push({ id, why });
+    const pool = i === 0 ? ['refinery', 'granary', 'arsenal', 'bastion'] : ['oracle', 'cenotaph', 'proving', 'bulwark'];
+    const alt = pool.find(x => !callingGate(s, r, x) && !out.includes(x) && !base.includes(x))
+      ?? [...pool, 'bastion', 'proving', 'bulwark'].find(x => !callingGate(s, r, x) && !out.includes(x) && !base.slice(i + 1).includes(x));
+    if (alt) out.push(alt);
+  });
+  return { options: out, gated };
+}
 export function pickCalling(s: GameState, r: Region, pick: unknown): string | null {
   const pc = r.story?.pendingCalling;
   if (!pc) return 'no calling to choose here';
@@ -849,7 +871,10 @@ export function soulEndTurn(s: GameState, pulse: number, emit: Emit, fought: Set
     st.loss = r.memorials.length;
     if (r.owner !== null && r.dev >= S.callingAtDev && r.kind !== 'void' && r.kind !== 'lane') {
       st.toil++;
-      if (!st.calling && !st.pendingCalling) st.pendingCalling = { options: callingOptions(s, r), since: s.turn, owner: r.owner };
+      if (!st.calling && !st.pendingCalling) {
+        const off = callingOffer(s, r);
+        st.pendingCalling = { options: off.options, since: s.turn, owner: r.owner, ...(off.gated.length ? { gated: off.gated } : {}) };
+      }
     }
     if (st.pendingCalling) {
       if (st.pendingCalling.owner !== r.owner) st.pendingCalling = null;

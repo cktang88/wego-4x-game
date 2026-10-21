@@ -22,7 +22,8 @@
 //  VP is only ever scored on the final end-of-turn state.
 // ============================================================================
 import { TECH, LAW, MODULES } from '../config/empire.ts';
-import { growSystem, gravityWell, starIndustry, worldFx } from './systems.ts';
+import { SY, growSystem, gravityWell, starIndustry, worldFx, sysOn, outputBodies, isOrbitalAt, ledgerAdd, bodyName, citizenBody, tributeCovers } from './systems.ts';
+import { contestOn, systemShares, noteBattleWon, onCaptureContest, contestEndTurn, tributeBlock, acceptBlock, offerTribute, acceptTribute, breakTribute } from './contest.ts';
 import { techCost, researchBlock, opposite, blueprintFor, baseHp, hasTech, hasLaw, connected, supplied, maxDevAt, moveNeighbors } from './empire.ts';
 import { RELICS, LORE } from '../config/content.ts';
 import { fightRounds, hostile, wouldFight, engagementAt, newReport, disengage, type FightOutcome } from './combat.ts';
@@ -31,7 +32,7 @@ import { fleetSpeed, strengthBand, findPath } from './graph.ts';
 import { canAfford, orderCost, pay, validateOrder, ORDER_INFO, MAX_JOINERS } from './orders.ts';
 import { Rng } from './rng.ts';
 import { maxGarrison, newFleet, newShip } from './setup.ts';
-import type { TickOpts, BattleReport, Engagement, Doctrine, Fleet, FoundSpec, FreeAction, GameEvent, GameState, Order, PlayerId, RegionId, Signal, Submission, TurnResult, VowKind, Posture, WorldPosture, FateUse } from './types.ts';
+import type { TickOpts, BattleReport, Engagement, Doctrine, Fleet, FoundSpec, FreeAction, GameEvent, GameState, Order, PlayerId, Region, RegionId, Signal, Submission, TurnResult, VowKind, Posture, WorldPosture, FateUse } from './types.ts';
 import { coverage, seesFleetsIn } from './visibility.ts';
 import { soulOn, SR, ensureSoul, bannersFree, resolveFound, raiseBanner, applyRout, onFleetLost, catchLimping, onCapture, raze, razeBlock, vowBlock, swearVow, pickHonour, pickCalling, soulEndTurn, soulReigns, soulRegen, soulYield, soulUpkeep, hasBoon, hasBane, breakVow, sagaBeat, beat, headline, addDeed, archiveFleet, cleanText, isPicket } from './soul.ts';
 import { makeEdition, queueDispatch } from './herald.ts';
@@ -71,6 +72,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     for (const f of s.fleets) { f.ordersThisTurn = 0; f.guardUsed = false; }
     // last turn's pact offers stay answerable for one more turn
     for (const p of s.players) { p.prevPactOffers = p.pactOffers ?? []; p.pactOffers = []; p.researched = 0; p.revokedThisTurn = []; }
+    // star systems: Tribute terms offered last turn stay answerable for one more turn, like pact offers
+    for (const p of s.players) if (p.tributeOffers !== undefined || p.prevTributeOffers !== undefined) { p.prevTributeOffers = p.tributeOffers ?? []; p.tributeOffers = []; }
     // sworn words only stay attached to offers that can still be answered
     for (const p of s.players) if (p.pactWords) for (const k of Object.keys(p.pactWords)) if (!(p.prevPactOffers ?? []).includes(Number(k))) delete p.pactWords[Number(k)];
     s.cycleStartOwners = s.regions.map(r => r.owner);
@@ -160,6 +163,11 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     const E = out.eng;
     // battle honors for the whole engagement
     const w = out.winner;
+    // star systems: the winner holds space while it stays; the battle goes on the system's (body-tagged) ledger
+    if (E.owners.length > 1 && out.rounds + E.rounds > 0) {
+      noteBattleWon(s, s.regions[rid], w);
+      if (sysOn(s) && s.regions[rid].kind !== 'lane') ledgerAdd(s, s.regions[rid], { turn: s.turn, kind: E.siege ? 'siege' : 'battle', text: `${E.name}${w === null ? '' : `: ${w === -1 ? (s.regions[rid].owner === null ? 'the defenders' : 'the Warden') : s.players[w]?.name ?? '?'} held the field`}.`, body: E.body, players: E.owners.filter((x): x is number => x >= 0) });
+    }
     const enemyLosses = Object.entries(E.losses).filter(([o]) => Number(o) !== w).reduce((a, [, n]) => a + n, 0);
     if (w !== null && w !== -1 && enemyLosses >= R.bounty.battleHonorMinKills && honors[w] < R.bounty.maxHonorPerTurn) {
       const vsLeader = leader !== null && E.owners.includes(leader) && w !== leader;
@@ -173,12 +181,13 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       const holder = s.regions[rid].owner ?? -1;
       // a siege held off: the garrison's side won against attackers
       if (E.garrisonStart > 0 && w === holder && E.owners.some(o => o !== holder)) story.siege++;
-      if (lost >= 3) beat(s, { kind: 'battle', text: headline(s, 'battle', { r: s.regions[rid].name, x: lost }), region: rid, players: E.owners.filter((x): x is number => x >= 0), drama: Math.min(5, 1 + Math.floor(lost / 2)), public: false });
+      const field = bodyName(s.regions[rid], E.body);
+      if (lost >= 3) beat(s, { kind: 'battle', text: headline(s, 'battle', { r: field ? `${field} (${s.regions[rid].name})` : s.regions[rid].name, x: lost }), region: rid, players: E.owners.filter((x): x is number => x >= 0), drama: Math.min(5, 1 + Math.floor(lost / 2)), public: false });
     }
     if (lost >= 2) {
       const ps = E.owners.filter((x): x is number => x >= 0);
       const long = s.turn > E.startedTurn ? ` after ${E.rounds} rounds over ${s.turn - E.startedTurn + 1} turns` : '';
-      s.chronicle.push({ turn: s.turn, region: rid, players: ps, major: lost >= 5,
+      s.chronicle.push({ turn: s.turn, region: rid, players: ps, major: lost >= 5, ...(E.body !== undefined ? { body: E.body } : {}),
         text: `The ${E.name} ends${long}: ${lost} ships destroyed. ${w === null ? 'Neither side broke.' : w === -1 ? 'The defenders held.' : `${s.players[w].name} held the field.`}` });
     }
   };
@@ -191,8 +200,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     for (const r of rotatedRegions) {
       // Soul: a limping fleet caught by any hostile fleet (or a hostile garrison) dies
       if (soul) for (const f of s.fleets.filter(x => x.limping && x.region === r.id && x.ships.length)) {
-        const catcher = s.fleets.find(x => x.region === r.id && x.ships.length && !x.limping && hostile(s, x.owner, f.owner) && x.ships.some(sh => sh.sys.weapons));
-        const gar = r.owner !== null && r.garrison > 0 && hostile(s, r.owner, f.owner);
+        const catcher = s.fleets.find(x => x.region === r.id && x.ships.length && !x.limping && hostile(s, x.owner, f.owner, r.id) && x.ships.some(sh => sh.sys.weapons));
+        const gar = r.owner !== null && r.garrison > 0 && hostile(s, r.owner, f.owner, r.id);
         if (!catcher && !gar) continue;
         s.chronicle.push({ turn: s.turn, region: r.id, players: [f.owner, ...(catcher && catcher.owner >= 0 ? [catcher.owner] : [])], major: (f.commander.rank >= 3),
           text: `${f.name} is caught limping at ${r.name} and destroyed${catcher ? ` by ${catcher.name}` : ''}.` });
@@ -211,11 +220,11 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       const besiegers = s.fleets.filter(f => f.region === r.id && f.siege === r.id && f.ships.length);
       if (!besiegers.length || r.garrison > 0) continue;
       const by = besiegers[0].owner;
-      if (s.fleets.some(f => f.region === r.id && f.ships.length && hostile(s, f.owner, by))) continue;
+      if (s.fleets.some(f => f.region === r.id && f.ships.length && hostile(s, f.owner, by, r.id))) continue;
       for (const f of besiegers) f.siege = null;
       if (r.owner === by) continue;
       // a siege that outlived a pact signed since (or an ally's region) never captures without a Seize (= betrayal)
-      if (r.owner !== null && !hostile(s, by, r.owner)) continue;
+      if (r.owner !== null && !hostile(s, by, r.owner, r.id)) continue;
       if (by === -1) {
         if (r.owner !== null && R.wardenHunt.razes) {
           const victim = r.owner;
@@ -284,7 +293,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         const err = validateOrder(s, p, o);
         if (err) { fail(pulse, p, o, err); continue; }
         const regionId = o.type === 'excavate' ? s.fleets.find(f => f.id === o.fleet)!.region : o.region;
-        if (s.fleets.some(f => f.region === regionId && f.ships.length && hostile(s, f.owner, p))) { fail(pulse, p, o, 'enemies present'); continue; }
+        if (s.fleets.some(f => f.region === regionId && f.ships.length && hostile(s, f.owner, p, regionId))) { fail(pulse, p, o, 'enemies present'); continue; }
         const cost = orderCost(s, o, p);
         if (!canAfford(s.players[p].res, cost, creditRate(s, p))) { fail(pulse, p, o, 'not enough resources'); continue; }
         pay(s.players[p].res, cost, creditRate(s, p));
@@ -339,7 +348,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       // a refit is a full overhaul: like building, it can't happen under enemy guns (no free mid-battle heal)
       if (o.type === 'refit') {
         const rf = s.fleets.find(x => x.id === o.fleet)!;
-        if (s.fleets.some(x => x.region === rf.region && x.ships.length && hostile(s, x.owner, p))) { fail(pulse, p, o, 'enemies present'); continue; }
+        if (s.fleets.some(x => x.region === rf.region && x.ships.length && hostile(s, x.owner, p, rf.region))) { fail(pulse, p, o, 'enemies present'); continue; }
       }
       const cost = orderCost(s, o, p);
       if (!canAfford(s.players[p].res, cost, creditRate(s, p))) { fail(pulse, p, o, 'not enough resources'); continue; }
@@ -463,7 +472,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       for (const p of seatOrder) if (p.id !== r.owner && !p.eliminated && r.loyalty[p.id] >= thr && (best === null || r.loyalty[p.id] > r.loyalty[best])) best = p.id;
       if (best === null) continue;
       if (r.owner !== null && s.players[r.owner].capital === r.id) continue;
-      const occupied = s.fleets.some(f => f.region === r.id && f.owner !== best && f.ships.length && (f.owner === r.owner || hostile(s, f.owner, best!)));
+      const occupied = s.fleets.some(f => f.region === r.id && f.owner !== best && f.ships.length && (f.owner === r.owner || hostile(s, f.owner, best!, r.id)));
       if (occupied) continue; // can't defect under someone else's guns
       const from = r.owner;
       capture(s, r.id, best, 'influence', pulse, emit, leader, capped);
@@ -672,8 +681,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       for (const m of stepping) {
         if (!s.fleets.includes(m.f) || m.idx >= m.path.length) continue;
         const r = s.regions[m.f.region];
-        const enemyFleet = s.fleets.some(x => x !== m.f && x.region === r.id && x.ships.length && hostile(s, x.owner, m.f.owner));
-        const enemyGarrison = r.owner !== null && hostile(s, r.owner, m.f.owner) && r.garrison > 0;
+        const enemyFleet = s.fleets.some(x => x !== m.f && x.region === r.id && x.ships.length && hostile(s, x.owner, m.f.owner, r.id));
+        const enemyGarrison = r.owner !== null && hostile(s, r.owner, m.f.owner, r.id) && r.garrison > 0;
         // Signature: a Hyperjump slips through blockades, but never through an Ambush
         const slips = sig && hasHyperjump(s, m.f) && !ambushAt(s, r.id, m.f.owner);
         if ((enemyFleet || enemyGarrison) && !slips) {
@@ -691,7 +700,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       // --- guard reactions (free standing order)
       for (const r of rotatedRegions) {
         if (r.owner === null) continue;
-        const invaders = s.fleets.filter(x => x.region === r.id && x.ships.length && hostile(s, x.owner, r.owner!) && x.owner !== -1
+        const invaders = s.fleets.filter(x => x.region === r.id && x.ships.length && hostile(s, x.owner, r.owner!, r.id) && x.owner !== -1
           && effStance(s, x) !== 'evasive' && !x.ships.every(sh => sh.cls === 'scout') && !x.limping);
         if (!invaders.length) continue;
         for (const g of s.fleets) {
@@ -699,7 +708,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
           if (sig && (isDugIn(s, g) || postureOf(s, g) === 'ambush' || postureOf(s, g) === 'guarded')) continue;   // a posture holds it in place
           if (g.region === r.id || !(r.links ?? r.neighbors).includes(g.region)) continue;
           if (movers.some(m => m.f === g && (m.idx < m.path.length || m.o.type === 'seize'))) continue;
-          if (s.fleets.some(x => x.region === g.region && x.ships.length && hostile(s, x.owner, g.owner))) continue; // pinned
+          if (s.fleets.some(x => x.region === g.region && x.ships.length && hostile(s, x.owner, g.owner, g.region))) continue; // pinned
           if (engagementAt(s, g.region) && wouldFight(s, g.region)) continue;   // pinned by a battle (e.g. a siege) it is fighting
           g.guardUsed = true;
           g.siege = null;
@@ -723,7 +732,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       if (!f.route.path.length) { f.route = null; continue; }
       // ended the turn among enemies short of its goal: intercepted, it stops here
       const here = s.regions[f.region];
-      if (s.fleets.some(x => x !== f && x.region === here.id && x.ships.length && hostile(s, x.owner, f.owner))) f.route = null;
+      if (s.fleets.some(x => x !== f && x.region === here.id && x.ships.length && hostile(s, x.owner, f.owner, here.id))) f.route = null;
     }
     // LIVE: fleets that made their step move along their route; blocked or destroyed fleets stop
     if (live) for (const m of movers) {
@@ -756,6 +765,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         fail(pulse, p, m.o, `${s.players[r.owner].name} took ${r.name} first`);
         continue;
       }
+      // star systems: seizing a system that pays you tribute breaks the terms (like a pact: Oathbreaker)
+      if (r.owner !== null && hostile(s, p, r.owner) && tributeCovers(s, p, r.owner, target)) breakTribute(s, p, target, pulse, emit);
       if (r.owner !== null && !hostile(s, p, r.owner)) {
         const victim = r.owner;
         const broken = s.pacts.find(x => (x.a === p && x.b === victim) || (x.a === victim && x.b === p));
@@ -773,7 +784,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       }
       const group = movers.filter(x => x.o === m.o && s.fleets.includes(x.f) && x.f.region === target).map(x => x.f);
       for (const f of group) f.siege = target;
-      if (r.garrison > 0 || s.fleets.some(f => f.region === target && f.ships.length && hostile(s, f.owner, p)))
+      if (r.garrison > 0 || s.fleets.some(f => f.region === target && f.ships.length && hostile(s, f.owner, p, target)))
         emit({ k: 'note', pulse, owner: p, text: `${group.map(f => f.name).join(' + ')} lay${group.length > 1 ? '' : 's'} siege to ${r.name}.`, region: target });
     }
 
@@ -880,7 +891,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   }
   for (const r of s.regions) {
     const underAttack = (engagementAt(s, r.id) && wouldFight(s, r.id))
-      || s.fleets.some(f => f.siege === r.id && f.region === r.id && f.ships.length && (r.owner === null || hostile(s, f.owner, r.owner)));
+      || s.fleets.some(f => f.siege === r.id && f.region === r.id && f.ships.length && (r.owner === null || hostile(s, f.owner, r.owner, r.id)));
     if (underAttack) { /* a garrison under siege or in battle can't rebuild */ }
     else if (r.owner !== null) {
       const o = r.owner;
@@ -903,9 +914,11 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       }
     }
     // star systems: an uncontested Core grows a citizen every few turns (docs/SYSTEMS.md)
-    if (r.owner !== null) growSystem(s, r, !!underAttack || s.fleets.some(f => f.region === r.id && f.ships.length && hostile(s, f.owner, r.owner!) && f.ships.some(sh => sh.cls !== 'scout')), endPulse, emit);
+    if (r.owner !== null) growSystem(s, r, !!underAttack || s.fleets.some(f => f.region === r.id && f.ships.length && hostile(s, f.owner, r.owner!, r.id) && f.ships.some(sh => sh.cls !== 'scout')), endPulse, emit);
     for (let i = 0; i < 3; i++) if (r.loyalty[i] > 0) r.loyalty[i] = Math.max(0, r.loyalty[i] - R.influence.decayPerTurn);
   }
+  // star systems: contested turns (refugees), occupations and tributes running out
+  contestEndTurn(s, endPulse, emit);
 
   // ---- pacts
   // a pact forms when both offer this turn, or one answers the other's offer from last turn
@@ -1129,6 +1142,7 @@ export function cleanFree(fa: unknown): FreeAction | null {
     if (fa.region !== undefined && !isId(fa.region)) return null;
     return { type: 'fate', use: fa.use as FateUse, ...(isId(fa.fleet) ? { fleet: fa.fleet } : {}), ...(isId(fa.region) ? { region: fa.region } : {}) };
   }
+  if (fa.type === 'tribute') return isId(fa.region) ? { type: 'tribute', region: fa.region, ...(fa.accept === true ? { accept: true } : {}) } : null;
   if (fa.type === 'dispatch') { const text = cleanText(fa.text, 140); return text ? { type: 'dispatch', text, ...(fa.as === 'source' ? { as: 'source' as const } : {}) } : null; }
   if (fa.type === 'calling') return isId(fa.region) && (typeof fa.pick === 'string' && fa.pick.length < 32 || isId(fa.pick)) ? { type: 'calling', region: fa.region, pick: fa.pick as string | number } : null;
   if (fa.type === 'raze') return isId(fa.region) ? { type: 'raze', region: fa.region } : null;
@@ -1190,6 +1204,13 @@ function applyFree(s: GameState, rng: Rng, p: PlayerId, fa: Submission['free'][n
     const b = fateBlock(s, p, fa.use, fa.fleet, fa.region);
     if (b) return b;
     spendFate(s, p, fa.use, { fleet: fa.fleet, region: fa.region }, 0, emit);
+    return null;
+  }
+  // ---- Star systems: offer terms over a system you besiege, or accept terms offered for your own
+  if (fa.type === 'tribute') {
+    const b = fa.accept ? acceptBlock(s, p, fa.region, 'resolve') : tributeBlock(s, p, fa.region, 'resolve');
+    if (b) return b;
+    if (fa.accept) acceptTribute(s, p, fa.region, 0, emit); else offerTribute(s, p, fa.region, 0, emit);
     return null;
   }
   // ---- Soul layer
@@ -1326,39 +1347,88 @@ export function income(s: GameState, p: PlayerId) {
   return incomeDetail(s, p).total;
 }
 
+/** One part of a system's output: which body it comes from (index; 3 = the Station; undefined = open space), whether
+ *  that is orbital, and its industry / credits / influence after the system's multipliers. */
+export interface YieldPart { key: string; body: number | undefined; orbital: boolean; i: number; c: number; f: number }
+export interface RegionYield { industry: number; credits: number; influence: number; cut: boolean; parts: YieldPart[]; orbital: { i: number; c: number; f: number } }
+
+/**
+ * What one system produces for its owner `p` this turn (before player-wide modifiers), or null when it yields
+ * nothing (Levies called in vain). `parts` (star systems only) attributes it to bodies: citizens to where they live,
+ * mines to the belt or barren world, trade hubs to the habitable world or gas giant, gas and veins to their body,
+ * a Depot to the Station; `orbital` sums the parts on orbital bodies (step 3: they go to whoever holds space).
+ */
+export function regionYield(s: GameState, p: PlayerId, r: Region, conn: Set<RegionId> | null, why?: string[], contested = false): RegionYield | null {
+  const R = s.rules, E = R.empire, on = E?.enabled !== false;
+  const pl = s.players[p];
+  // Signature: a system that called the levies in vain yields nothing for a while
+  if (sigOn(s) && regionIdle(s, r)) { why?.push(`${r.name}: levies called, no output`); return null; }
+  const B = sysOn(s) && r.bodies && r.kind !== 'lane' ? outputBodies(r) : null;
+  const parts: YieldPart[] = [];
+  const part = (key: string, body: number | undefined, i: number, c: number, f: number) => { if (B && (i || c || f)) parts.push({ key, body, orbital: isOrbitalAt(r, body), i, c, f }); };
+  const y = R.economy.yields[r.kind] ?? R.economy.yields.colony;
+  const mult = Math.max(1, r.dev);
+  const hub = (r.buildings.tradehub ?? 0) * (R.economy.tradeHubBonus + (on && hasTech(s, p, 'trade') ? E.tradeHubBonus : 0) + (on && hasLaw(s, p, 'mercantile') ? E.mercantileHubBonus : 0));
+  let ind = y.industry * mult + (r.buildings.mine ?? 0) * R.economy.mineBonus;
+  let cr = y.credits * mult + hub;
+  let inf = y.influence * (r.kind === 'void' ? 0 : 1) + (r.kind === 'home' ? Math.floor(r.dev / 2) : 0);
+  part('citizens', B?.cit, y.industry * mult, y.credits * mult, inf);
+  part('mine', B?.mine, (r.buildings.mine ?? 0) * R.economy.mineBonus, 0, 0);
+  part('hub', B?.hub, 0, hub, 0);
+  let cut = false;
+  let m = 1;
+  if (on) {
+    const wf = worldFx(s, r);   // the old traits (star systems: carried by bodies)
+    if (wf.forge) { ind += E.forgePerDev * mult; part('forge', B?.forge, E.forgePerDev * mult, 0, 0); }
+    if (wf.gas) { cr += E.gasCredits; part('gas', B?.gas, 0, E.gasCredits, 0); }
+    const si = starIndustry(s, r);  // blue giant: +1 per Mine / Extractor
+    ind += si; part('star', B?.mine, si, 0, 0);
+    if (r.buildings.depot) { ind += E.depotIndustry; part('depot', B?.depot, E.depotIndustry, 0, 0); }
+    if (r.vein && (r.buildings.extractor ?? 0) > 0 && conn!.has(r.id)) { cr += E.extractorCredits; part('vein', B?.vein, 0, E.extractorCredits, 0); }
+    if (hasLaw(s, p, 'federal') && r.kind === 'colony') { ind += 1; part('federal', B?.cit, 1, 0, r.dev >= 3 ? 1 : 0); if (r.dev >= 3) inf += 1; }
+    if (r.id === pl.capital && hasLaw(s, p, 'central')) { ind *= E.centralMult; cr *= E.centralMult; inf *= E.centralMult; m *= E.centralMult; }
+    // a contested system's own blockade is the step-3 split (no second halving for being cut off by it)
+    if (!conn!.has(r.id) && !contested) { ind *= E.cutOffYield; cr *= E.cutOffYield; inf *= E.cutOffYield; m *= E.cutOffYield; cut = true; }
+  }
+  if (m !== 1) for (const x of parts) { x.i *= m; x.c *= m; x.f *= m; }
+  if (r.story) { const y2 = soulYield(s, r); ind += y2.industry; cr += y2.credits; inf += y2.influence; part('calling', B?.cit, y2.industry, y2.credits, y2.influence); }
+  // Signature: Surge (Fate): double output this turn
+  if (sigOn(s)) { const k = regionSurge(s, r); if (k !== 1) { ind *= k; cr *= k; inf *= k; for (const x of parts) { x.i *= k; x.c *= k; x.f *= k; } why?.push(`${r.name}: Surge (×${k})`); } }
+  const orbital = { i: 0, c: 0, f: 0 };
+  for (const x of parts) if (x.orbital) { orbital.i += x.i; orbital.c += x.c; orbital.f += x.f; }
+  return { industry: ind, credits: cr, influence: inf, cut, parts, orbital };
+}
+
 /** Income with the reasons (for the UI breakdowns). */
 export function incomeDetail(s: GameState, p: PlayerId) {
   const R = s.rules, E = R.empire, on = E?.enabled !== false;
   const out = { industry: 0, credits: 0, influence: 0 };
   const why: string[] = [];
-  const conn = on ? connected(s, p) : null;
+  const conns = new Map<PlayerId, Set<RegionId>>();
+  const connOf = (q: PlayerId) => { if (!on) return null; let c = conns.get(q); if (!c) { c = connected(s, q); conns.set(q, c); } return c; };
   let cut = 0;
   const pl = s.players[p];
-  const sigWorld = sigOn(s);
+  const shares = contestOn(s);
   for (const r of s.regions) {
-    if (r.owner !== p) continue;
-    // Signature: a system that called the levies in vain yields nothing for a while
-    if (sigWorld && regionIdle(s, r)) { why.push(`${r.name}: levies called, no output`); continue; }
-    const y = R.economy.yields[r.kind] ?? R.economy.yields.colony;
-    const mult = Math.max(1, r.dev);
-    let ind = y.industry * mult + (r.buildings.mine ?? 0) * R.economy.mineBonus;
-    let cr = y.credits * mult + (r.buildings.tradehub ?? 0) * (R.economy.tradeHubBonus + (on && hasTech(s, p, 'trade') ? E.tradeHubBonus : 0) + (on && hasLaw(s, p, 'mercantile') ? E.mercantileHubBonus : 0));
-    let inf = y.influence * (r.kind === 'void' ? 0 : 1) + (r.kind === 'home' ? Math.floor(r.dev / 2) : 0);
-    if (on) {
-      const wf = worldFx(s, r);   // the old traits (star systems: carried by bodies)
-      if (wf.forge) ind += E.forgePerDev * mult;
-      if (wf.gas) cr += E.gasCredits;
-      ind += starIndustry(s, r);  // blue giant: +1 per Mine / Extractor
-      if (r.buildings.depot) ind += E.depotIndustry;
-      if (r.vein && (r.buildings.extractor ?? 0) > 0 && conn!.has(r.id)) cr += E.extractorCredits;
-      if (hasLaw(s, p, 'federal') && r.kind === 'colony') { ind += 1; if (r.dev >= 3) inf += 1; }
-      if (r.id === pl.capital && hasLaw(s, p, 'central')) { ind *= E.centralMult; cr *= E.centralMult; inf *= E.centralMult; }
-      if (!conn!.has(r.id)) { ind *= E.cutOffYield; cr *= E.cutOffYield; inf *= E.cutOffYield; cut++; }
-    }
-    if (r.story) { const y2 = soulYield(s, r); ind += y2.industry; cr += y2.credits; inf += y2.influence; }
-    // Signature: Surge (Fate): double output this turn
-    if (sigWorld) { const m = regionSurge(s, r); if (m !== 1) { ind *= m; cr *= m; inf *= m; why.push(`${r.name}: Surge (×${m})`); } }
-    out.industry += ind; out.credits += cr; out.influence += inf;
+    // star systems (step 3): a contested, occupied or tribute-paying system shares its output out
+    const sh = shares && r.owner !== null ? systemShares(s, r) : null;
+    if (r.owner !== p && !sh?.get.has(p)) continue;
+    const owner = r.owner!;
+    const y = regionYield(s, owner, r, connOf(owner), owner === p ? why : undefined, !!sh?.contest);
+    if (!y) continue;
+    if (owner === p && y.cut) cut++;
+    if (!sh) { out.industry += y.industry; out.credits += y.credits; out.influence += y.influence; continue; }
+    const g = sh.get.get(p)!;
+    const o = y.orbital;
+    const gi = o.i * g.o.i + (y.industry - o.i) * g.s.i, gc = o.c * g.o.c + (y.credits - o.c) * g.s.c, gf = o.f * g.o.f + (y.influence - o.f) * g.s.f;
+    out.industry += gi; out.credits += gc; out.influence += gf;
+    const n = (x: number) => Math.round(x);
+    if (owner === p) {
+      if (sh.contest) why.push(`${r.name}: contested${sh.blockaded ? `, blockaded (${n(gi)}⚙ ${n(gc)}¢ of ${n(y.industry)}⚙ ${n(y.credits)}¢)` : ', you hold space'}`);
+      if (sh.occupied) why.push(`${r.name}: occupied (${Math.round((sh.occupied.scorched ? 0 : SY(s).occupiedShare) * 100)}% for ${sh.occupied.until - s.turn} more turn${sh.occupied.until - s.turn === 1 ? '' : 's'})`);
+      if (sh.tribute) why.push(`${r.name}: pays tribute to ${s.players[sh.tribute.to]?.name ?? '?'}`);
+    } else if (sh.tribute?.to === p) why.push(`+${n(gi)}⚙ ${n(gc)}¢ tribute from ${r.name}`);
+    else why.push(`+${n(gi)}⚙ ${n(gc)}¢ plunder from ${r.name}`);
   }
   if (cut) why.push(`${cut} region${cut === 1 ? '' : 's'} cut off from your capital (half yield)`);
   if (pl.relics.includes('well')) out.credits += 6;
@@ -1400,12 +1470,16 @@ function capture(s: GameState, rid: RegionId, by: PlayerId, how: 'force' | 'infl
   r.heldSince = s.turn;
   r.project = null;
   r.loyalty = [0, 0, 0];
-  if (how === 'force' && r.dev > 1 && r.kind !== 'crown' && r.kind !== 'throne' && !r.story?.deeds.some(d => d.id === 'thrice')) r.dev--; // war scars (a Thrice-Taken world is used to it)
+  // war scars (a Thrice-Taken world is used to it); star systems: that citizen flees as refugees (contest.ts)
+  let lostCitizen = false;
+  if (how === 'force' && r.dev > 1 && r.kind !== 'crown' && r.kind !== 'throne' && !r.story?.deeds.some(d => d.id === 'thrice')) { r.dev--; lostCitizen = true; }
   r.garrison = how === 'force' ? s.rules.garrison.afterCapture + (s.rules.crowns.capturedGarrisonBonus[r.kind] ?? 0) : Math.max(s.rules.garrison.afterCapture, Math.floor(maxGarrison(s, rid) / 2));
   r.garrison = Math.min(r.garrison, Math.max(maxGarrison(s, rid), s.rules.garrison.afterCapture));
   s.turnStats.captures[by]++;
   emit({ k: 'capture', pulse, region: rid, by, from, how });
-  onCapture(s, r, by, from, how, pulse, emit, scorched);
+  const liberated = onCapture(s, r, by, from, how, pulse, emit, scorched);
+  // star systems: refugees, Occupied (not on a Liberation), any Tribute ends
+  if (contestOn(s)) onCaptureContest(s, r, by, from, how, lostCitizen, liberated, scorched, pulse, emit);
   if (scorched) scorchAftermath(r);
   else if (sigOn(s)) r.wposture = null;   // a world posture belongs to the owner who set it
   if (!scorched && from !== null && (r.buildings.academy ?? 0) > 0 && s.rules.empire?.enabled !== false) {

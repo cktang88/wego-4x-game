@@ -14,6 +14,7 @@ import type { BattleReport, Engagement, Fleet, GameEvent, GameState, PlayerId, R
 import { soulOn, SR, soulHit, soulDmg, soulSiege, soulArmor, soulForceRounds, soulWantsRetreat, hasBoon, hasBane, scarOf, routBlock, routExit, onRankUp, fulfilVow } from './soul.ts';
 import { traitFx } from './shiptraits.ts';
 import { distance } from './graph.ts';
+import { battleBody, battleName, tributeCovers } from './systems.ts';
 import { sigOn, effStance, sigRound, sigCanFire, sigFirst, sigHit, sigDmg, sigTaken, sigAtk, sigAfterRound, fateStand, fateOf, fx } from './signature.ts';
 
 type Owner = PlayerId | -1;
@@ -44,9 +45,14 @@ export interface FightOutcome {
   events: GameEvent[];
 }
 
-export function hostile(s: GameState, a: Owner, b: Owner): boolean {
+/**
+ * Are these two sides hostile? With `rid` (star systems): an accepted Tribute between them covers that system,
+ * so they don't fight there (it is broken only by a Seize: see resolve.ts).
+ */
+export function hostile(s: GameState, a: Owner, b: Owner, rid?: RegionId): boolean {
   if (a === b) return false;
   if (a === -1 || b === -1) return true;
+  if (rid !== undefined && s.regions[rid]?.tribute && tributeCovers(s, a, b, rid)) return false;
   return !s.pacts.some(p => p.until >= s.turn && ((p.a === a && p.b === b) || (p.a === b && p.b === a)));
 }
 
@@ -65,7 +71,7 @@ export function engagementAt(s: GameState, rid: RegionId): Engagement | undefine
 function garrisonSide(s: GameState, rid: RegionId, fleets: Fleet[]): Owner | null {
   const r = s.regions[rid];
   if (r.garrison <= 0) return null;
-  if (r.owner !== null) return fleets.some(f => hostile(s, f.owner, r.owner!)) ? r.owner : null;
+  if (r.owner !== null) return fleets.some(f => hostile(s, f.owner, r.owner!, rid)) ? r.owner : null;
   return fleets.some(f => f.siege === rid && f.owner !== -1) ? -1 : null;
 }
 
@@ -75,7 +81,7 @@ export function wouldFight(s: GameState, rid: RegionId): boolean {
   const here = s.fleets.filter(f => f.region === rid && f.ships.length && !f.limping);
   if (!here.length) return false;
   for (const a of here) for (const b of here) {
-    if (a.owner >= b.owner || !hostile(s, a.owner, b.owner)) continue;
+    if (a.owner >= b.owner || !hostile(s, a.owner, b.owner, rid)) continue;
     if (effStance(s, a) !== 'evasive' || effStance(s, b) !== 'evasive' || engagementAt(s, rid)) return true;
   }
   return garrisonSide(s, rid, here) !== null;
@@ -113,12 +119,18 @@ export function fightRounds(
   let eng = opts.clash ? undefined : engagementAt(s, rid);
   if (!eng) {
     region.battles++;
-    const name = opts.clashName ?? `${region.battles > 1 ? ordinal(region.battles) + ' ' : ''}${active.some(f => f.siege === rid) && !active.some(f => f.siege !== rid && f.owner !== region.owner) ? 'Siege' : 'Battle'} of ${region.name}`;
+    const isSiege = active.some(f => f.siege === rid) && !active.some(f => f.siege !== rid && f.owner !== region.owner);
+    const ord = region.battles > 1 ? ordinal(region.battles) + ' ' : '';
+    // star systems: the battle is fought over a body ("Battle of the Ashen Belt (Vel)"): a siege over the habitable
+    // world or the Station, anything else (an ambush, an interception) at the belt
+    const body = opts.clash ? undefined : battleBody(s, region, active.some(f => f.siege === rid));
+    const name = opts.clashName ?? battleName(region, body, isSiege ? 'Siege' : 'Battle', ord) ?? `${ord}${isSiege ? 'Siege' : 'Battle'} of ${region.name}`;
     eng = {
       id: s.nextId++, region: rid, name, startedTurn: s.turn, startedPulse: pulse, rounds: 0, forceAt: R.combat.maxRoundsBase,
       startHp: {}, fleets: [], owners: [], losses: {}, lastStand: [], firstBlood: false, garrisonStart: region.garrison,
       hulls: {}, cmds: {},
     };
+    if (body !== undefined) { eng.body = body; if (active.some(f => f.siege === rid)) eng.siege = true; }
     if (!opts.clash) s.engagements.push(eng);
   }
   const E = eng;
@@ -139,7 +151,7 @@ export function fightRounds(
       if (E.rounds > 0) hl(`Reinforcements: ${f.name} (${f.ships.length} ship${f.ships.length > 1 ? 's' : ''}) joins the fight.`);
       // rivalry bookkeeping (nemesis / vengeance)
       for (const o of active) {
-        if (o === f || !hostile(s, o.owner, f.owner)) continue;
+        if (o === f || !hostile(s, o.owner, f.owner, rid)) continue;
         for (const [x, y] of [[f, o], [o, f]] as const) {
           const rec = x.commander.rivals[y.commander.name] ?? (x.commander.rivals[y.commander.name] = { met: 0, lastWinner: null });
           rec.met++;
@@ -183,7 +195,7 @@ export function fightRounds(
   };
   // neutral garrisons only trade fire with the fleets besieging them
   const canTarget = (a: Unit, b: Unit): boolean => {
-    if (!hostile(s, a.owner, b.owner)) return false;
+    if (!hostile(s, a.owner, b.owner, rid)) return false;
     const neutralGar = (u: Unit) => !u.ship && region.owner === null;
     if (neutralGar(b) && a.fleet && a.fleet.siege !== rid && a.owner !== -1) return false;
     if (neutralGar(a) && b.fleet && b.fleet.siege !== rid) return false;
@@ -223,8 +235,8 @@ export function fightRounds(
       const tf0 = tg.fleet;
       h += soulHit(s, sh.fleet, tf0, tg.owner, {
         region, moved: x => cameFrom.has(x.id),
-        outnumbered: hullCount(sh.owner) < Math.max(0, ...active.filter(x => hostile(s, x.owner, sh.owner)).map(x => hullCount(x.owner))),
-        enemiesHaunted: active.some(x => hostile(s, x.owner, sh.owner) && !!scarOf(x, 'haunted')),
+        outnumbered: hullCount(sh.owner) < Math.max(0, ...active.filter(x => hostile(s, x.owner, sh.owner, rid)).map(x => hullCount(x.owner))),
+        enemiesHaunted: active.some(x => hostile(s, x.owner, sh.owner, rid) && !!scarOf(x, 'haunted')),
       });
     }
     if (tg.ship) {
@@ -591,7 +603,7 @@ export function fightRounds(
     const g = garrisonFor();
     let winner = 0;
     for (const o of new Set([...active.map(x => x.owner), ...(g !== null ? [g] : [])])) {
-      if (!hostile(s, o, f.owner)) continue;
+      if (!hostile(s, o, f.owner, rid)) continue;
       winner = Math.max(winner, sideStart(o) + (o === g ? E.garrisonStart : 0));
     }
     const why = routBlock(s, f, own, winner, exit);
@@ -613,9 +625,9 @@ export function fightRounds(
   }
   /** The strongest side hostile to `o` still in the fight (for blood-debts and grudges). */
   function strongestFoe(o: Owner): Owner {
-    let best: Owner = region.owner !== null && hostile(s, region.owner, o) ? region.owner : -1, bh = -1;
+    let best: Owner = region.owner !== null && hostile(s, region.owner, o, rid) ? region.owner : -1, bh = -1;
     for (const x of new Set(active.map(f => f.owner))) {
-      if (!hostile(s, x, o)) continue;
+      if (!hostile(s, x, o, rid)) continue;
       const h = active.filter(f => f.owner === x).reduce((a, f) => a + f.ships.reduce((b, sh) => b + sh.hp, 0), 0);
       if (h > bh) { bh = h; best = x; }
     }
@@ -630,8 +642,8 @@ export function fightRounds(
   }
 
   function retreatDest(f: Fleet): RegionId | null {
-    const enemyAt = (r: RegionId) => s.fleets.some(x => x.region === r && x.ships.length && hostile(s, x.owner, f.owner) && !active.includes(x));
-    const enemyGarrison = (r: RegionId) => { const g = s.regions[r]; return g.owner !== null && g.garrison > 0 && hostile(s, g.owner, f.owner); };
+    const enemyAt = (r: RegionId) => s.fleets.some(x => x.region === r && x.ships.length && hostile(s, x.owner, f.owner, r) && !active.includes(x));
+    const enemyGarrison = (r: RegionId) => { const g = s.regions[r]; return g.owner !== null && g.garrison > 0 && hostile(s, g.owner, f.owner, r); };
     const cf = cameFrom.get(f.id);
     const cfOk = cf !== undefined && cf !== rid && !enemyAt(cf);
     if (cfOk && !enemyGarrison(cf)) return cf;
@@ -694,7 +706,7 @@ export function fightRounds(
         }
       }
       for (const [rn, rec] of Object.entries(c.rivals)) {
-        if (rn in E.cmds && hostile(s, E.cmds[rn], f.owner)) {
+        if (rn in E.cmds && hostile(s, E.cmds[rn], f.owner, rid)) {
           if (won) rec.lastWinner = c.name; else if (winnerCmd.includes(rn)) rec.lastWinner = rn;
         }
       }
@@ -735,15 +747,15 @@ export function fightRounds(
 export function disengage(s: GameState, rng: Rng, f: Fleet, pulse: number, getReport: (eng: Engagement) => BattleReport): boolean {
   const eng = engagementAt(s, f.region);
   if (!eng || !wouldFight(s, f.region)) return true;
-  const enemies = s.fleets.some(x => x.region === f.region && x.ships.length && hostile(s, x.owner, f.owner));
+  const enemies = s.fleets.some(x => x.region === f.region && x.ships.length && hostile(s, x.owner, f.owner, f.region));
   const r = s.regions[f.region];
-  const gar = r.owner !== null && hostile(s, r.owner, f.owner) && r.garrison > 0;
+  const gar = r.owner !== null && hostile(s, r.owner, f.owner, f.region) && r.garrison > 0;
   if (!enemies && !gar) return true;
   const R = s.rules;
   if (f.commander.traits.includes('survivor') || R.combat.retreatPursuitShots <= 0 || hasBoon(s, f, 'cleanbreak')) return true;
   // Soul: a bannered fleet that would be wiped out breaking off routs instead (the resolver applies it)
   const canRout = soulOn(s) && !!f.banner && f.owner >= 0 && routBlock(s, f, 1, 0, f.region) === null;
-  const stayers = s.fleets.filter(x => x.region === f.region && x !== f && x.ships.length && hostile(s, x.owner, f.owner));
+  const stayers = s.fleets.filter(x => x.region === f.region && x !== f && x.ships.length && hostile(s, x.owner, f.owner, f.region));
   const before = f.ships.length;
   const report = getReport(eng);
   let side = report.sides.find(x => x.owner === f.owner);
