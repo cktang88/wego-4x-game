@@ -1192,7 +1192,7 @@ export class GameScreen {
 
   regionHtml(r: Region): string {
     const st = this.st, you = this.you, R = st.rules;
-    const kindName = { home: 'Capital world', colony: 'Colony', crown: 'Crown', throne: 'The Throne', relic: 'Relic site', void: 'Deep void' }[r.kind];
+    const kindName = { home: 'Capital world', colony: 'Colony', crown: 'Crown', throne: 'The Throne', relic: 'Relic site', void: 'Deep void', lane: 'Deep space' }[r.kind];
     const per = this.live ? 'cycle' : 'turn';
     const y = R.economy.yields[r.kind];
     const fleets = st.fleets.filter(f => f.region === r.id);

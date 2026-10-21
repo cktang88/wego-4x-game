@@ -390,7 +390,7 @@ export class MapRenderer {
       const sz = this.siteSize(r) * 1.3;
       this.labelBoxes.push({ x: r.site.x - sz, y: r.site.y - sz, w: sz * 2, h: sz * 2 });
     }
-    const prio = (r: Region) => ({ throne: 0, crown: 1, home: 2, relic: 3, colony: 4, void: 5 })[r.kind];
+    const prio = (r: Region) => ({ throne: 0, crown: 1, home: 2, relic: 3, colony: 4, void: 5, lane: 6 })[r.kind];
     for (const r of st.regions.slice().sort((a, b) => prio(a) - prio(b))) this.drawSite(r, I, colorOf(I.owners[r.id]));
     ctx.restore();
   }
