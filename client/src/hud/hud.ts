@@ -15,6 +15,7 @@ import { renderCard, bindCard } from './card.ts';
 import { renderNotes, bindNotes } from './notify.ts';
 import * as M from '../ui/modals.ts';
 import { fmtClock, plus, shortName, tip } from './util.ts';
+import { fatePill, fatePop } from './signature.ts';
 
 type ModalName = 'empire' | 'score' | 'chronicle' | 'help';
 interface ModalsModule {
@@ -150,7 +151,7 @@ export class Hud {
       const d = k === 'credits' ? inc[k] - up : inc[k];
       return `<button class="respill ${left < 0 ? 'short' : ''}" data-k="${k}" aria-label="${k}"><i>${icon}</i><b data-num="res-${k}">${left}</b><small class="${d < 0 ? 'neg' : ''}">${plus(d)}</small></button>`;
     };
-    g.setHtml(this.h.res, cell('industry', '⚙') + cell('credits', '¢') + cell('influence', '✦'));
+    g.setHtml(this.h.res, cell('industry', '⚙') + cell('credits', '¢') + cell('influence', '✦') + fatePill(g));
   }
   renderCrests() {
     const g = this.g, st = g.st, meta = g.src.meta;
@@ -210,6 +211,7 @@ export class Hud {
   }
   private popHtml(kind: string): string {
     const g = this.g, st = g.st;
+    if (kind === 'res:fate') return fatePop(g);
     if (kind.startsWith('res:')) {
       const me = g.you;
       if (me === null) return '';

@@ -919,6 +919,29 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
           if (ms > 0 && ms < 1 && style === 'crimson') smoke(g, a0[0] + ms * 4, a0[1] - ms * 6, 3 + ms * 7, 0.35 * (1 - ms));
         }
       }
+      // Signature: a first-strike volley flares gold at the gun; a Twist of Fate bends the shot away in a violet swirl
+      if (sh.rec.first) {
+        const fe = (tt - sh.t0) / 0.5;
+        if (fe >= 0 && fe <= 1) {
+          g.save(); g.globalCompositeOperation = 'lighter';
+          drawGlow(g, A[0], A[1], 8 + 14 * fe, [255, 214, 120], 0.9 * (1 - fe));
+          g.strokeStyle = `rgba(255,226,150,${0.85 * (1 - fe)})`; g.lineWidth = 1.6;
+          g.beginPath(); g.arc(A[0], A[1], 6 + 16 * fe, 0, Math.PI * 2); g.stroke();
+          g.restore();
+        }
+      }
+      if (sh.rec.twist) {
+        const te = (tt - sh.t1 + 0.15) / 0.9;
+        if (te >= 0 && te <= 1) {
+          const tp2 = pose(sh.to, tt);
+          g.save(); g.globalCompositeOperation = 'lighter';
+          g.strokeStyle = `rgba(214,170,255,${0.9 * (1 - te)})`; g.lineWidth = 2;
+          const R0 = Math.max(10, sh.to.s * 1.1);
+          for (let k = 0; k < 2; k++) { g.beginPath(); g.arc(tp2.x, tp2.y, R0 + k * 5 + te * 6, te * 6 + k * 2.2, te * 6 + k * 2.2 + 3.6); g.stroke(); }
+          drawGlow(g, tp2.x, tp2.y, R0 * 1.4, [190, 140, 255], 0.5 * (1 - te));
+          g.restore();
+        }
+      }
       // impact
       if (!sh.rec.miss) {
         const ip = (tt - sh.t1) / 0.42;
@@ -1065,6 +1088,31 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         g.shadowBlur = 0;
         setLs(g, '0px');
       }
+    }
+    // Signature callouts: FIRST STRIKE over the first gun of a side that strikes first, TWIST OF FATE over the spared ship
+    {
+      const seenFirst = new Set<string>();
+      for (const sh of shots) {
+        if (!sh.rec.first && !sh.rec.twist) continue;
+        const rIdx = roundStart.filter(x => x <= sh.t0).length;
+        const key = sh.rec.first ? `f${sh.from.side}:${rIdx}` : `t${sh.to.id}`;
+        if (seenFirst.has(key)) continue;
+        seenFirst.add(key);
+        const t0 = sh.rec.first ? sh.t0 : sh.t1;
+        const e = tt - t0;
+        if (e < 0 || e > 1.6) continue;
+        const u = sh.rec.first ? sh.from : sh.to;
+        const tp = pose(u, t0);
+        const txt = sh.rec.first ? 'FIRST STRIKE' : 'TWIST OF FATE';
+        g.globalAlpha = 1 - clamp((e - 1.1) / 0.5);
+        g.font = `700 11px ${FONT}`; setLs(g, '0.22em');
+        const y = slot(tp.x, tp.y - Math.max(u.s, 8) - 30 - e * 8, g.measureText(txt).width, 14);
+        g.lineWidth = 3; g.strokeStyle = 'rgba(8,2,20,.9)'; g.strokeText(txt, tp.x, y);
+        g.shadowColor = sh.rec.first ? '#ffb340' : '#b070ff'; g.shadowBlur = 10;
+        g.fillStyle = sh.rec.first ? '#ffe08a' : '#dcc0ff'; g.fillText(txt, tp.x, y);
+        g.shadowBlur = 0; setLs(g, '0px');
+      }
+      g.globalAlpha = 1;
     }
     // garrison fall callout
     for (const u of units.values()) {

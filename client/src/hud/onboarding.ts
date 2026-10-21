@@ -7,8 +7,8 @@ import type { GameScreen } from '../game.ts';
 import { esc } from '../ui/dom.ts';
 import { intentFor } from './verbs.ts';
 
-type Step = 'drag' | 'seal' | 'build' | 'enemy' | 'research' | 'laws';
-const ALL: Step[] = ['drag', 'seal', 'build', 'enemy', 'research', 'laws'];
+type Step = 'drag' | 'seal' | 'build' | 'enemy' | 'research' | 'laws' | 'posture';
+const ALL: Step[] = ['drag', 'seal', 'build', 'enemy', 'research', 'laws', 'posture'];
 const skipKey = (live: boolean) => `tc.tutorial.${live ? 'live' : 'wego'}`;
 const onceKey = (s: Step) => `tc.teach.${s}`;
 const get = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -54,6 +54,7 @@ export class Teach {
         const tray = !card.classList.contains('hidden') && card.querySelector('[data-tray="build"]');
         if (tray && !this.isDone('build')) { next = 'build'; this.sawBuild = true; }
         else if (this.sawBuild && !this.isDone('build')) this.done('build');
+        else if (!this.isDone('posture') && !card.classList.contains('hidden') && card.querySelector('[data-posture-row]')) next = 'posture';
         else if (!this.isDone('enemy') && this.enemyToken()) next = 'enemy';
         else if (!this.isDone('research') && st.turn >= 2 && g.canResearchNow()) next = 'research';
         else if (!this.isDone('laws') && st.turn >= 3 && !(st.players[g.you!]?.laws ?? []).length && st.rules.empire?.enabled !== false) next = 'laws';
@@ -83,7 +84,7 @@ export class Teach {
     return f ? f.id : null;
   }
   private text(s: Step): string {
-    return { drag: 'Drag to seize', seal: 'Seal when ready', build: 'Tap to build', enemy: 'Enemy in sight', research: 'Buy a tech', laws: 'Enact a law' }[s];
+    return { drag: 'Drag to seize', seal: 'Seal when ready', build: 'Tap to build', enemy: 'Enemy in sight', research: 'Buy a tech', laws: 'Enact a law', posture: 'Read your rival' }[s];
   }
   private render() {
     const el = this.g.hud.h.callout;
@@ -100,7 +101,7 @@ export class Teach {
     const g = this.g, el = g.hud.h.callout, s = this.cur;
     if (!s || el.classList.contains('hidden')) return;
     // timed ones bow out on their own
-    if ((s === 'enemy' || s === 'laws' || s === 'research') && performance.now() - this.shownAt > 9000) { this.done(s); return; }
+    if ((s === 'enemy' || s === 'laws' || s === 'research' || s === 'posture') && performance.now() - this.shownAt > 9000) { this.done(s); return; }
     let x = 0, y = 0, below = false;
     const at = (e: Element | null) => { if (!e) return false; const r = e.getBoundingClientRect(); if (!r.width) return false; x = r.left + r.width / 2; y = r.top; return true; };
     const onMap = (fid: number | null) => {
@@ -114,6 +115,7 @@ export class Teach {
     if (s === 'drag') ok = onMap(this.dragPair?.fleet ?? null);
     else if (s === 'seal') ok = at(g.hud.h.primary.querySelector('[data-submit]') ?? g.hud.h.primary);
     else if (s === 'build') ok = at(g.hud.h.card.querySelector('[data-tray="build"] .tiles'));
+    else if (s === 'posture') ok = at(g.hud.h.card.querySelector('[data-posture-row] .pz'));
     else if (s === 'enemy') ok = onMap(this.enemyToken());
     else ok = at(g.hud.h.tools.querySelector(g.phone ? '[data-act=menu]' : '[data-act=empire]'));
     if (!ok) { el.style.visibility = 'hidden'; return; }

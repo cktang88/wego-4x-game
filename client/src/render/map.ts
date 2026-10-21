@@ -2,7 +2,7 @@
 // (strategic / operational / detail), one object per idea (region banner, fleet token per owner per region,
 // battle roundel), lenses, order and drag arrows, plus replay animation overlays and effects.
 import type { GameState, Region, Fleet, Pt, Signal, Order, Engagement } from '../../../shared/sim/types.ts';
-import { NEUTRAL_COLOR, SIGILS, CALLINGS } from '../../../shared/config/content.ts';
+import { NEUTRAL_COLOR, SIGILS, CALLINGS, POSTURES } from '../../../shared/config/content.ts';
 import { tenureTier } from '../../../shared/sim/soul.ts';
 import { drawSigil, goldPaint } from '../art/sigils.ts';
 import { drawShip, drawPlumes, gunPoints } from '../art/ships.ts';
@@ -118,6 +118,8 @@ export interface DrawInput {
   expanded?: number | null;
   /** hold Space: detail-tier banners everywhere */
   peek?: boolean;
+  /** Signature: fleet id → posture to show (yours: planned or in force; rivals': only what your view reveals) */
+  postures?: Map<number, string> | null;
 }
 
 export class MapRenderer {
@@ -1780,11 +1782,34 @@ export class MapRenderer {
     let ext = 0; for (const q of pos) ext = Math.max(ext, Math.hypot(q.x, q.y));
     const rb = Math.max(G.rb, ext + len0 * (n > 1 ? 0.36 : 0.3));
     const ry = rb * BASE_SQUASH;
+    // Signature: what this token is betting this turn, and its public marks
+    const pmap = I.postures;
+    const tPost = pmap ? t.fleets.map(f => pmap.get(f.id)).find(Boolean) ?? null : null;
+    const sfl = t.fleets.map(f => this.fleetById(I.state, f.id)).filter((x): x is Fleet => !!x);
+    const turnNow = I.state.turn;
+    const dug = sfl.some(f => f.dugIn !== null && f.dugIn !== undefined && f.dugIn >= turnNow);
+    const exposed = sfl.some(f => f.exposed !== null && f.exposed !== undefined && f.exposed >= turnNow);
+    const fated = sfl.some(f => f.fate && f.fate.turn === turnNow);
+    const lurking = tPost === 'ambush' && owner === I.you;
     ctx.save();
-    ctx.globalAlpha = clamp01(alpha * lensDim);
+    ctx.globalAlpha = clamp01(alpha * lensDim * (lurking ? 0.62 : 1));
     ctx.translate(d.x, d.y);
     if (scale !== 1) ctx.scale(scale, scale);
+    if (fated && !reduced) {
+      // a Fate in force: a slow gold-violet halo under the base
+      const k = 0.5 + 0.5 * Math.sin(now / 420);
+      drawGlow(ctx, 0, 0, rb * S * 1.7, [220, 180, 255], 0.35 + 0.2 * k);
+    }
     drawBase(ctx, 0, 0, rb * S, rb * this.dpr, fill, { sel, oos: t.oos, big: n > 2 });
+    if (lurking) {
+      // lying in wait: a dashed, dimmed rim (only its owner sees the token at all)
+      ctx.save(); ctx.setLineDash([3 * S, 3 * S]); ctx.strokeStyle = 'rgba(230,220,255,0.85)'; ctx.lineWidth = 1.4 * S;
+      ctx.beginPath(); ctx.ellipse(0, 0, rb * S * 1.12, ry * S * 1.12, 0, 0, TAU); ctx.stroke(); ctx.restore();
+    }
+    if (exposed) {
+      ctx.save(); ctx.strokeStyle = 'rgba(255,90,80,0.9)'; ctx.lineWidth = 2 * S;
+      ctx.beginPath(); ctx.ellipse(0, 0, rb * S * 1.14, ry * S * 1.14, 0, 0, TAU); ctx.stroke(); ctx.restore();
+    }
     // models: back to front
     const bob = reduced || t.moving ? 0 : Math.sin(now / 850 + (t.fleets[0]?.id ?? 0) * 1.7) * 1.3;
     const order = pos.map((q, i) => ({ ...q, i })).sort((a, b) => a.y - b.y);
@@ -1879,6 +1904,27 @@ export class MapRenderer {
     if (sub) {
       ctx.font = numFont(Z.sf * S, 600); ctx.fillStyle = 'rgba(214,210,236,0.9)';
       ctx.fillText(sub, px0 + 5 * S + w1 + 2 * S, py0 + ph / 2 + 3 * S);
+    }
+    // posture / dug-in / exposed medallions along the front of the base (strategic: the posture only)
+    {
+      const marks: { t: string; fill: string; ink: string }[] = [];
+      if (tPost && tPost !== 'steady') marks.push({ t: POSTURES[tPost]?.icon ?? '◇', fill: owner === I.you ? '#1d1f26' : '#3a1418', ink: owner === I.you ? '#ffe2a0' : '#ffb0a0' });
+      if (dug && tier !== 'strategic') marks.push({ t: '⛓', fill: '#2a2a30', ink: '#d8dbe6' });
+      if (exposed) marks.push({ t: '◉', fill: '#5a1010', ink: '#ffd0c8' });
+      if (marks.length) {
+        const R = (tier === 'strategic' ? 7 : 9.5) * S;
+        let x = -((marks.length - 1) * (R * 2 + 2 * S)) / 2;
+        const y = ry * S + R * 0.6;
+        ctx.font = numFont(R * 1.25, 700); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        for (const m of marks) {
+          ctx.beginPath(); ctx.arc(x, y, R, 0, TAU);
+          ctx.fillStyle = m.fill; ctx.fill();
+          ctx.strokeStyle = '#c9a35c'; ctx.lineWidth = 1.1 * S; ctx.stroke();
+          ctx.fillStyle = m.ink; ctx.fillText(`${m.t}\uFE0E`, x, y + 0.5 * S);
+          x += R * 2 + 2 * S;
+        }
+        ctx.textBaseline = 'alphabetic';
+      }
     }
     // a limping fleet: where it is limping to, and when it gets there
     if (tier !== 'strategic') {

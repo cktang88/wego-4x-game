@@ -11,7 +11,8 @@ import { sigilSvg } from '../art/sigils.ts';
 const KIND_ICON: Record<string, string> = {
   rout: '⤺', caught: '✝', destroyed: '✝', broken: '✝', death: '✝', vengeance: '⚔', debt: '✠', vow_broken: '✗', vow_kept: '✦',
   vow_sworn: '✠', oath: '✗', coronation: '♛', relic: '✧', capital: '♜', capture: '⚑', razed: '♨', liberated: '☼', battle: '⚔',
-  honour: '❖', legend: '★', retired: '⚑', eliminated: '✝', founded: '⚑', quiet: '☾', calling: '◈', deed: '◆', fate: '⚄', fate_bonus: '⚄',
+  honour: '❖', legend: '★', retired: '⚑', eliminated: '✝', founded: '⚑', quiet: '☾', calling: '◈', deed: '◆', fate: '✪', fate_bonus: '✪',
+  p_called: '✓', p_caught: '✗', p_ambush: '◉', p_broken: '⚡', p_exposed: '◌', p_scorched: '♨', p_levies: '⚑',
 };
 export const headlineIcon = (k: string) => KIND_ICON[k] ?? (k.startsWith('p_') ? '◉' : '•');
 

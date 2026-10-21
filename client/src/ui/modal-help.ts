@@ -2,7 +2,7 @@
 import type { GameState } from '../../../shared/sim/types.ts';
 import { type Ctx } from './modal-util.ts';
 
-export const HELP_TABS: [string, string, string][] = [['win', '♛', 'How to win'], ['orders', '➤', 'Orders'], ['combat', '⚔', 'Combat'], ['soul', '⚑', 'Banners'], ['empire', '✺', 'Empire'], ['live', '⏱', 'Live mode']];
+export const HELP_TABS: [string, string, string][] = [['win', '♛', 'How to win'], ['orders', '➤', 'Orders'], ['combat', '⚔', 'Combat'], ['soul', '⚑', 'Banners'], ['bets', '⛉', 'Postures'], ['empire', '✺', 'Empire'], ['live', '⏱', 'Live mode']];
 
 interface Card { ic: string; t: string; b: string[] }
 
@@ -33,6 +33,16 @@ function cards(st: GameState, tab: string): Card[] {
       { ic: '✒', t: 'The Herald', b: ['A front page every turn, printed from the events.', 'Plant one <b>dispatch</b> a turn: a boast, a threat, a lie.', 'Blood-debts: kill a commander, and their house hits back harder.'] },
       { ic: '⚜', t: 'The Saga', b: ['At the end: every banner’s story, reigns, the fallen.', 'Copy it or save the image for the group chat.'] },
     ];
+    case 'bets': {
+      const G = R.signature;
+      return [
+        { ic: '⛉', t: 'Postures', b: ['Each turn, bet on your rival with a fleet’s <b>posture</b>.', 'Right: you win the moment. Wrong: you pay. Steady never bets.', 'Secret: rivals see it only beside you or by scan.'] },
+        { ic: '⚔', t: 'The reads', b: ['<b>Charge</b> (with a Seize) beats Steady; <b>Guarded</b> beats Charge.', '<b>Ambush</b> beats Running; not coming beats Ambush.', 'Nobody came? Guarded digs in; Ambush is exposed.'] },
+        { ic: '⚑', t: 'World stances', b: ['<b>Levies</b>: a siege is coming. <b>Scorch</b>: you’ll lose it.', '<b>Gates</b>: an ally needs a yard. Wrong bets cost output.'] },
+        { ic: '✪', t: 'Fate', b: [`${G?.fateStart ?? 3} tokens a game; ${G?.fatePerTurn ?? 1} a turn; spent in public.`, '<b>Last Stand</b>, <b>Twist</b>, <b>Hyperjump</b>, <b>Rally</b>, <b>Surge</b>.', `Far behind (${G?.fateComebackGap ?? 10}+ ♛)? One more, once.`] },
+        { ic: '✓', t: 'In the replay', b: ['<b>CALLED IT</b> when a read pays; <b>CAUGHT OUT</b> when it backfires.', 'Gold flares: a first strike. Violet swirl: a Twist of Fate.'] },
+      ];
+    }
     case 'empire': return [
       { ic: '✺', t: 'Research', b: [`<b>One technology per turn</b>: a free action, costs ⚙ ¢.`, 'Tier III is a fork: one of two, forever.', '★ belongs to whoever buys it first.', 'An <b>Academy</b> cuts prices; capturing one steals a tech.'] },
       { ic: '⚑', t: 'Laws', b: [`Enact: 1 order + ${E.lawCost}✦. Switching sides costs double.`, `${E.lawSlotsStart} slot, +1 at turn ${E.lawSlotTurns.join(', ')}, +1 with Bureaucracy.`, 'Revoking is free.'] },
@@ -54,7 +64,7 @@ function cards(st: GameState, tab: string): Card[] {
 
 export function helpBody(c: Ctx): string {
   const cs = cards(c.g.st, c.tab);
-  const keys = c.tab === 'win' ? `<section class="hc keys"><h3><span>⌨</span>Keys</h3><div class="kgrid"><kbd>E</kbd><span>Empire</span><kbd>Q</kbd><span>Score</span><kbd>C</kbd><span>Chronicle</span><kbd>?</kbd><span>Help</span><kbd>Esc</kbd><span>Close</span><kbd>1–6</kbd><span>Tabs</span><kbd>Tab</kbd><span>Idle fleet</span><kbd>Enter</kbd><span>Seal</span><kbd>Space</kbd><span>Peek / skip</span></div></section>` : '';
+  const keys = c.tab === 'win' ? `<section class="hc keys"><h3><span>⌨</span>Keys</h3><div class="kgrid"><kbd>E</kbd><span>Empire</span><kbd>Q</kbd><span>Score</span><kbd>C</kbd><span>Chronicle</span><kbd>?</kbd><span>Help</span><kbd>Esc</kbd><span>Close</span><kbd>1–7</kbd><span>Tabs</span><kbd>Tab</kbd><span>Idle fleet</span><kbd>Enter</kbd><span>Seal</span><kbd>Space</kbd><span>Peek / skip</span></div></section>` : '';
   const restart = c.g.you !== null && (c.g.restartTips || c.g.restartTour) ? `<button class="mbtn m-ghost" data-a="tips">↻ Restart tips</button>` : '';
   return `<div class="m-help"><div class="hgrid">${cs.map(x => `<section class="hc"><h3><span>${x.ic}</span>${x.t}</h3><ul>${x.b.map(b => `<li>${b}</li>`).join('')}</ul></section>`).join('')}${keys}</div>${restart ? `<div class="help-foot">${restart}</div>` : ''}</div>`;
 }

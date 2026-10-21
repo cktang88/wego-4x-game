@@ -28,6 +28,8 @@ import { Teach } from './hud/onboarding.ts';
 import { fmtDur, shortWhy, typing } from './hud/util.ts';
 import { intentFor, commitIntent, type Intent } from './hud/verbs.ts';
 import { applyFoundingVows } from './hud/soul.ts';
+import { postureMap } from './hud/signature.ts';
+import { FATE_USES, POSTURES, WORLD_POSTURES } from '../../shared/config/content.ts';
 import { maybeHerald, openHerald, heraldOpen, closeHerald } from './ui/herald.ts';
 import { openSaga, sagaOpen, closeSaga } from './ui/saga.ts';
 // the chrome theme and the Soul layer's styles load after every other sheet (shell.css, modals.css)
@@ -745,6 +747,14 @@ export class GameScreen {
       case 'merge': return `Merge ${fn(x.fleet)} into ${fn(x.into)}`;
       case 'split': return `Split ${x.ships.length} ship(s) off ${fn(x.fleet)}`;
       case 'halt': return `Halt ${fn(x.fleet)}`;
+      case 'posture': return `${fn(x.fleet)}: ${POSTURES[x.posture]?.name ?? x.posture}`;
+      case 'wposture': return `${this.st.regions[x.region]?.name ?? '?'}: ${WORLD_POSTURES[x.posture]?.name ?? x.posture}`;
+      case 'fate': return `Fate: ${FATE_USES[x.use]?.name ?? x.use}${x.fleet !== undefined ? ` (${fn(x.fleet)})` : x.region !== undefined ? ` (${this.st.regions[x.region]?.name ?? '?'})` : ''}`;
+      case 'vow': return `${fn(x.fleet)} swears a vow`;
+      case 'honour': return `${fn(x.fleet)}: honour`;
+      case 'calling': return `${this.st.regions[x.region]?.name ?? '?'}: calling`;
+      case 'raze': return `Raze ${this.st.regions[x.region]?.name ?? '?'}`;
+      case 'dispatch': return `Dispatch: “${x.text.slice(0, 40)}”`;
       default: return empireFreeText(x, cls => this.st.rules.ships[cls]?.name ?? cls) ?? (x as { type: string }).type;
     }
   }
@@ -842,6 +852,8 @@ export class GameScreen {
       else if (e.k === 'build' || e.k === 'project' || e.k === 'betrayal' || e.k === 'pact' || e.k === 'refit') push(450, e);
       else if (e.k === 'tech' || e.k === 'law') push(e.k === 'tech' && TECH[e.tech]?.tier === 4 ? 1100 : 600, e);
       else if (e.k === 'rout') push(800, e);
+      else if (e.k === 'posture') { if (e.outcome !== 'none') push(950, e); }
+      else if (e.k === 'fate') push(900, e);
       else if (e.k === 'soul') { if (SOUL_STAMP[e.kind] && e.region !== undefined) push(SOUL_STAMP[e.kind][2] ? 1000 : 750, e); }
       else if (e.k === 'fail' || e.k === 'note' || e.k === 'blocked' || e.k === 'influence' || e.k === 'fortify' || e.k === 'scan') push(e.k === 'fail' ? 500 : 350, e);
     }
@@ -918,6 +930,22 @@ export class GameScreen {
         case 'tech': case 'law': this.empireFx(e, now); break;
         case 'refit': if (st.regions[e.region]) this.fx.push({ kind: 'build', pos: st.regions[e.region].site, color: this.color(e.owner), t0: now, dur: 700 }); break;
         case 'blocked': this.fx.push({ kind: 'text', pos: st.regions[e.at].site, color: '#ffd86b', t0: now, dur: 900, text: 'blocked' }); break;
+        case 'posture': {
+          const r = st.regions[e.region];
+          if (r && e.outcome !== 'none') {
+            this.fx.push({ kind: 'stamp', pos: r.site, color: e.outcome === 'called' ? '#ffd86b' : '#ff5d5d', t0: now, dur: 1700, text: e.outcome === 'called' ? 'CALLED IT' : 'CAUGHT OUT' });
+            focus ??= r.site;
+          }
+          break;
+        }
+        case 'fate': {
+          const fl = e.fleet !== undefined ? this.fleet(e.fleet) ?? R.result.startFleets.find(x => x.id === e.fleet) : undefined;
+          const r = e.region !== undefined ? st.regions[e.region] : fl ? st.regions[fl.region] : undefined;
+          if (r) this.fx.push({ kind: 'stamp', pos: r.site, color: '#d6b4ff', t0: now, dur: 1600, text: 'FATE' });
+          this.banner(e.use === 'bonus' ? '✪ FORTUNE' : `✪ ${(FATE_USES[e.use]?.name ?? e.use).toUpperCase()}`);
+          if (r) focus ??= r.site;
+          break;
+        }
         case 'rout': {
           const f = R.fleets.get(e.fleet);
           if (f) { f.region = e.to; R.moving.add(e.fleet); }
@@ -1143,7 +1171,7 @@ export class GameScreen {
       ...this.supplyOverlay(),
     };
     // UX v2 renderer inputs (docs/UX-V2.md §8): the drag arrow, the lens, a fanned stack, Space-peek
-    Object.assign(input, { drag: this.blockingReplay ? null : this.gest.drawDrag(now), lens: this.lens, expanded: this.expanded, peek: this.peek });
+    Object.assign(input, { drag: this.blockingReplay ? null : this.gest.drawDrag(now), lens: this.lens, expanded: this.expanded, peek: this.peek, postures: this.replay ? null : postureMap(this) });
     this.map.draw(input);
     this.fx = this.fx.filter(f => now - f.t0 < f.dur);
     this.gest.afterDraw();
@@ -1488,6 +1516,8 @@ export function eventText(st: GameState, e: GameEvent, you: number | null): stri
     case 'refit': return `${pn(e.owner)} ${fn(e.fleet)} refits at ${rn(e.region)}`;
     case 'rout': return `${pn(e.owner)} ${fn(e.fleet)} routs from ${rn(e.from)}, limping home`;
     case 'soul': return esc(e.text);
+    case 'posture': return esc(e.text);
+    case 'fate': return `✪ ${esc(e.text)}`;
     default: return '';
   }
 }

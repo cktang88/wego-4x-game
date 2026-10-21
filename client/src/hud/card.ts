@@ -18,6 +18,7 @@ import { intentFor, commitIntent, type Intent } from './verbs.ts';
 import { shipSvg, shortWhy, tip, fmtDur } from './util.ts';
 import { fleetBadge, fleetSubline, fleetSoulRows, honourChoice, sagaChips, fleetSoulActs, vowPicker, shipTraitBits, worldEpi, worldSoulRows, soulAction, openFounding, bannersLeft } from './soul.ts';
 import { bannerSvg } from '../art/sigils.ts';
+import { postureRow, fateRow, postureStatus, worldSigRows, sigAction } from './signature.ts';
 
 const PROJ_ICON: Record<string, string> = { develop: '▲', shipyard: '⚒', fortress: '⛨', mine: '⚙', tradehub: '¢', sensor: '◎', academy: '✺', extractor: '⚛', battery: '⚔', pshield: '⛨', depot: '➤', gate: '◎' };
 const MOD_COLOR: Record<string, string> = { armor: '#c9c3e6', railgun: '#ff9b6b', deflector: '#6fd0ff', ion: '#9dff8a' };
@@ -85,6 +86,7 @@ function ownFleet(g: GameScreen, f: Fleet): string {
   if (f.siege === f.region) status.push(`<span class="war">⚔ Siege${war ? ` · ${war.rounds}` : ''}</span>`);
   else if (war) status.push(`<span class="war">⚔ In battle</span>`);
   if (f.fatigued) status.push('<span class="warn">⚠ Fatigued</span>');
+  status.push(...postureStatus(g, f));
   if (f.fortified) status.push('<span>⛨ Dug in</span>');
   if (st.rules.empire?.enabled !== false && f.ships.length && ((f.oos ?? 0) > 0 || !supplied(st, f.owner).has(f.region))) status.push('<span class="warn">⚠ No supply</span>');
   if (f.route && !f.limping && (f.route.path.length || f.route.seize !== null)) {
@@ -128,7 +130,7 @@ function ownFleet(g: GameScreen, f: Fleet): string {
       ${f.history.length ? `<div class="hist">${f.history.slice(-4).reverse().map(x => `<div>${esc(x)}</div>`).join('')}</div>` : ''}</div>` : '';
   return `${head(g, f.name, g.color(f.owner), stats, `${sib}<button class="cx more-btn ${moreOpen ? 'on' : ''}" data-a="more" aria-label="More"${tip('Commander & record')}>⋯</button>`, fleetBadge(g, f), fleetSubline(g, f))}
     ${status.length ? `<div class="cst">${status.join('')}</div>` : ''}
-    ${honourChoice(g, f)}${fleetSoulRows(g, f)}
+    ${honourChoice(g, f)}${fleetSoulRows(g, f)}${postureRow(g, f)}${fateRow(g, f)}
     <div class="fan" data-fleet="${f.id}">${fan}</div>
     ${acts ? `<div class="acts">${acts}</div>` : ''}${vowPicker(g, f)}
     ${sagaChips(g, f)}${hint}${more}`;
@@ -142,7 +144,8 @@ function foeFleet(g: GameScreen, f: Fleet): string {
   const trait = f.commander.traits[f.commander.traits.length - 1];
   const stats = stat('⚔', String(fleetPower(st, f)), 'Power') + stat('⛭', String(f.ships.length), 'Ships') +
     `<span class="cmd">${esc(shortOwner(g, f.owner))}${trait ? ` · <em>${esc(CMD_TRAITS[trait]?.name ?? trait)}</em>` : ''}</span>`;
-  return `${head(g, f.name, g.color(f.owner), stats, '', fleetBadge(g, f), fleetSubline(g, f))}${fleetSoulRows(g, f)}<div class="fan foe">${ships}</div>${sagaChips(g, f)}`;
+  const ps = postureStatus(g, f);
+  return `${head(g, f.name, g.color(f.owner), stats, '', fleetBadge(g, f), fleetSubline(g, f))}${ps.length ? `<div class="cst">${ps.join('')}</div>` : ''}${fleetSoulRows(g, f)}<div class="fan foe">${ships}</div>${sagaChips(g, f)}`;
 }
 const shortOwner = (g: GameScreen, o: number | null) => g.pname(o).split(' ')[0];
 
@@ -217,7 +220,7 @@ function ownPlanet(g: GameScreen, r: Region): string {
     trays += `<div class="acts">${agents ? ib('influence', '✦', 'Purge', g.orderWhy({ type: 'influence', target: r.id }), '', 'Remove rival agents') : ''}${ib('scan', '◎', 'Scan', g.orderWhy({ type: 'scan', target: r.id }), '', 'Reveal this area')}</div>`;
   }
   const cap = st.players[you]?.capital === r.id ? ' <small class="tag">capital</small>' : '';
-  return `${head(g, r.name, g.color(r.owner), regionStats(g, r), cap, '', worldEpi(g, r))}${regionStatus(g, r)}${worldSoulRows(g, r)}${trays}`;
+  return `${head(g, r.name, g.color(r.owner), regionStats(g, r), cap, '', worldEpi(g, r))}${regionStatus(g, r)}${worldSoulRows(g, r)}${worldSigRows(g, r)}${trays}`;
 }
 
 /** Which fleet a build at r goes into: a fleet already here, or a new banner (the founding sheet). Per region. */
@@ -337,7 +340,7 @@ export function cardAction(g: GameScreen, a: string, data: DOMStringMap, shift =
   if (!sel) return;
   if (a === 'record' && soulAction(g, a, data)) return;
   if (a === 'into' && sel.kind === 'region') { intoChoice.set(sel.id, data.id === 'new' ? 'new' : Number(data.id)); g.renderAll(); return; }
-  if (g.canPlan && soulAction(g, a, data)) return;
+  if (g.canPlan && (sigAction(g, a, data) || soulAction(g, a, data))) return;
   if (a === 'fleet') { g.select({ kind: 'fleet', id: Number(data.id) }); return; }
   if (a === 'sib' && sel.kind === 'fleet') {
     const f = g.fleet(sel.id); if (!f) return;

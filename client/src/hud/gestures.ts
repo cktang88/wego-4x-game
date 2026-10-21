@@ -9,6 +9,7 @@ import { blueprintFor } from '../../../shared/sim/empire.ts';
 import { esc } from '../ui/dom.ts';
 import { intentFor, targetMap, commitIntent, isLane, VERB_COLOR, type DragSrc, type Intent } from './verbs.ts';
 import { cardAction } from './card.ts';
+import { offerCharge } from './signature.ts';
 import { shortWhy } from './util.ts';
 
 interface Press { id: number; x: number; y: number; touch: boolean; fleet: number | null; moved: boolean; pan: { cx: number; cy: number } | null; lp: number; longed: boolean }
@@ -346,7 +347,7 @@ export class Gestures {
     const it = d.intent;
     if (commit && it?.ok) {
       if (it.icon === '↶') { const k = movementSlot(g, d.src.fleet); if (k !== null) g.removeOrder(k); return; }
-      commitIntent(g, it);
+      if (commitIntent(g, it) && it.verb === 'seize' && !it.full) offerCharge(g, d.src.fleet, it.to);
       return;
     }
     // invalid / nothing: spring back (nothing to undo)

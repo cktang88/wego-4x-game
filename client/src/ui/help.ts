@@ -41,6 +41,12 @@ export function helpHtml(st: GameState): string {
     <li><b>Blood-debts</b>: kill a rival's commander and their house hits you harder until they get even (a drop of blood on the map).</li>
     <li>At the end, <b>the Saga</b> tells it all: every banner's story, the Throne's reigns, the memorial roll, broken oaths and debts. Copy it or save the image for the group chat.</li>
   </ul>
+  <h2>Postures and Fate: reading your friends</h2>
+  <ul>
+    <li>From turn ${3} each fleet card offers a <b>posture</b>: a secret bet on what your rival will do this turn. <b>Guarded</b> (they attack me here), <b>Running</b> (my path is clear), <b>Charge</b> (with a Seize: the defender isn't braced), <b>Ambush</b> (they come through here). Right, and you win the moment; wrong, and you pay. <b>Steady</b>, the default, never bets. Drop a Seize by drag and the board offers a Charge.</li>
+    <li>Your worlds can take a stance too: <b>Call the Levies</b>, <b>Scorched Earth</b>, <b>Open the Gates</b>.</li>
+    <li><b>Fate</b>: ${R.signature?.fateStart ?? 3} tokens a game (the coins at the top), at most ${R.signature?.fatePerTurn ?? 1} a turn, spent in public: Last Stand, Twist of Fate, Hyperjump, Rally (a limping fleet) and Surge (a world). The replay stamps CALLED IT and CAUGHT OUT.</li>
+  </ul>
   <h2>Combat</h2>
   <ul>
     <li><b>Battles take time.</b> Each turn a battle fights ${R.combat.roundsPerTurn} rounds and then carries on, so reinforcements can arrive and sieges give defenders time to respond. Bigger battles last longer; leaving one costs a parting volley.</li>
