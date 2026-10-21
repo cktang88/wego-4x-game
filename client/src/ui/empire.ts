@@ -173,9 +173,11 @@ function queuedLaws(g: GameScreen, pid: number): string[] {
 interface LawCard { state: 'on' | 'revoking' | 'pending' | 'open'; why: string | null; note: string; cost: number }
 function lawCard(g: GameScreen, pid: number, editable: boolean, id: string): LawCard {
   const st = g.st, pl = st.players[pid];
-  const cost = lawCost(st, pid, id);
+  // priced as the resolver will: after your free actions (revoking the other side first makes it a plain enact)
+  const cs = pid === g.you ? g.costState() : st;
+  const cost = lawCost(cs, pid, id);
   const opp = opposite(id);
-  const switching = !!opp && !!pl.laws?.includes(opp);
+  const switching = !!opp && !!cs.players[pid].laws?.includes(opp);
   if (pl.laws?.includes(id)) {
     if (pid === g.you && pendingRevoke(g, id)) return { state: 'revoking', why: null, note: g.live ? 'Revoked at the next tick.' : 'Revoked when the turn resolves (before pulse I).', cost };
     return { state: 'on', why: null, note: 'In force. Revoking is free and opens the slot.', cost };
@@ -211,7 +213,7 @@ function charterHtml(g: GameScreen, pid: number, editable: boolean): string {
     const c = lawCard(g, pid, editable, id);
     const rivals = st.players.filter(p => p.id !== pid && p.laws?.includes(id));
     const pips = rivals.length ? `<span class="rp">${rivals.map(p => `<i style="background:${esc(p.color)}"></i>`).join('')}</span>` : '';
-    const sub = c.state === 'on' ? 'in force' : c.state === 'revoking' ? 'revoking' : c.state === 'pending' ? `⏳ ${g.live ? 'next tick' : `pulse ${roman((pendingLaw(g, id) ?? 0) + 1)}`}` : `${c.cost}✦${opposite(id) && laws.includes(opposite(id)!) ? ' · switch' : ''}`;
+    const sub = c.state === 'on' ? 'in force' : c.state === 'revoking' ? 'revoking' : c.state === 'pending' ? `⏳ ${g.live ? 'next tick' : `pulse ${roman((pendingLaw(g, id) ?? 0) + 1)}`}` : `${c.cost}✦${opposite(id) && laws.includes(opposite(id)!) && !(pid === g.you && pendingRevoke(g, opposite(id)!)) ? ' · switch' : ''}`;
     const x = editable ? (c.state === 'on' ? `<i class="x" data-revoke="${id}" title="Revoke (free)" role="button" aria-label="Revoke ${esc(l.name)}">×</i>`
       : c.state === 'revoking' && !g.live ? `<i class="x" data-unrevoke="${id}" title="Keep this law" role="button" aria-label="Keep ${esc(l.name)}">↺</i>`
       : c.state === 'pending' ? `<i class="x" data-unlaw="${id}" title="Remove this order" role="button" aria-label="Cancel">×</i>` : '') : '';

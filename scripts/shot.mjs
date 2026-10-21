@@ -3,6 +3,8 @@ import { chromium } from 'playwright-core';
 const [url, out, actions = '[]', w = '1440', h = '900'] = process.argv.slice(2);
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const page = await browser.newPage({ viewport: { width: Number(w), height: Number(h) } });
+// ignore Vite hot reloads (other files changing mid-run would reload the page)
+await page.routeWebSocket(/\?token=/, () => {});
 const logs = [];
 page.on('console', m => logs.push(`[${m.type()}] ${m.text()}`));
 page.on('pageerror', e => logs.push(`[pageerror] ${e.message}`));

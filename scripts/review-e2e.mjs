@@ -6,6 +6,8 @@ const base = process.argv[2] ?? 'http://localhost:5173/';
 const TURNS = Number(process.argv[3] ?? 15);
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+// ignore Vite hot reloads (other files changing mid-run would reload the page)
+await page.routeWebSocket(/\?token=/, () => {});
 const errors = [];
 const fails = [];
 const check = (ok, msg) => { if (!ok) fails.push(msg); console.log(`${ok ? 'ok  ' : 'FAIL'} ${msg}`); };
@@ -65,6 +67,13 @@ console.log('watch session', JSON.stringify(ws), 'battles opened', opened);
 check(ws.turn > TURNS || ws.winner !== null, `auto-play reached turn ${TURNS + 1} (got ${ws.turn})`);
 await page.click('[data-x=auto]').catch(() => {});
 await page.evaluate(() => window.tc.screen.endReplay());
+// a game that ended during auto-play shows the victory card: look around (it must close and stay closed)
+await page.waitForTimeout(500);
+if (await page.$('[data-victory]')) {
+  await page.click('[data-victory] [data-x]');
+  await page.waitForTimeout(300);
+  check(!(await page.$('[data-victory]')), 'victory card closes with Look around');
+}
 // chronicle battle list opens viewer for every battle of last turn (garrison-only, 3-side…)
 await page.click('[data-tab=chronicle]');
 const bids = await page.$$eval('[data-battle]', es => es.map(e => e.dataset.battle));

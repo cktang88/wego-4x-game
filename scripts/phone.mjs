@@ -9,6 +9,8 @@ const ctx = await browser.newContext({
   userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
 });
 const page = await ctx.newPage();
+// ignore Vite hot reloads (other files changing mid-run would reload the page)
+await page.routeWebSocket(/\?token=/, () => {});
 const errors = [];
 page.on('pageerror', e => errors.push(e.message));
 const shot = async n => page.screenshot({ path: `${out}/ph-${n}.png` });

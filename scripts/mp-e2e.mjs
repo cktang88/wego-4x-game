@@ -1,10 +1,10 @@
 // Online multiplayer in real browsers: 3 isolated contexts create/join/seal a turn.
 import { chromium } from 'playwright-core';
 const base = process.argv[2] ?? 'http://localhost:5173/';
-const out = process.argv[3] ?? '.';
+const out = process.argv[3] ?? '/tmp';
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const errors = [];
-const mk = async () => { const c = await browser.newContext({ viewport: { width: 1280, height: 820 } }); const p = await c.newPage(); p.on('pageerror', e => errors.push(e.message)); return p; };
+const mk = async () => { const c = await browser.newContext({ viewport: { width: 1280, height: 820 } }); const p = await c.newPage(); await p.routeWebSocket(/\?token=/, () => {}); p.on('pageerror', e => errors.push(e.message)); return p; };
 const a = await mk(), b = await mk(), c = await mk();
 await a.goto(base);
 await a.fill('[data-l=name]', 'Alice');

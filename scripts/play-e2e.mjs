@@ -5,6 +5,8 @@ const out = process.argv[2] ?? '.';
 const base = process.argv[3] ?? 'http://localhost:5173/';
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+// ignore Vite hot reloads (other files changing mid-run would reload the page)
+await page.routeWebSocket(/\?token=/, () => {});
 const errors = [];
 page.on('pageerror', e => errors.push(e.message));
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });

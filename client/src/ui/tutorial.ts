@@ -103,7 +103,8 @@ export class Coach {
 
   private step(): Step | null {
     const g = this.g, st = g.st, you = g.you!;
-    if (g.replay || g.curtain || document.querySelector('.overlay, .bv-overlay')) return null;
+    // a LIVE tick's short animation doesn't take over the screen: the bubble stays (it used to blink away every tick)
+    if (g.blockingReplay || g.curtain || document.querySelector('.overlay, .bv-overlay')) return null;
     const live = g.live, ph = g.phone, tap = ph ? 'Tap' : 'Click';
     const fleetOrder = (o: { type: string } | null) => !!o && ['move', 'seize', 'fortify', 'excavate'].includes(o.type);
     const buildOrder = (o: { type: string } | null) => !!o && (o.type === 'build' || o.type === 'develop');

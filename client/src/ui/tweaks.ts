@@ -6,9 +6,15 @@ import { esc, overlay, toast } from './dom.ts';
 const KEY = 'tc.rules.overrides';
 
 export function loadOverrides(): Record<string, unknown> {
-  try { return JSON.parse(localStorage.getItem(KEY) ?? '{}'); } catch { return {}; }
+  try {
+    const o = JSON.parse(localStorage.getItem(KEY) ?? '{}');
+    // only an object of rule groups is meaningful (a pasted string or array would count its characters as "groups")
+    return isObj(o) ? o as Record<string, unknown> : {};
+  } catch { return {}; }
 }
-function saveOverrides(o: unknown) { localStorage.setItem(KEY, JSON.stringify(o)); }
+function saveOverrides(o: unknown) {
+  try { localStorage.setItem(KEY, JSON.stringify(o)); } catch { toast('Could not save: browser storage is blocked or full.'); }
+}
 
 function get(o: any, path: string[]) { return path.reduce((a, k) => (a == null ? undefined : a[k]), o); }
 function set(o: any, path: string[], v: unknown) {
@@ -73,6 +79,9 @@ export function openTweaks() {
   o.querySelector('[data-x="import"]')!.addEventListener('click', () => {
     const t = prompt('Paste rule overrides JSON');
     if (!t) return;
-    try { saveOverrides(JSON.parse(t)); o.remove(); openTweaks(); } catch { toast('Invalid JSON'); }
+    let v: unknown;
+    try { v = JSON.parse(t); } catch { toast('Invalid JSON'); return; }
+    if (!isObj(v)) { toast('Expected a JSON object of rule groups, e.g. {"orders":{"perTurn":4}}'); return; }
+    saveOverrides(v); o.remove(); openTweaks();
   });
 }

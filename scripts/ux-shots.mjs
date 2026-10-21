@@ -9,6 +9,8 @@ const errors = [];
 async function run(tag, phone, live) {
   const ctx = phone ? await browser.newContext({ ...devices['iPhone 15 Pro'], defaultBrowserType: undefined }) : await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
+  // ignore Vite hot reloads (other files changing mid-run would reload the page)
+  await page.routeWebSocket(/\?token=/, () => {});
   page.on('pageerror', e => errors.push(`${tag}: ${e.message}`));
   page.on('console', m => { if (m.type() === 'error') errors.push(`${tag}: ${m.text()}`); });
   let n = 0;
@@ -91,8 +93,11 @@ async function run(tag, phone, live) {
     await page.waitForTimeout(300);
   }
   console.log(tag, 'step', await step());
+  if (await step() === 'empire') { await shot('empire-step'); await tapSel('[data-coach=next]'); await page.waitForTimeout(300); console.log(tag, 'step', await step()); }
   await shot('end');
   await tapSel('[data-coach=finish]');
+  await page.waitForTimeout(200);
+  if (await step() !== null) { console.log(tag, 'FAIL tour did not finish'); errors.push(`${tag}: tour did not finish`); }
   await page.waitForTimeout(300);
   // a fleet panel with a section open, then the orders tab
   await tapAt(...await xy('fleet', info.fleet));

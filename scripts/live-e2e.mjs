@@ -7,6 +7,8 @@ const phone = process.argv[4] === 'phone';
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const ctx = phone ? await browser.newContext({ ...devices['iPhone 15 Pro'], defaultBrowserType: undefined }) : await browser.newContext({ viewport: { width: 1440, height: 900 } });
 const page = await ctx.newPage();
+// ignore Vite hot reloads (other files changing mid-run would reload the page)
+await page.routeWebSocket(/\?token=/, () => {});
 const errors = [];
 page.on('pageerror', e => errors.push(e.message));
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });

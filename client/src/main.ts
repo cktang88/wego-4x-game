@@ -11,6 +11,27 @@ import type { GameMeta } from '../../shared/protocol.ts';
 import { LIVE_SPEEDS } from '../../shared/sim/live.ts';
 
 const app = document.getElementById('app')!;
+
+/** localStorage that never throws: with site data blocked (or a full quota) the lobby must still work.
+ *  Saves also live in memory for the session, so a local game can still be started and played. */
+const mem = new Map<string, string>();
+const store = {
+  get(k: string): string | null { try { const v = localStorage.getItem(k); if (v !== null) return v; } catch { /* blocked */ } return mem.get(k) ?? null; },
+  set(k: string, v: string) { mem.set(k, v); try { localStorage.setItem(k, v); } catch { /* blocked or full */ } },
+};
+/** A new local game in this save slot: forget the old one's plans and "seen turn" markers (same seed → same keys). */
+function forgetLocal(slot: string) {
+  try {
+    const drop: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith(`tc.plan.${slot}:`) || k.startsWith(`tc.seen.${slot}:`))) drop.push(k);
+    }
+    drop.forEach(k => localStorage.removeItem(k));
+  } catch { /* */ }
+}
+/** LocalSource keeps its own save in localStorage; mirror it in memory so a blocked storage can't lose the game. */
+function remember(src: LocalSource) { mem.set(src.storageKey, JSON.stringify(src.save)); }
 let screen: GameScreen | null = null;
 /** Bumped on every route change so async work from a previous route can tell it is stale. */
 let routeGen = 0;
@@ -19,6 +40,7 @@ let pending: RemoteSource | null = null;
 
 function route() {
   routeGen++;
+  if (screen?.src instanceof LocalSource) remember(screen.src);
   screen?.destroy();
   screen = null;
   pending?.close();
@@ -36,7 +58,7 @@ function route() {
 window.addEventListener('hashchange', route);
 
 function openLocal(key: string) {
-  const raw = localStorage.getItem(key);
+  const raw = store.get(key);
   if (!raw) { location.hash = '#/'; return; }
   let save: LocalSave;
   try {
@@ -110,13 +132,13 @@ async function seatFromToken(id: string, token: string): Promise<number> {
 function joinDialog(meta: GameMeta) {
   app.innerHTML = `<div class="lobby"><div class="lobby-inner"><div class="card" style="max-width:520px;margin:40px auto">
     <h2>Join “${esc(meta.name)}”</h2>
-    <div class="form"><span>Your name</span><input data-name value="${esc(localStorage.getItem('tc.name') ?? '')}" placeholder="Commander"></div>
+    <div class="form"><span>Your name</span><input data-name value="${esc(store.get('tc.name') ?? '')}" placeholder="Commander"></div>
     <div class="col" style="margin-top:12px">${meta.seats.map(s => `<div class="row"><span class="grow">${esc(s.name)} <span class="faint">${s.kind === 'ai' ? `AI (${esc(s.aiLevel)})` : s.claimed ? 'taken' : 'open'}</span></span>
       ${s.kind === 'human' && !s.claimed ? `<button class="primary" data-seat="${Number(s.seat)}">Take this seat</button>` : ''}</div>`).join('')}</div>
     <div class="row" style="margin-top:14px"><button data-spec>Spectate instead</button><a href="#/">Back to lobby</a></div></div></div></div>`;
   app.querySelectorAll<HTMLButtonElement>('[data-seat]').forEach(b => b.addEventListener('click', async () => {
     const name = app.querySelector<HTMLInputElement>('[data-name]')!.value.trim();
-    if (name) localStorage.setItem('tc.name', name);
+    if (name) store.set('tc.name', name);
     try {
       const r = await api.join(meta.id, Number(b.dataset.seat), name);
       tokens.set(meta.id, r);
@@ -139,8 +161,8 @@ function joinDialog(meta: GameMeta) {
 
 // ===================================================================== lobby
 function lobby() {
-  const hasSave = !!localStorage.getItem('tc.local.autosave');
-  const name = localStorage.getItem('tc.name') ?? '';
+  const hasSave = !!store.get('tc.local.autosave');
+  const name = store.get('tc.name') ?? '';
   const tw = Object.keys(loadOverrides()).length;
   app.innerHTML = `<div class="lobby"><div class="lobby-inner">
     <div class="title"><h1>THREE CROWNS</h1>
@@ -176,7 +198,7 @@ function lobby() {
     </div></div></div>`;
   const q = (s: string) => app.querySelector<HTMLInputElement>(s)!;
   q('[data-l="start"]').addEventListener('click', () => {
-    const prev = localStorage.getItem('tc.local.autosave');
+    const prev = store.get('tc.local.autosave');
     if (prev) {
       try {
         const sv = JSON.parse(prev) as LocalSave;
@@ -184,7 +206,7 @@ function lobby() {
       } catch { /* ignore */ }
     }
     const nm = q('[data-l="name"]').value.trim();
-    if (nm) localStorage.setItem('tc.name', nm);
+    if (nm) store.set('tc.name', nm);
     const lv = (k: string) => q(`[data-l="${k}"]`).value;
     const seat = (v: string) => v === 'human' ? { kind: 'human' as const, aiLevel: 'standard' as const } : { kind: 'ai' as const, aiLevel: v as 'novice' };
     const seed = q('[data-l="seed"]').value.trim();
@@ -195,11 +217,19 @@ function lobby() {
     if (live && (lv('ai1') === 'human' || lv('ai2') === 'human')) toast('Live mode is one human per browser: hotseat rivals became AIs. Use Online multiplayer to play live with friends.');
     const src = LocalSource.create('Local game', [{ kind: 'human', aiLevel: 'standard' }, rival(lv('ai1')), rival(lv('ai2'))], [nm || undefined], seed ? Number(seed) : undefined, loadOverrides(), undefined, live);
     src.refresh();
+    // this source only wrote the save; the route opens its own. Left running, a LIVE one kept ticking its
+    // own copy of the game in the background and overwrote the autosave (without your queued orders)
+    src.close();
+    remember(src);
+    forgetLocal('tc.local.autosave');
     location.hash = '#/local';
   });
   q('[data-l="watch"]').addEventListener('click', () => {
     const src = LocalSource.create('AI exhibition', [{ kind: 'ai', aiLevel: 'expert' }, { kind: 'ai', aiLevel: 'standard' }, { kind: 'ai', aiLevel: 'novice' }], ['Expert AI', 'Standard AI', 'Novice AI'], undefined, loadOverrides(), 'tc.local.watch');
     src.refresh();
+    src.close();
+    remember(src);
+    forgetLocal('tc.local.watch');
     location.hash = '#/watch';
   });
   app.querySelector('[data-l="continue"]')?.addEventListener('click', () => (location.hash = '#/local'));
@@ -210,7 +240,8 @@ function lobby() {
       try {
         const save = JSON.parse(await f.text());
         if (!save?.state?.regions || !Array.isArray(save.seats)) throw new Error('not a save');
-        localStorage.setItem('tc.local.autosave', JSON.stringify(save));
+        forgetLocal('tc.local.autosave');
+        store.set('tc.local.autosave', JSON.stringify(save));
         // hashchange triggers the route; if we're already there, route explicitly
         if (location.hash === '#/local') route(); else location.hash = '#/local';
       } catch { toast('That file is not a Three Crowns save.'); }
@@ -226,7 +257,7 @@ function lobby() {
   });
   q('[data-o="create"]').addEventListener('click', async () => {
     const nm = q('[data-l="name"]').value.trim() || 'Player 1';
-    localStorage.setItem('tc.name', nm);
+    store.set('tc.name', nm);
     const seat = (v: string) => v === 'human' ? { kind: 'human' } : { kind: 'ai', aiLevel: v };
     try {
       const r = await api.create({

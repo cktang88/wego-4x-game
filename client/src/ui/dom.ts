@@ -159,6 +159,17 @@ function schedule() {
   queueMicrotask(() => { scheduled = false; scanNums(); scanPops(); });
 }
 
+/**
+ * Forget every remembered number and list item: a new game (or the next hotseat player) starts from what it shows,
+ * instead of counting from the previous game's VP / the previous player's resources.
+ */
+export function resetUiFx() {
+  for (const st of nums.values()) cancelAnimationFrame(st.raf);
+  nums.clear();
+  popKeys = new Set();
+  popGroups = new Set();
+}
+
 /** Re-scan [data-num] / [data-pop] right now (normally automatic via a MutationObserver). */
 export function animateNumbers() { scanNums(); scanPops(); }
 

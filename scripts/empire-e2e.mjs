@@ -13,6 +13,8 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
 async function start(ctxOpts) {
   const ctx = await browser.newContext(ctxOpts);
   const page = await ctx.newPage();
+  // ignore Vite hot reloads (other files changing mid-run would reload the page)
+  await page.routeWebSocket(/\?token=/, () => {});
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(base);
@@ -220,6 +222,8 @@ const seal = async page => {
 {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
+  // ignore Vite hot reloads (other files changing mid-run would reload the page)
+  await page.routeWebSocket(/\?token=/, () => {});
   page.on('pageerror', e => errors.push(e.message));
   await page.goto(base);
   await page.evaluate(() => { localStorage.clear(); localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); });
@@ -250,6 +254,8 @@ const seal = async page => {
 {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
+  // ignore Vite hot reloads (other files changing mid-run would reload the page)
+  await page.routeWebSocket(/\?token=/, () => {});
   page.on('pageerror', e => errors.push(e.message));
   await page.goto(base);
   await page.evaluate(() => { localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); });
