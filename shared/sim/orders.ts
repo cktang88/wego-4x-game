@@ -5,6 +5,8 @@ import { fleetSpeed } from './graph.ts';
 import type { GameState, Order, PlayerId, Ship } from './types.ts';
 import { classBlock, moveNeighbors, hasLaw, hasTech, lawBlock, lawCost, lookup, maxDevAt, projectBlock, projectCostMod, shipCostMod, blueprintFor } from './empire.ts';
 import { LAW } from '../config/empire.ts';
+import { DEEDS } from '../config/content.ts';
+import { soulOn, SR, bannersFree, bannerLimit, resolveFound, razeBlock, soulShipDiscount, hasBane } from './soul.ts';
 
 export const ORDER_INFO: Record<Order['type'], { name: string; icon: string; help: string }> = {
   move:      { name: 'Move',      icon: '➤', help: 'Move a fleet up to its speed in regions. Overdrive: +1 range, but the fleet is fatigued next turn (weaker attacks).' },
@@ -20,6 +22,9 @@ export const ORDER_INFO: Record<Order['type'], { name: string; icon: string; hel
   pact:      { name: 'Pact',      icon: '⚭', help: 'Offer a non-aggression pact. If both players offer each other on the same turn it forms for several turns. Breaking one costs VP.' },
   law:       { name: 'Enact law', icon: '⚑', help: 'Enact a law from your Charter (costs influence). Switching a pair to its other side costs double.' },
   refit:     { name: 'Refit',     icon: '⚒', help: 'At one of your shipyards: every ship in the fleet gets its class\'s current module, and is fully repaired.' },
+  retire:    { name: 'Retire',    icon: '⚑', help: 'A Storied or Legend fleet furls its banner at one of your worlds. Its ships stand down; the world becomes its Haven (a permanent Deed carrying its first boon).' },
+  engrave:   { name: 'Engrave',   icon: '✎', help: 'Engrave one of a world\'s Deeds so it is never replaced.' },
+  raze:      { name: 'Raze',      icon: '🔥', help: 'Raze a world you captured last turn: a lump of industry and credits, development −1, its calling lost; its former owner swears vengeance.' },
 };
 
 export function orderCost(s: GameState, o: Order, p: PlayerId): Partial<Res> {
@@ -28,7 +33,15 @@ export function orderCost(s: GameState, o: Order, p: PlayerId): Partial<Res> {
     case 'build': {
       const c = { ...(Object.hasOwn(s.rules.ships, o.cls) ? s.rules.ships[o.cls].cost : undefined) };
       if (s.players[p]?.relics.includes('loom') && c.industry) c.industry = Math.round(c.industry * 0.85);
-      return shipCostMod(s, p, o.cls, c);
+      const out = shipCostMod(s, p, o.cls, c);
+      if (soulOn(s)) {
+        // Soul: an Arsenal world builds cheaper; a Gilded fleet costs more to reinforce
+        const disc = soulShipDiscount(s, s.regions[o.region]);
+        if (disc && out.industry) out.industry = Math.round(out.industry * (1 - disc));
+        const tf = o.fleet !== null ? s.fleets.find(x => x.id === o.fleet) : undefined;
+        if (tf && hasBane(s, tf, 'gilded')) out.credits = (out.credits ?? 0) + SR(s).gildedCredits;
+      }
+      return out;
     }
     case 'develop': return projectCostMod(s, p, o.project, o.region, { ...(Object.hasOwn(s.rules.projects, o.project) ? s.rules.projects[o.project].cost : undefined) });
     case 'influence': {
@@ -46,6 +59,7 @@ export function orderCost(s: GameState, o: Order, p: PlayerId): Partial<Res> {
       return n ? { industry: n * s.rules.empire.refitIndustryPerShip } : {};
     }
     case 'pact': return { influence: I.pactCost };
+    case 'engrave': return { influence: SR(s).engraveInfluence, credits: SR(s).engraveCredits };
     default: return {};
   }
 }
@@ -97,6 +111,9 @@ export function describeOrder(s: GameState, o: Order): string {
     case 'pact': return `Offer pact to ${s.players[o.with]?.name ?? '?'}`;
     case 'law': return `Enact ${lookup(LAW, o.law)?.name ?? o.law}`;
     case 'refit': return `Refit ${fn(o.fleet)}`;
+    case 'retire': return `${fn(o.fleet)} retires`;
+    case 'engrave': return `Engrave ${lookup(DEEDS, o.deed)?.name.replace(/\{fleet\}/, '…') ?? o.deed} at ${rn(o.region)}`;
+    case 'raze': return `Raze ${rn(o.region)}`;
   }
 }
 
@@ -137,6 +154,7 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       if (t.owner === p) return 'already yours';
       if (t.kind === 'lane') return 'nothing to seize in deep space';
       if (o.via !== undefined && (!Array.isArray(o.via) || o.via.length > 32 || !o.via.every(x => reg(x)))) return 'bad path';
+      if (fleet!.limping) return 'a limping fleet cannot attack';
       const via = o.via ?? [];
       if (via.length) {
         // march then assault: the whole way (via + the target) must fit in one turn's movement
@@ -168,7 +186,16 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
         const f = s.fleets.find(x => x.id === o.fleet);
         if (!f || f.owner !== p || f.region !== o.region) return 'target fleet not here';
         if (f.ships.length >= s.rules.maxShipsPerFleet) return 'fleet is full';
-      } else if (s.fleets.filter(f => f.owner === p && f.ships.length).length >= s.rules.maxFleets) return 'too many fleets';
+        if (soulOn(s) && !f.banner && o.cls !== 'scout') return 'a picket carries only scouts: found a fleet (a new banner) or build into a bannered fleet';
+      } else {
+        if (s.fleets.filter(f => f.owner === p && f.ships.length).length >= s.rules.maxFleets) return 'too many fleets';
+        if (soulOn(s) && (o.cls !== 'scout' || o.found)) {
+          // Soul: a new fleet raises a banner: one must be free (bannersBase + 1 per Crown held)
+          if (bannersFree(s, p) <= 0) return `no free banner (${bannerLimit(s, p)} in use): build into a fleet here, or hold more Crowns`;
+          const fd = resolveFound(s, p, o.region, o.found);
+          if (typeof fd === 'string') return fd;
+        }
+      }
       return null;
     }
     case 'develop': {
@@ -209,6 +236,25 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       return null;
     }
     case 'law': return typeof o.law === 'string' ? lawBlock(s, p, o.law) : 'unknown law';
+    case 'retire': {
+      if (!soulOn(s) || !fleet!.banner) return 'only a bannered fleet can retire';
+      if (fleet!.commander.rank < SR(s).retireMinRank) return 'only Storied or Legend fleets retire';
+      const r = s.regions[fleet!.region];
+      if (r.owner !== p || r.kind === 'lane') return 'must be at one of your worlds';
+      if (s.fleets.some(f => f.region === r.id && f.ships.length && f.owner !== p && (f.owner === -1 || !s.pacts.some(x => x.until >= s.turn && ((x.a === p && x.b === f.owner) || (x.b === p && x.a === f.owner)))))) return 'enemies present';
+      return null;
+    }
+    case 'engrave': {
+      const r = reg(o.region);
+      if (!r) return 'no such region';
+      if (!soulOn(s) || !r.story) return 'no deeds here';
+      if (r.owner !== p) return 'not your world';
+      const d = r.story.deeds.find(x => x.id === o.deed);
+      if (!d) return 'that deed is not here';
+      if (r.story.deeds.some(x => x.engraved)) return 'a deed is already engraved here';
+      return null;
+    }
+    case 'raze': return razeBlock(s, p, o.region, false);
     case 'refit': {
       const r = s.regions[fleet!.region];
       if (r.owner !== p || !(r.buildings.shipyard ?? 0)) return 'must be at one of your shipyards';

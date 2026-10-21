@@ -23,7 +23,7 @@ await page.waitForTimeout(1000);
 await page.screenshot({ path: `${out}/live-0.png` });
 const fleetXY = id => page.evaluate(id => {
   const s = window.tc.screen; const lay = s.currentFleetDraws().find(f => f.id === id);
-  const p = s.map.toScreen(lay.pos); const r = s.el.canvas.getBoundingClientRect(); return [p.x + r.left, p.y + r.top];
+  const p = s.map.toScreen(s.lastFleetPos.get(id) ?? lay.pos); const r = s.el.canvas.getBoundingClientRect(); return [p.x + r.left, p.y + r.top];
 }, id);
 const regionXY = id => page.evaluate(id => {
   const s = window.tc.screen; const p = s.map.toScreen(s.st.regions[id].site); const r = s.el.canvas.getBoundingClientRect(); return [p.x + r.left, p.y + r.top - 4];

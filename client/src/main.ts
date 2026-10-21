@@ -3,6 +3,7 @@ import './style.css';
 import './fx.css';
 import './ux.css';
 import './empire.css';
+import './shell.css';
 import { GameScreen, backfillRules } from './game.ts';
 import { LocalSource, RemoteSource, api, tokens, type LocalSave } from './net.ts';
 import { esc, toast, overlay } from './ui/dom.ts';

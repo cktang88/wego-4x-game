@@ -10,6 +10,9 @@ const games = Number(arg('games', '20'));
 const rules = JSON.parse(arg('rules', '{}'));
 const verbose = args.includes('--verbose');
 const seed0 = Number(arg('seed', '1000'));
+// Soul layer: what AI fleets are founded with (style combos, random legal combos, or none) — for boon balance checks
+const combos = arg('combos', 'style');
+(globalThis as { __tcSoulCombos?: string }).__tcSoulCombos = combos;
 const suite = args.includes('--suite')
   ? ['expert,standard,novice', 'expert,novice,novice', 'standard,novice,novice', 'expert,expert,standard']
   : [arg('levels', 'expert,standard,novice')];
@@ -45,6 +48,11 @@ for (const lvStr of suite) {
   const techLv: Record<string, number[]> = {};
   let techsOwned = 0, oosNotes = 0, stolen = 0;
   const vpSpread: number[] = [];
+  // ---- Soul layer metrics
+  const soulN: Record<string, number> = {};
+  const bump = (k: string, n = 1) => { soulN[k] = (soulN[k] ?? 0) + n; };
+  const traitDist: Record<string, Record<string, number>> = {};
+  const boonSeats: Record<string, number> = {}, boonWins: Record<string, number> = {};
   const t0 = Date.now();
   for (let g = 0; g < games; g++) {
     // rotate seats so map position doesn't bias the level comparison
@@ -57,8 +65,20 @@ for (const lvStr of suite) {
         subs[p.id] = planTurn(s, p.id);
         for (const o of subs[p.id].orders) { const k = o ? o.type : 'none'; (orderMix[p.aiLevel] ??= {})[k] = (orderMix[p.aiLevel][k] ?? 0) + 1; }
       }
+      const startBanner = new Map(s.fleets.map(f => [f.id, !!f.banner]));
       s = resolveTurn(s, subs);
       battles += s.last!.battles.length;
+      for (const e of s.last!.events) {
+        if (e.k === 'rout') bump('routs');
+        if (e.k === 'destroyed' && e.owner >= 0) bump(startBanner.get(e.fleet) || s.soul?.fallen.some(r => r.id === e.fleet) ? 'banners destroyed' : 'pickets/other destroyed');
+        if (e.k === 'soul') bump(e.kind);
+        if (e.k === 'build') {
+          const r = s.regions[e.region];
+          const sh = s.fleets.find(f => f.id === e.fleet)?.ships.find(x => x.name === e.name);
+          const label = r.feature !== 'none' ? r.feature : r.trait ?? r.kind;
+          for (const t of sh?.traits ?? []) { (traitDist[label] ??= {})[t] = (traitDist[label][t] ?? 0) + 1; }
+        }
+      }
       for (const e of s.last!.events) {
         if (e.k === 'capture') { captures++; if (e.how === 'influence') influenceCaps++; }
         if (e.k === 'pact') pacts++;
@@ -88,6 +108,19 @@ for (const lvStr of suite) {
       (vpByLevel[p.aiLevel] ??= []).push(p.vp);
     }
     relics += s.loreFound;
+    bump('caught', (s.soul?.fallen ?? []).filter(r => r.fate === 'caught').length);
+    bump('fallen: broken', (s.soul?.fallen ?? []).filter(r => r.fate === 'broken').length);
+    bump('fallen: retired', (s.soul?.fallen ?? []).filter(r => r.fate === 'retired').length);
+    bump('honours', s.fleets.concat().reduce((a, f) => a + (f.honours?.length ?? 0), 0) + (s.soul?.fallen ?? []).reduce((a, r) => a + r.honours.length, 0));
+    bump('debts', s.soul?.debts.length ?? 0);
+    bump('oathbreaker houses', s.players.filter(p => p.oathbreaker?.length).length);
+    // boon pick/win: which boons each seat flew (founded or honoured), against who won
+    for (const p of s.players) {
+      const used = new Set<string>();
+      for (const f of s.fleets) if (f.owner === p.id && f.banner) { for (const b of f.banner.boons) used.add(b); for (const h of f.honours ?? []) used.add(h.id); }
+      for (const r of s.soul?.fallen ?? []) if (r.owner === p.id) { for (const b of r.boons) used.add(b); for (const h of r.honours) used.add(h); }
+      for (const b of used) { boonSeats[b] = (boonSeats[b] ?? 0) + 1; if (s.winner === p.id) boonWins[b] = (boonWins[b] ?? 0) + 1; }
+    }
     turns += s.turn - 1;
     const w = s.winner ?? 0;
     if (leaderT6 === w) earlyDecided++;
@@ -114,5 +147,8 @@ for (const lvStr of suite) {
   console.log(`techs/player ${(techsOwned / games / 3).toFixed(1)} ${JSON.stringify(Object.fromEntries(Object.entries(techLv).map(([k, v]) => [k, avg(v)])))} | stolen ${stolen} | out-of-supply events/game ${(oosNotes / games).toFixed(1)} | empire projects/game`, Object.fromEntries(Object.entries(empireBuilds).map(([k, v]) => [k, +(v / games).toFixed(1)])));
   console.log('tech: times bought (avg turn):', Object.entries(techTurn).sort((a, b) => b[1].length - a[1].length).map(([k, v]) => `${k}:${v.length}(${avg(v)})`).join(' '));
   console.log('laws enacted :', lawCount);
+  console.log(`soul (combos=${combos}) per game:`, Object.fromEntries(Object.entries(soulN).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, +(v / games).toFixed(2)])));
+  console.log('boon seats & win% (fair share 33%):', Object.entries(boonSeats).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}:${Math.round(100 * (boonWins[k] ?? 0) / n)}%`).join(' | '));
+  if (verbose || args.includes('--traits')) console.log('ship traits by yard world:', JSON.stringify(Object.fromEntries(Object.entries(traitDist).map(([k, m]) => [k, Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([t, n]) => `${t}:${n}`).join(' ')]))));
   console.log(`relics/game ${(relics / games).toFixed(1)} | warden woke ${warden}/${games} (killed ${wardenKilled}) | pacts ${pacts} | betrayals ${betrayals} | margin ${avg(vpSpread)} VP | decided-by-T6 ${earlyDecided}/${games}`);
 }

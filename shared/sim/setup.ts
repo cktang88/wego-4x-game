@@ -5,6 +5,9 @@ import { Rng } from './rng.ts';
 import type { Commander, Fleet, GameState, Player, PlayerId, RegionId, Ship } from './types.ts';
 import { EDICTS } from './edicts.ts';
 import { baseHp, blueprintFor, maxDevAt } from './empire.ts';
+import { rollShipTraits, traitHpMult } from './shiptraits.ts';
+import { ensureSoul, soulOn, soulGarrison } from './soul.ts';
+import { SIGILS } from '../config/content.ts';
 
 export interface PlayerSetup { name?: string; kind: 'human' | 'ai'; aiLevel?: Player['aiLevel'] }
 export interface GameSetup {
@@ -67,9 +70,17 @@ export function createGame(setup: GameSetup): GameState {
   for (let i = 0; i < 3; i++) {
     rules.start.fleets.forEach((classes, k) => {
       const f = newFleet(s, rng, i, homes[i], FLEET_NAMES[k % FLEET_NAMES.length]);
-      for (const c of classes) f.ships.push(newShip(s, rng, c, i));
+      for (const c of classes) f.ships.push(newShip(s, rng, c, i, { region: homes[i], fleet: f }));
+      // Soul layer: the starting warfleets fly banners (the same boons/banes for every house: fair); scouts are pickets
+      if (soulOn(s) && classes.some(c => c !== 'scout')) {
+        const mods = START_MODS[k % START_MODS.length];
+        f.banner = { sigil: SIGILS[(i * 4 + k) % SIGILS.length].id, boons: [...mods.boons], banes: [...mods.banes], home: homes[i], foundedTurn: 1 };
+        f.tally = { sieges: 0, defences: 0, interceptions: 0, wins: 0, routs: 0 };
+        f.saga = [{ turn: 1, kind: 'founded', text: `Founded at ${s.regions[homes[i]].name} when the beacons were lit.`, region: homes[i] }];
+      }
     });
   }
+  ensureSoul(s);
   s.rngState = rng.state;
   s.chronicle.push({ turn: 1, text: 'Three heirs of a dead empire light their beacons. The Hollow Throne waits between them.', players: [0, 1, 2], major: true });
   return s;
@@ -97,9 +108,19 @@ export function newFleet(s: GameState, rng: Rng, owner: PlayerId, region: Region
   return f;
 }
 
-export function newShip(s: GameState, rng: Rng, cls: string, owner: PlayerId | -1 = -1): Ship {
+/** Boons/banes of the starting banners (index = start fleet). Point-buy legal with soul.freePoints >= 1. */
+export const START_MODS: { boons: string[]; banes: string[] }[] = [
+  { boons: ['inspiring'], banes: ['looselips'] },
+  { boons: ['shock'], banes: ['green'] },
+];
+
+/** A new ship. With `opts.region` (the yard) it is rolled its Soul-layer traits (shiptraits.ts). */
+export function newShip(s: GameState, rng: Rng, cls: string, owner: PlayerId | -1 = -1, opts?: { region?: RegionId; fleet?: Fleet | null }): Ship {
   const mod = blueprintFor(s, owner, cls);
-  const hp = baseHp(s, cls, mod);
+  let hp = baseHp(s, cls, mod);
+  const id = s.nextId;
+  const traits = opts?.region !== undefined ? rollShipTraits(s, rng.state, id, owner, opts.region, opts.fleet) : [];
+  if (traits.length) hp = Math.max(1, Math.round(hp * traitHpMult({ traits })));
   const used = new Set(s.fleets.flatMap(f => f.ships.map(x => x.name)));
   let name = rng.pick(SHIP_NAMES);
   for (let i = 0; i < 40 && used.has(name); i++) name = rng.pick(SHIP_NAMES);
@@ -108,6 +129,7 @@ export function newShip(s: GameState, rng: Rng, cls: string, owner: PlayerId | -
     id: s.nextId++, name, cls, hp, maxHp: hp, mod,
     sys: { engines: true, weapons: true, shields: true },
     kills: 0, battles: 0, title: null, bornTurn: s.turn,
+    ...(traits.length ? { traits } : {}),
   };
 }
 
@@ -125,7 +147,7 @@ export function maxGarrison(s: GameState, rid: RegionId): number {
     if (pl?.laws?.includes('bastion')) m *= E.bastionGarrisonMult;
     if (pl?.techs?.includes('citadel')) m *= E.citadelGarrisonMult;
   }
-  return Math.round(m);
+  return Math.round(m) + soulGarrison(s, r);
 }
 
 export function ordinal(n: number): string {

@@ -163,7 +163,22 @@ function applyQueued(p: GameState, pid: PlayerId, o: Order, nextFakeId: () => nu
       const sh = placeholderShip(o.cls, p.turn);
       const f = o.fleet !== null ? p.fleets.find(x => x.id === o.fleet) : undefined;
       if (f) f.ships.push(sh);
-      else p.fleets.push({ ...p.fleets.find(x => x.owner === pid)!, id: nextFakeId(), owner: pid, region: o.region, ships: [sh], route: null, siege: null, ordersThisTurn: 0, bornTurn: p.turn });
+      else {
+        // a new fleet: it flies a (placeholder) banner unless it is a scout picket, so the banner count stays right
+        const banner = o.cls !== 'scout' || o.found ? { sigil: '', boons: [], banes: [], home: o.region, foundedTurn: p.turn } : null;
+        p.fleets.push({ ...p.fleets.find(x => x.owner === pid)!, id: nextFakeId(), owner: pid, region: o.region, ships: [sh], route: null, siege: null, ordersThisTurn: 0, bornTurn: p.turn, banner });
+      }
+      break;
+    }
+    case 'retire': p.fleets = p.fleets.filter(x => x.id !== o.fleet); break;
+    case 'engrave': {
+      const r = p.regions[o.region];
+      if (r.story) p.regions[o.region] = { ...r, story: { ...r.story, deeds: r.story.deeds.map(d => (d.id === o.deed ? { ...d, engraved: true } : d)) } };
+      break;
+    }
+    case 'raze': {
+      const r = p.regions[o.region];
+      if (r.story) p.regions[o.region] = { ...r, story: { ...r.story, captured: null } };
       break;
     }
     case 'refit': {
@@ -201,7 +216,8 @@ export function queueOrder(s: GameState, pid: PlayerId, o: Order, now: number): 
     return 'already influenced there this cycle';
   if (o.type === 'pact' && me.pactOffers.includes(o.with)) return 'pact already offered this cycle';
   if (o.type === 'conceal' && proj.concealed?.includes(pid)) return 'already concealed this cycle';
-  if (!canAfford(me.res, orderCost(proj, o, pid), creditRate(proj, pid)))
+  // like the resolver: moves and seizes cost nothing and are never price-checked (a bankrupt house can still move)
+  if (o.type !== 'move' && o.type !== 'seize' && !canAfford(me.res, orderCost(proj, o, pid), creditRate(proj, pid)))
     return q.length || (L.free[pid] ?? []).length ? 'not enough resources (after what is already queued)' : 'not enough resources';
   q.push(o);
   L.bank[pid]--;
@@ -230,9 +246,10 @@ export function queueFree(s: GameState, pid: PlayerId, fa: FreeAction): string |
   const list = (L.free[pid] ??= []);
   const same = (x: FreeAction) =>
     x.type === fa.type && (
-      fa.type === 'doctrine' || fa.type === 'rename' ? (x as { fleet: number }).fleet === fa.fleet
+      fa.type === 'doctrine' || fa.type === 'rename' || fa.type === 'honour' || fa.type === 'vow' ? (x as { fleet: number }).fleet === fa.fleet
       : fa.type === 'blueprint' ? (x as { cls: string }).cls === fa.cls
-      : false);
+      : fa.type === 'calling' || fa.type === 'raze' ? (x as { region: number }).region === fa.region
+      : fa.type === 'dispatch');   // a newer dispatch replaces the queued one
   const i = list.findIndex(same);
   if (i >= 0) list.splice(i, 1);
   switch (fa.type) {
@@ -249,6 +266,9 @@ export function queueFree(s: GameState, pid: PlayerId, fa: FreeAction): string |
     case 'revoke':
       if (list.some(x => x.type === 'revoke' && x.law === fa.law)) return 'already queued';
       if (!projected(s, pid, false).players[pid].laws?.includes(fa.law)) return 'not enacted';
+      break;
+    case 'dispatch':
+      if (s.players[pid].dispatchTurn === s.turn || (s.soul?.dispatches ?? []).some(d => d.p === pid)) return 'one dispatch per edition';
       break;
     case 'merge': {
       const f = s.fleets.find(x => x.id === fa.fleet && x.owner === pid);
@@ -316,7 +336,7 @@ export function runTick(s0: GameState, isAI: (pid: PlayerId) => boolean): GameSt
       const pref = L.tick % 3 === 2 ? Math.min(opts.length - 1, 1 + ((L.tick / 3) | 0) % Math.max(1, opts.length - 1)) : 0;
       for (const o of [opts[pref], ...opts.filter((_, i) => i !== pref)]) if (queueOrder(s1, p.id, o, tickTime) === null) break;
     }
-    for (const fa of plan.free) if (fa.type === 'doctrine' || fa.type === 'research' || fa.type === 'blueprint') queueFree(s1, p.id, fa);
+    for (const fa of plan.free) if (['doctrine', 'research', 'blueprint', 'vow', 'honour', 'calling', 'raze', 'dispatch'].includes(fa.type)) queueFree(s1, p.id, fa);
   }
   const ticks = ticksPerCycle(s1);
   const t = L.tick;

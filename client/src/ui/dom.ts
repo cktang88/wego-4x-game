@@ -77,7 +77,6 @@ export function roman(n: number): string {
 //                             counts up/down to the new value and the element flashes .num-up (green) / .num-down (red).
 //   data-pop="<group>:<key>"  on list items (order slots, queue entries, dock pills). When an item whose key was not
 //                             there before appears in a group that was already on screen, it gets a one-shot .fx-pop.
-//   .tabs + .tabbody          a click on a tab button cross-fades the tab body (automatic, no marking needed).
 // =====================================================================================
 interface NumState { value: number; from: number; to: number; t0: number; el: HTMLElement | null; raf: number }
 const nums = new Map<string, NumState>();
@@ -181,14 +180,5 @@ function installUiFx() {
   });
   const start = () => mo.observe(document.body, { childList: true, subtree: true });
   if (document.body) start(); else document.addEventListener('DOMContentLoaded', start, { once: true });
-  // tab switches cross-fade the tab body
-  document.addEventListener('click', e => {
-    const b = (e.target as HTMLElement | null)?.closest?.('.tabs button');
-    if (!b || reduced()) return;
-    const body = b.closest('.panel')?.querySelector<HTMLElement>('.tabbody');
-    if (!body) return;
-    // after the tab's own handler re-rendered the body
-    requestAnimationFrame(() => { body.classList.remove('fx-tabswap'); void body.offsetWidth; body.classList.add('fx-tabswap'); });
-  }, true);
 }
 installUiFx();

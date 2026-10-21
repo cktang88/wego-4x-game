@@ -40,6 +40,7 @@ describe('LIVE: order bank', () => {
     const cost = s.rules.ships.corvette.cost;
     s.players[0].res = { industry: cost.industry ?? 0, credits: cost.credits ?? 0, influence: 0 };
     s.rules.economy.creditsPerIndustry = 0;   // no credit top-up: exactly one corvette is affordable
+    s.rules.soul.bannersBase = 9;             // Soul layer: each fleet:null build founds a banner; leave room for two
     expect(queueOrder(s, 0, { type: 'build', region: cap, cls: 'corvette', fleet: null }, T0)).toBeNull();
     expect(queueOrder(s, 0, { type: 'build', region: cap, cls: 'corvette', fleet: null }, T0)).toMatch(/not enough/);
   });

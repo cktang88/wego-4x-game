@@ -55,7 +55,7 @@ const waitTick = (page, n) => page.waitForFunction(n => window.tc.screen.st.live
     s.addOrder({ type: 'move', fleet: a.id, path: [n, st.regions[n].neighbors.find(x => x !== a.region)] });
     const b = fs[1] ?? fs[0];
     s.select({ kind: 'fleet', id: b.id });
-    s.action('move', {});
+    s.mode = { type: 'move', fleet: b.id };
     return { a: a.id, b: b.id };
   });
   await waitTick(page, 2);
@@ -63,24 +63,32 @@ const waitTick = (page, n) => page.waitForFunction(n => window.tc.screen.st.live
   const st1 = await page.evaluate(() => ({ sel: window.tc.screen.sel, mode: window.tc.screen.mode?.type, seen: window.tc.screen.lastSeenTick, tick: window.tc.screen.st.live.tick }));
   check(st1.sel?.id === ids.b && st1.mode === 'move', `live: selection and targeting survive ticks (${JSON.stringify(st1)})`);
   check(st1.seen === st1.tick, 'live: the client notices every tick (tick animations can play)');
-  // a doctrine change waits for the next tick: the panel must show the new stance, not snap back
+  // a doctrine change waits for the next tick: the card must show the new stance, not snap back
   await page.keyboard.press('Escape');
-  await page.evaluate(id => { const s = window.tc.screen; s.openSecs.add('doctrine'); s.select({ kind: 'fleet', id }); }, ids.b);
-  await page.selectOption('[data-doc=stance]', 'evasive');
+  await page.evaluate(id => window.tc.screen.select({ kind: 'fleet', id }), ids.b);
+  await page.click('.card [data-a=stance][data-s=evasive]');
   await page.waitForTimeout(200);
-  check(await page.$eval('[data-doc=stance]', e => e.value) === 'evasive', 'live: pending doctrine shown before the tick');
-  // a half-typed fleet name and chat message survive ticks (panels re-render on every tick)
+  check(!!(await page.$('.card [data-a=stance][data-s=evasive].on')), 'live: pending doctrine shown before the tick');
+  // a half-typed fleet name survives ticks (the card re-renders on every tick)
+  await page.click('.card [data-a=more]');
   await page.fill('[data-rename]', 'Half typed');
-  await page.click('[data-tab=chat]');
-  await page.fill('[data-msg]', 'draft message');
+  const tk0 = await page.evaluate(() => window.tc.screen.st.live.tick);
+  await waitTick(page, tk0 + 1);
+  await page.waitForTimeout(200);
+  const rn = await page.evaluate(() => ({ v: document.querySelector('[data-rename]')?.value, focused: document.activeElement?.hasAttribute('data-rename') }));
+  check(rn.v === 'Half typed' && rn.focused, `live: half-typed fleet name and focus survive a tick (${JSON.stringify(rn)})`);
+  // the chat draft (Score modal) survives ticks
+  await page.evaluate(() => { document.activeElement?.blur(); window.tc.screen.openModal('score'); });
+  await page.waitForTimeout(200);
+  await page.click('[data-a=chat-toggle]');
+  await page.fill('[data-chat-msg]', 'draft message');
   const tk = await page.evaluate(() => window.tc.screen.st.live.tick);
   await waitTick(page, tk + 1);
   await page.waitForTimeout(200);
-  const ch = await page.evaluate(() => ({ v: document.querySelector('[data-msg]')?.value, focused: document.activeElement?.hasAttribute('data-msg') }));
+  const ch = await page.evaluate(() => ({ v: document.querySelector('[data-chat-msg]')?.value, focused: document.activeElement?.hasAttribute('data-chat-msg') }));
   check(ch.v === 'draft message' && ch.focused, `live: chat draft and focus survive a tick (${JSON.stringify(ch)})`);
-  await page.click('[data-tab=orders]');
+  await page.keyboard.press('Escape');
   await page.waitForTimeout(100);
-  check(await page.evaluate(() => window.tc.screen.chatDraft) === 'draft message', 'live: unfocused chat draft kept too');
   // replaying a tick by its number: the client maps ticks to cycles the same way the history does
   await waitTick(page, 9);
   const map = await page.evaluate(() => { const s = window.tc.screen; return s.src.save.history.filter(h => h.tick).map(h => [h.tick, h.turn, s.turnOfTick(h.tick)]); });
@@ -118,11 +126,10 @@ const waitTick = (page, n) => page.waitForFunction(n => window.tc.screen.st.live
     s.plan.orders[0] = { type: 'seize', fleet: fs[0].id, target: st.regions[fs[0].region].neighbors[0], also: [fs[1].id] };
     s.plan.orders[1] = { type: 'fortify', fleet: fs[1].id };
     s.savePlan(); s.renderAll();
-    const txt = document.querySelector('.slot[data-slot="1"] .desc small')?.textContent ?? '';
-    return { txt, spend: s.plannedSpend().credits, rep: st.rules.orders.repeatFleetCredits };
+    return { spend: s.plannedSpend().credits, rep: st.rules.orders.repeatFleetCredits };
   });
-  check(fee.txt.includes(`${fee.rep}¢`) && fee.spend >= fee.rep, `wego: repeat fee shown for a joiner's own order (${JSON.stringify(fee)})`);
-  // join-assault chips: at most MAX_JOINERS (3), the rest disabled
+  check(fee.spend >= fee.rep, `wego: repeat fee counted for a joiner's own order (${JSON.stringify(fee)})`);
+  // joining an assault: at most MAX_JOINERS (3); a 4th drop on the target is refused with a reason
   const jc = await page.evaluate(() => {
     const s = window.tc.screen, st = s.st;
     const fs = st.fleets.filter(x => x.owner === s.you && x.ships.length);
@@ -132,12 +139,14 @@ const waitTick = (page, n) => page.waitForFunction(n => window.tc.screen.st.live
     const extra = [];
     for (let i = 0; i < 4; i++) { const g = structuredClone(main); g.id = 9000 + i; g.name = `Test ${i}`; g.region = main.region; st.fleets.push(g); extra.push(g.id); }
     s.plan = s.freshPlan();
-    s.plan.orders[0] = { type: 'seize', fleet: main.id, target, also: extra.slice(0, 3) };
+    s.plan.orders[0] = { type: 'seize', fleet: main.id, target, also: extra.slice(0, 2) };
+    const third = s.intent({ fleet: extra[2] }, target);
+    s.plan.orders[0].also = extra.slice(0, 3);
+    const fourth = s.intent({ fleet: extra[3] }, target);
     s.renderAll();
-    const chips = [...document.querySelectorAll('[data-join]')].map(b => ({ id: b.dataset.join, dis: b.disabled }));
-    return chips;
+    return { third: third && [third.verb, third.ok], fourth: fourth && [fourth.verb, fourth.ok, fourth.text] };
   });
-  check(jc.filter(c => c.dis).length >= 1 && jc.filter(c => !c.dis).length >= 3, `wego: a 4th joiner can't be added (${JSON.stringify(jc)})`);
+  check(jc.third?.[0] === 'join' && jc.third[1] && jc.fourth && !jc.fourth[1] && /3 joiners/.test(jc.fourth[2]), `wego: a 4th joiner can't be added (${JSON.stringify(jc)})`);
   await ctx.close();
 }
 
@@ -157,10 +166,10 @@ const waitTick = (page, n) => page.waitForFunction(n => window.tc.screen.st.live
 {
   const { ctx, page } = await open();
   await startLocal(page, { seed: '7', ai1: 'human' });
-  await page.evaluate(() => { const s = window.tc.screen, st = s.st; const f = st.fleets.find(f => f.owner === s.you); s.addOrder({ type: 'seize', fleet: f.id, target: st.regions[f.region].neighbors.find(n => st.regions[n].owner !== s.you) }); });
+  await page.evaluate(() => { const s = window.tc.screen, st = s.st; const f = st.fleets.find(f => f.owner === s.you); s.commit(s.intent({ fleet: f.id }, st.regions[f.region].neighbors.find(n => st.regions[n].owner !== s.you && st.regions[n].kind !== 'lane'))); });
   await page.click('[data-preview]');
   await page.waitForTimeout(300);
-  await page.click('[data-submit]');
+  await page.evaluate(() => window.tc.screen.submit());
   await page.click('[data-y]');
   await page.waitForTimeout(200);
   await page.click('.curtain [data-x]');
@@ -197,19 +206,24 @@ const waitTick = (page, n) => page.waitForFunction(n => window.tc.screen.st.live
   await startLocal(page, { seed: '3' });
   await page.evaluate(() => { const s = window.tc.screen; s.src.chat.push({ at: Date.now(), seat: 1, to: null, text: 'hi' }); s.src.onChange('chat'); });
   await page.waitForTimeout(100);
-  check(!!(await page.$('.dock [data-d=sheet] .badge')), 'phone: unread chat shows on the dock');
-  await page.tap('.dock button[data-d=sheet]');
-  await page.waitForTimeout(200);
-  check(await page.evaluate(() => window.tc.screen.tab === 'chat' && window.tc.screen.unreadChat === 0), 'phone: the dock opens the chat and clears the badge');
+  check(!!(await page.$('.hud-bl .nbadge')) && !!(await page.$('.hud-br [data-act=menu] .dot')), 'phone: unread chat shows on the badge and the menu');
+  await page.tap('.hud-bl .nbadge');
+  await page.waitForTimeout(150);
+  await page.tap('.nlist [data-pop="note:chat"]');
+  await page.waitForTimeout(300);
+  check(await page.evaluate(() => window.tc.screen.hud.modalOpen() && window.tc.screen.unreadChat === 0), 'phone: the badge opens Score (chat) and clears it');
   await page.screenshot({ path: `${out}/ui-phone-chat.png` });
-  // a tapped number's popover must go away when its element is re-rendered
-  await page.tap('[data-tab=orders]');
-  await page.tap('.res [data-tip]');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => window.tc.screen.hud.modal && document.querySelector('[data-a=close], .modal-x')?.click());
+  await page.waitForTimeout(200);
+  // a resource pill opens its breakdown; tapping the board closes it
+  await page.tap('.respill[data-k=industry]');
   await page.waitForTimeout(100);
-  const shown = await page.evaluate(() => !document.querySelector('.uxtip').classList.contains('hidden'));
-  await page.evaluate(() => window.tc.screen.renderAll());
-  const after = await page.evaluate(() => !document.querySelector('.uxtip').classList.contains('hidden'));
-  check(shown && !after, `phone: popover closes when its number re-renders (${shown}/${after})`);
+  const shown = await page.evaluate(() => !document.querySelector('.pop').classList.contains('hidden'));
+  await page.touchscreen.tap(200, 400);
+  await page.waitForTimeout(100);
+  const after = await page.evaluate(() => !document.querySelector('.pop').classList.contains('hidden'));
+  check(shown && !after, `phone: resource breakdown opens and closes (${shown}/${after})`);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
   check(!overflow, 'phone: no horizontal overflow');
   await ctx.close();
@@ -259,16 +273,19 @@ if (process.env.NO_SERVER !== '1') {
   await a.waitForTimeout(200);
   check(await a.evaluate(() => window.tc.screen.plan.orders.filter(Boolean).length) === 1, 'online: unsealing gives the plan back');
   // Alice is typing when Bob's message (and a seal) arrive
-  await a.click('[data-tab=chat]');
-  await a.fill('[data-msg]', 'half a thought');
-  await b.click('[data-tab=chat]');
-  await b.fill('[data-msg]', 'hello Alice');
-  await b.press('[data-msg]', 'Enter');
+  await a.evaluate(() => window.tc.screen.openModal('score'));
+  await a.click('[data-a=chat-toggle]');
+  await a.fill('[data-chat-msg]', 'half a thought');
+  await b.evaluate(() => window.tc.screen.openModal('score'));
+  await b.click('[data-a=chat-toggle]');
+  await b.fill('[data-chat-msg]', 'hello Alice');
+  await b.press('[data-chat-msg]', 'Enter');
+  await b.keyboard.press('Escape');
   await b.evaluate(() => window.tc.screen.submit());
   await b.click('[data-y]').catch(() => {});
   await a.waitForFunction(() => window.tc.screen.src.chat.length > 0);
   await a.waitForTimeout(300);
-  const d = await a.evaluate(() => ({ v: document.querySelector('[data-msg]')?.value, f: document.activeElement?.hasAttribute('data-msg'), log: document.querySelector('.chatlog')?.textContent.includes('hello Alice') }));
+  const d = await a.evaluate(() => ({ v: document.querySelector('[data-chat-msg]')?.value, f: document.activeElement?.hasAttribute('data-chat-msg'), log: document.querySelector('.chat-log')?.textContent.includes('hello Alice') }));
   check(d.v === 'half a thought' && d.f && d.log, `online: a rival's message doesn't wipe your draft (${JSON.stringify(d)})`);
   // spectator: read-only orders, empire picker
   const { ctx: cc, page: c } = await open();
@@ -277,8 +294,10 @@ if (process.env.NO_SERVER !== '1') {
   if (spec) { await spec.click(); await c.waitForFunction(() => window.tc?.screen?.st); }
   else await c.waitForFunction(() => window.tc?.screen?.st);
   check(await c.evaluate(() => window.tc.screen.you === null && !window.tc.screen.canPlan), 'online: spectator cannot plan');
-  await c.click('[data-tab=empire]');
-  check(!!(await c.$('[data-emp-p]')), 'online: spectator can browse empires');
+  await c.evaluate(() => window.tc.screen.openModal('empire'));
+  await c.waitForTimeout(200);
+  check(!!(await c.$('[data-a=emp-pid]')), 'online: spectator can browse empires');
+  check(!(await c.$('.strip .chip')) && !(await c.$('[data-submit]')), 'online: spectator has no plan strip');
   await Promise.all([ca.close(), cb.close(), cc.close()]);
 }
 

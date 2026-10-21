@@ -1,4 +1,5 @@
 import { shipStats } from './empire.ts';
+import { soulSpeedMod } from './soul.ts';
 import type { GameState, RegionId, Fleet, PlayerId } from './types.ts';
 
 /** BFS shortest path from a to b (inclusive of b, exclusive of a). null if unreachable. */
@@ -68,7 +69,8 @@ export function fleetSpeed(s: GameState, f: Fleet): number {
     const base = shipStats(s, sh, f.owner).speed;
     sp = Math.min(sp, sh.sys.engines ? base : 1);
   }
-  return sp;
+  // Soul layer: limping, Long Range / Ponderous, the Haunted scar, a relic carried home
+  return f.banner || f.limping ? Math.max(1, sp + soulSpeedMod(s, f)) : sp;
 }
 
 export function fleetPower(s: GameState, f: Fleet): number {

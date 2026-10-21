@@ -12,13 +12,13 @@ page.on('pageerror', e => errors.push(e.message));
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 await page.goto(base);
 // the first-run tour is exercised by scripts/ux-shots.mjs; skip it here
-await page.evaluate(() => { localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); });
+await page.evaluate(() => { localStorage.clear(); localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); });
 await page.click('[data-l=start]');
 await page.waitForTimeout(800);
 // helper: screen coordinates of a fleet / region
 const fleetXY = id => page.evaluate(id => {
   const s = window.tc.screen; const lay = s.currentFleetDraws().find(f => f.id === id);
-  const p = s.map.toScreen(lay.pos); const r = s.el.canvas.getBoundingClientRect(); return [p.x + r.left, p.y + r.top];
+  const p = s.map.toScreen(s.lastFleetPos.get(id) ?? lay.pos); const r = s.el.canvas.getBoundingClientRect(); return [p.x + r.left, p.y + r.top];
 }, id);
 const regionXY = id => page.evaluate(id => {
   const s = window.tc.screen; const p = s.map.toScreen(s.st.regions[id].site); const r = s.el.canvas.getBoundingClientRect(); return [p.x + r.left, p.y + r.top - 4];
@@ -27,26 +27,34 @@ for (let turn = 0; turn < Number(process.argv[4] ?? 3); turn++) {
   const info = await page.evaluate(() => {
     const s = window.tc.screen, st = s.st, me = s.you;
     const fleets = st.fleets.filter(f => f.owner === me);
-    const targets = fleets.map(f => st.regions[f.region].neighbors.find(n => st.regions[n].owner !== me && st.regions[n].kind !== 'crown' && st.regions[n].kind !== 'throne'));
+    const targets = fleets.map(f => st.regions[f.region].neighbors.find(n => st.regions[n].owner !== me && st.regions[n].kind !== 'crown' && st.regions[n].kind !== 'throne' && st.regions[n].kind !== 'lane'));
     return { fleets: fleets.map(f => f.id), targets, cap: st.players[me].capital };
   });
-  // seize with the first two fleets
+  // seize with the first two fleets: the first by dragging its token, the second by click, S, click
   for (let i = 0; i < Math.min(2, info.fleets.length); i++) {
     if (info.targets[i] === undefined) continue;
     const [fx, fy] = await fleetXY(info.fleets[i]);
-    await page.mouse.click(fx, fy);
-    await page.keyboard.press('s');
     const [rx, ry] = await regionXY(info.targets[i]);
-    await page.mouse.click(rx, ry);
+    if (i === 0) {
+      await page.mouse.move(fx, fy); await page.mouse.down();
+      await page.mouse.move(fx + 10, fy + 10, { steps: 3 });
+      await page.mouse.move(rx, ry, { steps: 8 });
+      await page.waitForTimeout(150);
+      await page.mouse.up();
+    } else {
+      await page.mouse.click(fx, fy);
+      await page.keyboard.press('s');
+      await page.mouse.click(rx, ry);
+    }
+    await page.waitForTimeout(150);
   }
+  console.log('planned', await page.evaluate(() => window.tc.screen.plan.orders.map(o => o?.type ?? null).join(',')));
   // build at capital
-  const [cx, cy] = await regionXY(info.cap);
-  await page.mouse.click(cx, cy + 40);
+  await page.evaluate(id => window.tc.screen.select({ kind: 'region', id }), info.cap);
   await page.waitForTimeout(200);
   const b = await page.$('[data-a=build][data-cls=frigate]');
   if (b) await b.click();
   await page.screenshot({ path: `${out}/e2e-plan-${turn}.png` });
-  await page.click('[data-tab=orders]');
   await page.click('[data-submit]');
   await page.waitForTimeout(300);
   const dlg = await page.$('[data-y]'); if (dlg) await dlg.click();

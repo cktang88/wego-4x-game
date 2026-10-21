@@ -46,7 +46,7 @@ export const DEFAULT_RULES = {
     regionsPerWedge: 8,    // map has 3-fold symmetry: 3 wedges + the Throne
     radius: 1000,          // world units
     minSiteDist: 150,
-    laneDots: [] as number[],   // hyperlanes longer than these get 1, 2 deep-space waypoints (travel takes longer); UX v2 enables [330, 520]
+    laneDots: [330, 520] as number[],   // hyperlanes longer than these get 1, 2 deep-space waypoints (travel takes longer)
     borderWobble: 0.18,    // 0 = straight Voronoi edges
     minSharedEdge: 30,     // regions touching on a shorter edge are NOT adjacent
     nebulaChance: 0.18,
@@ -232,8 +232,8 @@ export const DEFAULT_RULES = {
   },
 };
 
-export type Rules = typeof DEFAULT_RULES & typeof EXTRA_DEFAULTS & typeof PLAYTEST_DEFAULTS;
-export function defaultRules(): Rules { return structuredClone({ ...DEFAULT_RULES, ...EXTRA_DEFAULTS, ...PLAYTEST_DEFAULTS }); }
+export type Rules = typeof DEFAULT_RULES & typeof EXTRA_DEFAULTS & typeof PLAYTEST_DEFAULTS & typeof SOUL_DEFAULTS;
+export function defaultRules(): Rules { return structuredClone({ ...DEFAULT_RULES, ...EXTRA_DEFAULTS, ...PLAYTEST_DEFAULTS, ...SOUL_DEFAULTS }); }
 
 export function isObj(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -397,5 +397,113 @@ export const PLAYTEST_DEFAULTS = {
     federalDevelopDiscount: 0.35,
     openInfluence: 3,
     martialInfluence: -1,
+  },
+};
+
+// ---------------------------------------------------------------- the Soul layer (docs/SOUL.md, phase A)
+// Fleets as characters, worlds with a story, blood-debts, sworn pacts, the Herald, ship traits.
+// Content (names, descriptions) lives in config/content.ts; every number is here.
+export const SOUL_DEFAULTS = {
+  soul: {
+    enabled: true,
+    // ---- banners & founding (Build with `found`, or fleet:null = founded with defaults)
+    bannersBase: 3,              // banners a house can fly...
+    bannersPerCrown: 1,          // ...+1 per Crown held (maxFleets stays a hard cap). Scout-only pickets fly no banner.
+    freePoints: 1,               // boon cost may exceed bane value by this much (0 = strict net zero)
+    maxBoons: 3,
+    maxBanes: 3,
+    // ---- boons & banes (behavioural fleet modifiers)
+    medicsRepair: 4,             // Field Medics: hull repaired a turn anywhere in supply (own worlds: shipyard rate)
+    salvageIndustry: 3,          // Salvagers: industry per enemy ship lost in a battle it wins
+    hunterHit: 0.2,
+    ironRounds: 3,               // Iron Discipline: forced out this many rounds later...
+    ironHoldFrac: 0.5,           // ...and never retreats voluntarily above this strength
+    siegebreakerSiege: 2,
+    beloveInfluence: 1,
+    raiderPlunder: 4,            // Raiders: credits a turn (+1 per development) taken from the system's owner
+    raiderLoot: 4,               // Raiders: credits looted per world taken by force (+2 per development)
+    raiderLootPerDev: 2,
+    inspiringRegen: 4,
+    greenHit: 0.15,
+    hungryUpkeep: 2,
+    brittleRetreat: 0.55,
+    brittleRounds: 2,
+    glassDmg: 1,
+    homesickJumps: 3,
+    gildedCredits: 10,
+    // ---- vows
+    vowThroneHit: 0.08,
+    vowNeverRetreatHit: 0.05,
+    vowNeverRetreatWins: 3,
+    vowGuardHit: 0.05,
+    vowGuardEvasion: 0.05,
+    vowGuardTurns: 6,
+    vowAvengeDmg: 1,
+    vowRelicSpeed: 1,
+    // ---- rout & limp
+    routMinStrength: 0.25,       // destroyed instead if it had under this share of the winner's strength
+    routHullCap: 0.3,            // surviving hulls are capped at this share of their max hull
+    routRepeatTurns: 4,          // a second rout within this many turns kills the fleet
+    limpSpeedPenalty: 1,
+    limpingVisible: true,        // limping fleets are visible to every house
+    limpClearHp: 0.5,            // limping ends at a friendly yard, or at an owned world once every hull is above this
+    breakAtScars: 3,             // the third scar breaks (disbands) the fleet
+    // ---- scars
+    burnedHullMult: 0.85,
+    burnedNerveHit: 0.06,
+    grudgeDmg: 1,
+    grudgeOtherHit: 0.05,
+    skeletonHit: 0.06,
+    skeletonUpkeepMult: 0.5,
+    hauntedSpeed: 1,
+    hauntedMorale: 0.04,
+    // ---- honours & rank
+    maxHonours: 3,
+    honourAutoTurns: 1,          // an unpicked honour defaults to its first option after this many turns
+    retireMinRank: 4,            // Storied (rank 4) and Legend (rank 5) fleets can retire
+    upkeepByRank: [0, 0, 0, 1, 2, 3] as number[],   // extra credits upkeep, indexed by commander rank
+    provingMaxXp: 6,             // Proving Ground XP never takes a commander past this (XP is earned by fighting)
+    // ---- worlds: ledger, calling, tenure, deeds
+    callingAtDev: 3,
+    tenureTiers: [3, 6, 10] as number[],   // turns of continuous ownership for tier 1, 2, 3
+    dormantTurns: 3,
+    liberateWithin: 5,
+    maxDeeds: 2,
+    engraveInfluence: 4,
+    engraveCredits: 10,
+    unbrokenSieges: 2,
+    thriceCaptures: 3,
+    razeLump: 15,                // credits + industry for razing, +razeLumpPerDev x development (each)
+    razeLumpPerDev: 8,
+    razeVendettaTurns: 8,
+    vendettaHit: 0.08,
+    // calling effects by tier [none yet, tier 1, tier 2, tier 3]
+    arsenalDiscount: [0.1, 0.15, 0.2, 0.25] as number[],
+    granaryIndustry: [2, 3, 4, 6] as number[],
+    granaryCredits: [1, 1, 2, 3] as number[],
+    bastionGarrison: [4, 6, 9, 12] as number[],
+    bastionRegen: [1, 1, 2, 3] as number[],
+    refineryCredits: [3, 4, 6, 8] as number[],
+    provingXp: [1, 1, 2, 3] as number[],
+    oracleRange: [1, 1, 1, 2] as number[],
+    cenotaphHit: [0.03, 0.04, 0.05, 0.07] as number[],
+    cenotaphArmor: [0, 1, 1, 2] as number[],
+    bulwarkSiegeCut: [1, 1, 2, 2] as number[],
+    // deeds
+    deedFellHit: 0.05,
+    deedUnbrokenArmor: 1,
+    deedSeatGarrison: 10,
+    deedLiberatedInfluence: 1,
+    // ---- friends: blood-debts, pacts, the Herald
+    debtHit: 0.06,               // avenger's fleets vs the debtor's
+    debtKillerHit: 0.04,         // extra against the killer commander himself
+    heraldKeep: 12,              // editions kept in state
+    heraldMin: 3,
+    heraldMax: 6,
+    dispatchMax: 140,
+    pactWordsMax: 120,
+    // ---- ship traits (rolled at build time from the yard world and the empire)
+    shipTraits: true,
+    shipQuirkChance: 0.15,
   },
 };

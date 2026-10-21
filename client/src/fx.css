@@ -34,17 +34,6 @@ button.primary:hover:not(:disabled) { box-shadow: 0 0 14px rgba(160, 120, 255, 0
 @keyframes dlg-out { to { opacity: 0; transform: translateY(6px) scale(0.97); } }
 
 /* ------------------------------------------------------------ panels: the selection panel slides in when shown; phone sheets rise */
-.game:not(.phone) .panel.left:not(.hidden) { animation: panel-in 0.24s var(--ease-out) both; }
-@keyframes panel-in { from { opacity: 0; transform: translateX(-14px); } }
-.phone .panel.left:not(.hidden), .phone.sheet-open:not(.sel-open) .panel.right { animation: sheet-up 0.28s var(--ease-out) both; }
-@keyframes sheet-up { from { transform: translateY(40%); opacity: 0.2; } }
-.panel.right { transition: box-shadow 0.25s; }
-.tabbody.fx-tabswap { animation: tab-swap 0.22s ease-out; }
-@keyframes tab-swap { from { opacity: 0; transform: translateY(5px); } }
-.tabs button { transition: color 0.15s, box-shadow 0.2s, background 0.15s; }
-.tabs button.on { box-shadow: inset 0 -2px 0 var(--accent), 0 6px 14px -10px var(--accent); }
-.tabs button .badge { animation: badge-in 0.35s var(--ease-spring); }
-@keyframes badge-in { from { transform: scale(0.2); } }
 
 /* ------------------------------------------------------------ list items that just appeared (data-pop) */
 .fx-pop { animation: fx-pop 0.42s var(--ease-spring); }
@@ -62,8 +51,6 @@ button.primary:hover:not(:disabled) { box-shadow: 0 0 14px rgba(160, 120, 255, 0
 @keyframes num-down { 0% { color: #fff; text-shadow: 0 0 10px var(--bad); background: rgba(255, 93, 122, 0.24); } 100% { background: transparent; } }
 
 /* ------------------------------------------------------------ the pulse bar fills as the replay advances */
-.pulsebar span { transition: background 0.3s, box-shadow 0.3s, transform 0.3s; }
-.pulsebar span.on { transform: scaleY(1.5); }
 
 /* ------------------------------------------------------------ PULSE / PREVIEW / BETRAYAL banner: letters snap together, light lines sweep out */
 .banner.show { animation: banner-in 0.62s var(--ease-out) both; }
@@ -119,9 +106,7 @@ button.primary:hover:not(:disabled) { box-shadow: 0 0 14px rgba(160, 120, 255, 0
 
 /* ------------------------------------------------------------ less motion, please */
 @media (prefers-reduced-motion: reduce) {
-  .toast, .overlay, .overlay > .dialog, .panel.left, .panel.right, .tabbody.fx-tabswap, .fx-pop, .banner.show, .banner.hide,
   .banner::before, .banner::after, .vic-rays, .vic-sparks i, .vic-card, .vic-crown, .vic-name, .vic-rank,
-  .lobby .title h1, .lobby .cards > .card, .tabs button .badge { animation: none !important; }
   .num-up, .num-down { animation-duration: 0.01s; }
   .banner.show { opacity: 1; }
   .vic-sparks { display: none; }

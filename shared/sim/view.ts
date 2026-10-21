@@ -1,6 +1,7 @@
 // Per-player views: what the server sends to each client (fog of war applied).
 import { withinArea } from './graph.ts';
-import { coverage, seesFleetsIn } from './visibility.ts';
+import { coverage, seesFleetsIn, seesFleet } from './visibility.ts';
+import { headlineVisible } from './herald.ts';
 import type { Doctrine, Fleet, GameState, PlayerId, RegionId, TurnResult } from './types.ts';
 
 /** Remember what a player last saw of each region (for fogged regions). */
@@ -23,13 +24,16 @@ function maskRivalFleet(f: Fleet) {
   delete f.oos;
   f.ordersThisTurn = 0;
   f.guardUsed = false;
+  // Soul layer: banners, vows, scars, honours, epithets and brands are public; a pending choice is not
+  delete f.pendingHonour;
+  delete f.sulkUntil;
 }
 
 export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
   if (p === null) return { state: s, you: null, visible: s.regions.map(r => r.id) };
   const cov = coverage(s, p);
   const v: GameState = structuredClone({ ...s, last: null, log: [] });
-  v.fleets = v.fleets.filter(f => f.owner === p || seesFleetsIn(s, p, f.region, cov));
+  v.fleets = v.fleets.filter(f => f.owner === p || seesFleet(s, p, f, cov));
   for (const f of v.fleets) if (f.owner !== p) maskRivalFleet(f);
   for (const pl of v.players) {
     if (pl.id === p) continue;
@@ -38,10 +42,14 @@ export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
     pl.pactOffers = (pl.pactOffers ?? []).filter(x => x === p);
     pl.prevPactOffers = (pl.prevPactOffers ?? []).filter(x => x === p);
     pl.reserveCommanders = [];
+    // sworn words on a pact offer are for its addressee only
+    if (pl.pactWords) pl.pactWords = Object.fromEntries(Object.entries(pl.pactWords).filter(([k]) => Number(k) === p));
     // VP amounts are public, but an honors line names a battle you may not have seen
     pl.vpLog = (pl.vpLog ?? []).map(e => e.why.startsWith('Battle honors') ? { ...e, why: 'Battle honors' } : e);
   }
   for (const r of v.regions) {
+    // Soul layer: a world's ledger, epithet, calling and deeds are public; a pending calling is its owner's
+    if (r.story && r.owner !== p) r.story.pendingCalling = null;
     if (cov.has(r.id) || r.owner === p) continue;
     // fogged: hide projects and exact garrison of rival regions
     r.project = null;
@@ -71,6 +79,14 @@ export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
     return cov.has(c.region) || (!!lastSeen && c.turn === s.last?.turn && lastSeen.has(c.region));
   });
   v.edictDeck = [];
+  if (v.soul) {
+    // the Herald respects fog: public headlines, ones about you, and ones your sensors covered; dispatches are public once printed
+    v.soul.beats = [];
+    v.soul.dispatches = v.soul.dispatches.filter(d => d.p === p);
+    v.soul.herald = v.soul.herald.map(ed => ({ ...ed, headlines: ed.headlines.filter(h => headlineVisible(h, p)) }));
+    v.soul.moments = v.soul.moments.filter(h => headlineVisible(h, p));
+    v.soul.fallen = v.soul.fallen.filter(r => r.owner === p || r.public || !!r.seenBy?.includes(p));
+  }
   if (v.live) {
     // your own queue and bank only; rivals' banks and plans are secret
     v.live.queue = { [p]: v.live.queue[p] ?? [] };
@@ -166,11 +182,15 @@ function filterResult(s: GameState, r: TurnResult, p: PlayerId, endCov: Set<Regi
       case 'refit': return e.owner === p || sees(e.region);
       case 'fail': return e.owner === p;
       case 'note': return e.owner === null || e.owner === p;
+      case 'rout': return e.owner === p || e.by === p || sees(e.from) || sees(e.to);
+      case 'soul': return e.owner === null || e.owner === p;
       default: return false;
     }
   });
   const battleIds = new Set(events.filter(e => e.k === 'battle').map(e => (e as { battle: number }).battle));
-  const startFleets = structuredClone((r.startFleets ?? []).filter(f => f.owner === p || seesAtStart(f.region)));
+  // Ghosts stay hidden in replays too (Conspicuous and limping fleets are seen anyway)
+  const ghostOk = (f: Fleet) => !f.banner?.boons.includes('ghosts') || seesFleet(startState, p, f);
+  const startFleets = structuredClone((r.startFleets ?? []).filter(f => f.owner === p || (seesAtStart(f.region) && ghostOk(f))));
   for (const f of startFleets) if (f.owner !== p) maskRivalFleet(f);
   const seen = new Set<RegionId>();
   for (const rid of cov) if (sees(rid)) seen.add(rid);

@@ -3,6 +3,7 @@
 import type { Res } from '../config/rules.ts';
 import { TECH, TECHS, LAW, MODULE, type TechDef } from '../config/empire.ts';
 import type { Fleet, GameState, PlayerId, RegionId, Ship } from './types.ts';
+import { traitFx } from './shiptraits.ts';
 
 const on = (s: GameState) => s.rules.empire?.enabled !== false;
 
@@ -184,6 +185,12 @@ export interface ShipStats { hp: number; attack: number; shots: number; shields:
 export function shipStats(s: GameState, sh: Ship, owner: PlayerId | -1): ShipStats {
   const d = lookup(s.rules.ships, sh.cls) ?? s.rules.ships.frigate;
   const st: ShipStats = { hp: sh.maxHp, attack: d.attack, shots: d.shots, shields: d.shields, speed: d.speed, siege: d.siege, evasion: d.evasion, sensor: d.sensor };
+  if (sh.traits?.length) {
+    // Soul layer: rolled ship traits (small, double-edged)
+    const t = traitFx(sh);
+    st.attack = Math.max(1, st.attack + t.attack); st.shields = Math.max(0, st.shields + t.shields); st.speed = Math.max(1, st.speed + t.speed);
+    st.siege = Math.max(0, st.siege + t.siege); st.evasion = Math.max(-0.1, st.evasion + t.evasion); st.sensor = Math.max(0, st.sensor + t.sensor);
+  }
   if (!on(s)) return st;
   if (sh.mod === 'railgun') { st.attack += 1; st.shots += st.shots >= 3 ? 1 : 0; }
   if (sh.mod === 'deflector') { st.shields += 2; st.evasion += 0.03; }

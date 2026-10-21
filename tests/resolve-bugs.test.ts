@@ -60,6 +60,7 @@ describe('resolve: seat fairness & eliminated players', () => {
 describe('resolve: free actions during a battle', () => {
   it('splitting a fleet mid-battle does not trick the original into retreating', () => {
     const s = game();
+    s.rules.soul.bannersBase = 9;   // Soul layer: a split founds a new banner; leave room for it
     s.rules.combat.forceDecision = false;
     const rid = farColony(s, 2).id;
     s.regions[rid].garrison = 0; s.regions[rid].baseGarrison = 0;
@@ -85,6 +86,7 @@ describe('resolve: free actions during a battle', () => {
 
   it('split keeps the out-of-supply counter (no reset exploit)', () => {
     const s = game();
+    s.rules.soul.bannersBase = 9;   // Soul layer: a split founds a new banner; leave room for it
     const rid = farColony(s, 2, 0).id;
     const f = fleetAt(s, 0, rid, ['frigate', 'frigate']);
     f.oos = 3;

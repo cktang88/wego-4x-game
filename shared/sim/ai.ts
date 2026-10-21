@@ -22,6 +22,8 @@ import { viewFor } from './view.ts';
 import { empireFree, empireCands, empireRegionValue, canField } from './ai-empire.ts';
 import { shipStats, hasTech, hasLaw, baseHp, blueprintFor } from './empire.ts';
 import { LAW, LAWS } from '../config/empire.ts';
+import { soulFree, soulCands, aiFoundSpec } from './ai-soul.ts';
+import { hasBane } from './soul.ts';
 
 interface Cand { o: Order; v: number; tag: string }
 type Level = 'novice' | 'standard' | 'expert';
@@ -101,6 +103,10 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         guard: expert ? atHome && here.id !== me.capital && f.ships.length >= 2 && guardSafe(f) : atHome && enemyPowerNear(s, pid, f.region, 1) > fleetPower(s, f) * 0.6,
       };
       if (isScoutFleet(f) || (f.ships.length === 1 && (R.ships[f.ships[0].cls]?.hp ?? 9) <= 6)) { d.stance = 'evasive'; d.guard = false; }
+      // Soul: a limping fleet slips home quietly; a guard-vowed fleet never answers calls elsewhere; a Reckless one never runs
+      if (f.limping) { d.stance = 'evasive'; d.guard = false; }
+      if (f.vow?.kind === 'guard') d.guard = false;
+      if (d.stance === 'evasive' && hasBane(s, f, 'reckless')) d.stance = 'defensive';
       sub.free.push({ type: 'doctrine', fleet: f.id, doctrine: d });
       f.doctrine = d;
     }
@@ -108,6 +114,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
 
   // -------------------------------------------------- the Empire layer: research & blueprints (free)
   sub.free.push(...empireFree({ s, pid, lvl, rng, threatened }));
+  // -------------------------------------------------- the Soul layer: honours, callings, vows, razing, dispatches (free)
+  sub.free.push(...soulFree({ s, pid, lvl, threatened, mainArmy: myFleets().filter(f => !isScoutFleet(f) && !f.limping).sort((a, b) => fleetPower(s, b) - fleetPower(s, a))[0] }));
 
   // -------------------------------------------------- order slots (greedy over projected state)
   const usedTargets = new Set<string>();
@@ -236,6 +244,12 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     }
   }
   function slot() { return sub.orders.filter(Boolean).length; }
+  /** A Build: into a fleet at the yard, or founding a new banner (Soul layer: with this style's boons and banes). */
+  function buildOrder(region: number, cls: string, joinable: Fleet | undefined): Order {
+    if (joinable) return { type: 'build', region, cls, fleet: joinable.id };
+    if (s.rules.soul?.enabled !== false && s.rules.soul && cls !== 'scout') return { type: 'build', region, cls, fleet: null, found: aiFoundSpec(s, pid, lvl, region) };
+    return { type: 'build', region, cls, fleet: null };
+  }
 
   /** Rough "what is this region worth to me" in VP-ish units. */
   function regionValue(r: Region): number {
@@ -340,12 +354,20 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     const fleets = myFleets();
     const myPow = fleets.reduce((a, f) => a + fleetPower(s, f), 0) || 1;
     const rivalPow = Math.max(1, ...s.players.filter(p => p.id !== pid && !p.eliminated).map(p => s.fleets.filter(f => f.owner === p.id).reduce((a, f) => a + fleetPower(s, f), 0)));
-    const mainArmy = fleets.filter(f => !isScoutFleet(f)).sort((a, b) => fleetPower(s, b) - fleetPower(s, a))[0];
+    const mainArmy = fleets.filter(f => !isScoutFleet(f) && !f.limping).sort((a, b) => fleetPower(s, b) - fleetPower(s, a))[0];
 
     for (const f of fleets) {
       const uses = fleetUses.get(f.id) ?? 0;
       if (uses >= R.orders.maxPerFleet) continue;
       if (f.route && f.route.path.length) continue;   // already travelling on a route (it keeps going without orders)
+      if (f.limping) continue;                         // Soul: a limping fleet follows its own route home
+      const sworeGuard = f.vow?.kind === 'guard';     // Soul: leaving its world would break the vow
+      // Soul: a relic-vowed fleet carrying its relic heads home to fulfil the vow
+      if (f.vow?.kind === 'relic' && f.vow.carrying && f.banner && f.region !== f.banner.home) {
+        const home = findPath(s, f.region, f.banner.home);
+        if (home && !home.slice(0, -1).some(x => hostileFleetsAt(x).length || (s.regions[x].owner !== null && s.regions[x].owner !== pid && s.regions[x].garrison > 0)))
+          out.push({ o: { type: 'move', fleet: f.id, path: home }, v: 5, tag: `move:${f.id}` });
+      }
       const fatiguePenalty = uses > 0 ? (me0().res.credits > 20 ? 1 : 4) : 0;
       const pow = fleetPower(s, f);
       const here = s.regions[f.region];
@@ -389,7 +411,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
           for (const n of s.regions[r].links ?? s.regions[r].neighbors) if (n !== here.id && !hereLinks.includes(n) && !prev.has(n) && !viaOf.has(n) && s.regions[n].kind !== 'lane') viaOf.set(n, via);
         }
       }
-      for (const tid of [here.id, ...hereLinks.filter(n => s.regions[n].kind !== 'lane'), ...viaOf.keys()]) {
+      for (const tid of sworeGuard ? [] : [here.id, ...hereLinks.filter(n => s.regions[n].kind !== 'lane'), ...viaOf.keys()]) {
         const via = viaOf.get(tid);
         const t = s.regions[tid];
         if (t.owner === pid) continue;
@@ -404,7 +426,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
           // combined assault: bring every idle fleet next to the target if one fleet alone isn't enough
           let sim = seizeOdds(units, t, ukey);
           if (sim.p < 0.9) {
-            const helpers = fleets.filter(g => g !== f && !isScoutFleet(g) && (fleetUses.get(g.id) ?? 0) < R.orders.maxPerFleet && !(live && g.route) &&
+            const helpers = fleets.filter(g => g !== f && !isScoutFleet(g) && !g.limping && g.vow?.kind !== 'guard' && (fleetUses.get(g.id) ?? 0) < R.orders.maxPerFleet && !(live && g.route) &&
               !(g.bornTurn === s.turn && s.turn > 1) &&
               (g.region === tid || s.regions[g.region].neighbors.includes(tid)) && !threatened.has(g.region))
               // the resolver lets at most 3 fleets join an assault: plan with the 3 strongest
@@ -437,7 +459,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       const canOd = expert ? !f.fatigued && uses === 0 : !f.fatigued;
       // destinations are planets (waypoints are passed through); routes may take more than one turn
       const odBonus = canOd && !novice ? R.overdrive.speedBonus : 0;
-      const reach = [...within(s, f.region, live || R.orders.pulses > 1 ? sp + odBonus : sp * 2 + odBonus)].filter(x => x !== f.region && s.regions[x].kind !== 'lane');
+      const reach = sworeGuard ? [] : [...within(s, f.region, live || R.orders.pulses > 1 ? sp + odBonus : sp * 2 + odBonus)].filter(x => x !== f.region && s.regions[x].kind !== 'lane');
       for (const dest of reach) {
         const path = findPath(s, f.region, dest);
         if (!path) continue;
@@ -499,14 +521,14 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         const joinable = myFleets().find(f => f.region === r.id && f.ships.length < R.maxShipsPerFleet && !isScoutFleet(f) && !f.doctrine.guard && !(live && f.route));
         if (expert) {
           const b = expertBuild(r, need, joinable, mainArmy);
-          if (b) out.push({ o: { type: 'build', region: r.id, cls: b.cls, fleet: joinable ? joinable.id : null }, v: b.v, tag: `build:${r.id}:${sub.orders.filter(o => o?.type === 'build').length}` });
+          if (b) out.push({ o: buildOrder(r.id, b.cls, joinable), v: b.v, tag: `build:${r.id}:${sub.orders.filter(o => o?.type === 'build').length}` });
         } else {
           for (const [cls, d] of Object.entries(R.ships)) {
             if (d.needsShipyard > yard || cls === 'scout') continue;
             // bang per buck, with a nod to the fact that Orders (not money) are the real limit
             const eff = (d.hp * 0.5 + d.attack * d.shots * 2 + d.shields * 3) / Math.pow(Math.max(10, (d.cost.industry ?? 0) + (d.cost.credits ?? 0)), 0.85);
             const v = (3 + need * 3.5 * aggr) * eff * 1.4 + (novice ? rng.next() * 2 : 0);
-            out.push({ o: { type: 'build', region: r.id, cls, fleet: joinable ? joinable.id : null }, v, tag: `build:${r.id}:${cls}` });
+            out.push({ o: buildOrder(r.id, cls, joinable), v, tag: `build:${r.id}:${cls}` });
           }
         }
       }
@@ -524,6 +546,9 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         }
       }
     }
+
+    // ------------- the Soul layer: retire a battered legend (rare)
+    out.push(...soulCands({ s, pid, lvl, threatened }));
 
     // ------------- the Empire layer: laws, projects, refits
     out.push(...empireCands({ s, pid, lvl, rng, threatened }, s.regions.filter(x => x.owner === pid), mainArmy ? mainArmy.region : null));

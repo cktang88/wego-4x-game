@@ -9,3 +9,6 @@ export * from './sim/view.ts';
 export * from './sim/live.ts';
 export * from './config/rules.ts';
 export * from './config/content.ts';
+export * from './sim/soul.ts';
+export * from './sim/herald.ts';
+export * from './sim/shiptraits.ts';

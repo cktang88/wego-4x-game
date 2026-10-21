@@ -137,7 +137,9 @@ describe('fog of war: turn results', () => {
         const cov = coverage(s, p);
         for (const f of v.fleets) if (f.owner !== p) {
           const reg = s.regions[f.region];
-          expect(cov.has(f.region) || (reg.kind === 'throne' && s.rules.throne.holderVisible)).toBe(true);
+          // Soul layer: limping and Conspicuous fleets are public by design (rules.soul.limpingVisible, the Conspicuous bane)
+          const publicFleet = !!f.limping || !!f.banner?.banes.includes('conspicuous');
+          expect(cov.has(f.region) || publicFleet || (reg.kind === 'throne' && s.rules.throne.holderVisible)).toBe(true);
         }
         for (const sg of v.last!.signals) expect(sg.observer).toBe(p);
         for (const e of v.last!.events) if (e.k === 'fail' || e.k === 'scan') expect(e.owner).toBe(p);

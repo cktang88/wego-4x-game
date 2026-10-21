@@ -21,8 +21,12 @@ for (const [p, n] of [[b, 'Bob'], [c, 'Cara']]) {
   await p.waitForTimeout(1200);
 }
 await a.screenshot({ path: `${out}/mp-a-before.png` });
-for (const p of [a, b, c]) {
-  await p.click('[data-tab=orders]');
+// seal one client first: its primary button shows Waiting with the others' seal pips
+await a.click('[data-submit]'); await a.waitForTimeout(200); { const y = await a.$('[data-y]'); if (y) await y.click(); }
+await a.waitForTimeout(500);
+await a.screenshot({ path: `${out}/mp-a-waiting.png` });
+console.log('a waiting:', await a.evaluate(() => !!document.querySelector('.pbtn.waiting') && !!document.querySelector('[data-unsubmit]')));
+for (const p of [b, c]) {
   await p.click('[data-submit]');
   await p.waitForTimeout(200);
   const y = await p.$('[data-y]'); if (y) await y.click();

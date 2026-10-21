@@ -30,8 +30,12 @@ import { fleetSpeed, strengthBand, findPath } from './graph.ts';
 import { canAfford, orderCost, pay, validateOrder, ORDER_INFO, MAX_JOINERS } from './orders.ts';
 import { Rng } from './rng.ts';
 import { maxGarrison, newFleet, newShip } from './setup.ts';
-import type { TickOpts, BattleReport, Engagement, Doctrine, Fleet, FreeAction, GameEvent, GameState, Order, PlayerId, RegionId, Signal, Submission, TurnResult } from './types.ts';
+import type { TickOpts, BattleReport, Engagement, Doctrine, Fleet, FoundSpec, FreeAction, GameEvent, GameState, Order, PlayerId, RegionId, Signal, Submission, TurnResult, VowKind } from './types.ts';
 import { coverage, seesFleetsIn } from './visibility.ts';
+import { soulOn, SR, ensureSoul, bannersFree, resolveFound, raiseBanner, applyRout, onFleetLost, catchLimping, onCapture, raze, razeBlock, vowBlock, swearVow, pickHonour, pickCalling, soulEndTurn, soulReigns, soulRegen, soulYield, soulUpkeep, hasBoon, hasBane, breakVow, sagaBeat, beat, headline, addDeed, archiveFleet, cleanText, isPicket } from './soul.ts';
+import { makeEdition, queueDispatch } from './herald.ts';
+import { traitFx, traitHpMult } from './shiptraits.ts';
+import { BOONS, DEEDS } from '../config/content.ts';
 
 export function emptySubmission(s: GameState): Submission {
   return { orders: new Array(s.rules.orders.perTurn).fill(null), free: [] };
@@ -53,6 +57,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   const battles: BattleReport[] = [];
   const signals: Signal[] = [];
   const subs: Record<number, Submission> = {};
+  const soul = !!ensureSoul(s);
   for (const p of s.players) subs[p.id] = sanitize(s, submissions[p.id], live);
   s.log.push(live ? { turn: s.turn, submissions: structuredClone(subs), tick: { ...tick! } } : { turn: s.turn, submissions: structuredClone(subs) });
 
@@ -62,6 +67,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     for (const f of s.fleets) { f.ordersThisTurn = 0; f.guardUsed = false; }
     // last turn's pact offers stay answerable for one more turn
     for (const p of s.players) { p.prevPactOffers = p.pactOffers ?? []; p.pactOffers = []; p.researched = 0; p.revokedThisTurn = []; }
+    // sworn words only stay attached to offers that can still be answered
+    for (const p of s.players) if (p.pactWords) for (const k of Object.keys(p.pactWords)) if (!(p.prevPactOffers ?? []).includes(Number(k))) delete p.pactWords[Number(k)];
     s.cycleStartOwners = s.regions.map(r => r.owner);
     s.concealed = [];
   }
@@ -75,12 +82,13 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
 
   // ---------------------------------------------------------- free actions
   const freeFails: GameEvent[] = [];
+  const fought = new Set<number>();   // Soul: fleets that fought a battle this step
   // same rotating seat order as orders, so simultaneous races (a ★ technology) never always favour seat 0;
   // eliminated players can't act at all
   const freeRot = s.turn % s.players.length;
   const freeSeats = [...s.players.slice(freeRot), ...s.players.slice(0, freeRot)].filter(p => !p.eliminated);
   for (const p of freeSeats) for (const fa of subs[p.id].free) {
-    const err = applyFree(s, rng, p.id, fa);
+    const err = applyFree(s, rng, p.id, fa, e => freeFails.push(e));
     if (err) freeFails.push({ k: 'fail', pulse: 0, owner: p.id, text: `${fa.type === 'research' ? `Research (${TECH[fa.tech]?.name ?? fa.tech})` : fa.type} failed: ${err}` });
     else if (fa.type === 'research') {
       freeFails.push({ k: 'tech', pulse: 0, owner: p.id, tech: fa.tech });
@@ -117,13 +125,28 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   };
   const handleFight = (out: FightOutcome, rid: RegionId, pulse: number, report: BattleReport | undefined) => {
     if (out.rounds > 0 && report) emit({ k: 'battle', pulse, region: rid, battle: report.id, name: report.name, parties: report.sides.map(x => x.owner) });
+    if (out.eng) for (const id of out.eng.fleets) fought.add(id);
     for (const r of out.retreats) {
       emit({ k: 'retreat', pulse, fleet: r.fleet.id, owner: r.fleet.owner, from: rid, to: r.to });
       r.fleet.region = r.to;
       r.fleet.fortified = false;
       r.fleet.route = null;   // LIVE: a fleet driven off its course stops (its route no longer starts here)
+      // forced out (a never-retreat fleet only ever leaves when forced): the vow is broken
+      if (soul && r.fleet.vow?.kind === 'never_retreat') breakVow(s, r.fleet, pulse, emit, `retreated from ${s.regions[rid].name}`);
     }
-    for (const f of out.destroyedFleets) emit({ k: 'destroyed', pulse, fleet: f.id, owner: f.owner, region: rid, name: f.name });
+    // Soul: routed fleets limp away (a third scar breaks them)
+    for (const r of out.routs) {
+      r.fleet.region = r.to;
+      r.fleet.fortified = false;
+      r.fleet.route = null;
+      if (applyRout(s, r.fleet, rid, r.by, pulse, emit) === 'broken') r.fleet.ships = [];
+      else s.chronicle.push({ turn: s.turn, region: rid, players: [r.fleet.owner], text: `${r.fleet.name} routs from ${s.regions[rid].name} and limps for home.` });
+    }
+    for (const e of out.events) emit(e);
+    for (const f of out.destroyedFleets) {
+      emit({ k: 'destroyed', pulse, fleet: f.id, owner: f.owner, region: rid, name: f.name });
+      if (soul && f.owner >= 0) { const k = out.killers.get(f.id); onFleetLost(s, f, rid, 'destroyed', k?.owner ?? null, k?.cmd ?? null, pulse, emit); }
+    }
     s.fleets = s.fleets.filter(f => f.ships.length > 0);
     // credit whoever sank the Warden's last ship, even if the battle goes on between players
     if (s.wardenAwake && !s.wardenDefeated && !s.fleets.some(f => f.owner === -1)) wardenDefeated(out.wardenSlayer ?? out.winner);
@@ -138,6 +161,14 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       addVp(s, w, capped(w, vsLeader ? R.bounty.battleHonorVsLeaderVp : R.bounty.battleHonorVp), `Battle honors: ${E.name}${vsLeader ? ' (against the leader)' : ''}`);
     }
     const lost = Object.values(E.losses).reduce((a, b) => a + b, 0);
+    const story = s.regions[rid].story;
+    if (soul && story) {
+      if (E.owners.length > 1) story.blood++;
+      const holder = s.regions[rid].owner ?? -1;
+      // a siege held off: the garrison's side won against attackers
+      if (E.garrisonStart > 0 && w === holder && E.owners.some(o => o !== holder)) story.siege++;
+      if (lost >= 3) beat(s, { kind: 'battle', text: headline(s, 'battle', { r: s.regions[rid].name, x: lost }), region: rid, players: E.owners.filter((x): x is number => x >= 0), drama: Math.min(5, 1 + Math.floor(lost / 2)), public: false });
+    }
     if (lost >= 2) {
       const ps = E.owners.filter((x): x is number => x >= 0);
       const long = s.turn > E.startedTurn ? ` after ${E.rounds} rounds over ${s.turn - E.startedTurn + 1} turns` : '';
@@ -151,6 +182,17 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   /** Combat step of a pulse: every engagement fights its rounds, then finished sieges capture. */
   const combatPhase = (pulse: number, cameFrom: Map<number, RegionId>) => {
     for (const r of rotatedRegions) {
+      // Soul: a limping fleet caught by any hostile fleet (or a hostile garrison) dies
+      if (soul) for (const f of s.fleets.filter(x => x.limping && x.region === r.id && x.ships.length)) {
+        const catcher = s.fleets.find(x => x.region === r.id && x.ships.length && !x.limping && hostile(s, x.owner, f.owner) && x.ships.some(sh => sh.sys.weapons));
+        const gar = r.owner !== null && r.garrison > 0 && hostile(s, r.owner, f.owner);
+        if (!catcher && !gar) continue;
+        s.chronicle.push({ turn: s.turn, region: r.id, players: [f.owner, ...(catcher && catcher.owner >= 0 ? [catcher.owner] : [])], major: (f.commander.rank >= 3),
+          text: `${f.name} is caught limping at ${r.name} and destroyed${catcher ? ` by ${catcher.name}` : ''}.` });
+        catchLimping(s, f, catcher ? catcher.owner : r.owner!, catcher ?? null, pulse, emit);
+        if (catcher) fought.add(catcher.id);
+      }
+      if (soul) s.fleets = s.fleets.filter(f => f.ships.length > 0);
       const eng = engagementAt(s, r.id);
       if (!wouldFight(s, r.id) && !eng) continue;
       let rep: BattleReport | undefined;
@@ -171,6 +213,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         if (r.owner !== null && R.wardenHunt.razes) {
           const victim = r.owner;
           r.owner = null; r.garrison = 0; r.project = null; r.dev = Math.max(1, r.dev - 1);
+          if (r.story) { r.story.owners.push({ p: null, turn: s.turn, how: 'warden' }); r.story.pendingCalling = null; if (r.story.calling) r.story.calling.dormantUntil = s.turn + SR(s).dormantTurns; }
           s.chronicle.push({ turn: s.turn, region: r.id, players: [victim], major: true, text: `The Warden razes ${r.name}. ${s.players[victim].name} loses it.` });
           emit({ k: 'note', pulse, owner: null, text: `The Warden razes ${r.name}.`, region: r.id });
         }
@@ -240,9 +283,26 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         pay(s.players[p].res, cost, creditRate(s, p));
         if (o.type === 'build') {
           let f = o.fleet !== null ? s.fleets.find(x => x.id === o.fleet)! : null;
-          if (!f) f = newFleet(s, rng, p, o.region);
-          const sh = newShip(s, rng, o.cls, p);
+          if (!f) {
+            f = newFleet(s, rng, p, o.region);
+            // Soul: a new fleet raises a banner (a scout without founding data is a picket)
+            if (soul && (o.cls !== 'scout' || o.found)) {
+              const fd = resolveFound(s, p, o.region, o.found);
+              if (typeof fd !== 'string') {
+                raiseBanner(s, f, fd.name, fd.banner);
+                emit({ k: 'soul', pulse, kind: 'founded', owner: p, text: `${f.name} is founded at ${s.regions[o.region].name}.`, region: o.region, fleet: f.id, players: [p] });
+                beat(s, { kind: 'founded', text: headline(s, 'founded', { a: s.players[p].name, f: f.name, r: s.regions[o.region].name }), region: o.region, players: [p], drama: 1, public: false });
+              }
+            }
+          }
+          const sh = newShip(s, rng, o.cls, p, { region: o.region, fleet: f });
           f.ships.push(sh);
+          // Soul: a Proving Ground bloods green commanders (never past rules.soul.provingMaxXp: XP is earned by fighting)
+          if (soul && f.banner) {
+            const pr = s.regions[o.region];
+            const t = pr.story?.calling?.id === 'proving' && !(pr.story.calling.dormantUntil! > s.turn) ? (() => { const tt = SR(s).tenureTiers.filter(x => s.turn - pr.story!.tenureFrom >= x).length; return SR(s).provingXp[Math.min(3, tt)] ?? 0; })() : 0;
+            if (t && f.commander.xp < SR(s).provingMaxXp) f.commander.xp = Math.min(SR(s).provingMaxXp, f.commander.xp + t);
+          }
           emit({ k: 'build', pulse, region: o.region, owner: p, cls: o.cls, fleet: f.id, name: sh.name });
           signal(pulse, p, o.region, `Shipyard activity at ${s.regions[o.region].name}`, { confirmed: false });
         } else if (o.type === 'develop') {
@@ -251,6 +311,13 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
           signal(pulse, p, o.region, `Construction at ${s.regions[o.region].name}`);
         } else {
           excavate(s, rng, p, regionId, pulse, emit);
+          if (soul) {
+            const ef = s.fleets.find(x => x.id === (o as { fleet: number }).fleet);
+            const st = s.regions[regionId].story;
+            if (st) st.relic++;
+            const got = s.regions[regionId].relic;
+            if (ef && ef.vow?.kind === 'relic' && got && got !== 'empty') { ef.vow.carrying = got; sagaBeat(ef, s.turn, 'relic', `Dug up a relic at ${s.regions[regionId].name} and turns for home.`, regionId); }
+          }
         }
       }
     };
@@ -259,7 +326,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
 
     // ---------------------------------------------------------- 1. prepare
     for (const { p, o } of orders) {
-      if (!['fortify', 'scan', 'feint', 'conceal', 'pact', 'law', 'refit'].includes(o.type)) continue;
+      if (!['fortify', 'scan', 'feint', 'conceal', 'pact', 'law', 'refit', 'retire', 'engrave', 'raze'].includes(o.type)) continue;
       const err = validateOrder(s, p, o);
       if (err) { fail(pulse, p, o, err); continue; }
       // a refit is a full overhaul: like building, it can't happen under enemy guns (no free mid-battle heal)
@@ -318,7 +385,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
             const mod = blueprintFor(s, p, sh.cls);
             const frac = sh.hp / Math.max(1, sh.maxHp);
             sh.mod = mod;
-            sh.maxHp = baseHp(s, sh.cls, mod);
+            // ship traits and a Burned Hull scar survive a refit
+            sh.maxHp = Math.max(1, Math.round(baseHp(s, sh.cls, mod) * (sh.traits?.length ? traitHpMult(sh) : 1) * (f.scars?.some(x => x.id === 'burned') ? SR(s).burnedHullMult : 1)));
             sh.hp = Math.max(1, Math.round(sh.maxHp * Math.max(frac, 1)));
             sh.sys = { engines: true, weapons: true, shields: true };
           }
@@ -326,7 +394,28 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
           signal(pulse, p, f.region, `${s.players[p].name} refitting ships at ${s.regions[f.region].name}`);
           break;
         }
+        case 'retire': {
+          const f = s.fleets.find(x => x.id === o.fleet)!;
+          const r = s.regions[f.region];
+          addDeed(s, r, { id: 'haven', turn: s.turn, name: `Haven of ${f.name}`, by: p, fleet: f.name, boon: f.banner?.boons[0] ?? (f.honours ?? [])[0]?.id });
+          sagaBeat(f, s.turn, 'retired', `Retired with honours to ${r.name}.`, r.id);
+          emit({ k: 'soul', pulse, kind: 'retired', owner: null, text: `${f.name} retires with honours to ${r.name}.`, region: r.id, fleet: f.id, players: [p] });
+          beat(s, { kind: 'retired', text: headline(s, 'retired', { f: f.name, r: r.name }), region: r.id, players: [p], drama: 5, public: true });
+          s.chronicle.push({ turn: s.turn, region: r.id, players: [p], major: true, text: `${f.name} furls its banner at ${r.name}. ${r.name} becomes the Haven of ${f.name}.` });
+          archiveFleet(s, f, 'retired', r.id);
+          f.ships = [];
+          s.fleets = s.fleets.filter(x => x !== f);
+          break;
+        }
+        case 'engrave': {
+          const d = s.regions[o.region].story!.deeds.find(x => x.id === o.deed)!;
+          d.engraved = true;
+          emit({ k: 'soul', pulse, kind: 'engraved', owner: p, text: `${d.name} is engraved at ${s.regions[o.region].name}.`, region: o.region });
+          break;
+        }
+        case 'raze': raze(s, p, s.regions[o.region], pulse, emit); break;
         case 'pact':
+          if (o.words) (s.players[p].pactWords ??= {})[o.with] = o.words;
           s.players[p].pactOffers.push(o.with);
           emit({ k: 'note', pulse, owner: p, text: `Pact offered to ${s.players[o.with].name}.` });
           signal(pulse, p, s.players[o.with].capital, `${s.players[p].name} has offered you a pact`, { force: true });
@@ -394,7 +483,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         } else {
           f.route = { path: f.region === o.target ? [] : [...(o.via ?? []), o.target], seize: o.target, mp: startMp };
           for (const id of [...new Set(o.also ?? [])].filter(id => id !== o.fleet).slice(0, MAX_JOINERS)) {
-            const g = s.fleets.find(x => x.id === id && x.owner === p && x.ships.length);
+            const g = s.fleets.find(x => x.id === id && x.owner === p && x.ships.length && !x.limping);
             if (!g || g === f || (g.region !== o.target && !(s.regions[g.region].links ?? s.regions[g.region].neighbors).includes(o.target))) continue;
             if (g.ordersThisTurn >= R.orders.maxPerFleet) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is exhausted (max ${R.orders.maxPerFleet} orders per turn)` }); continue; }
             if (g.ordersThisTurn > 0) s.players[p].res.credits -= R.orders.repeatFleetCredits;
@@ -416,7 +505,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         else {
           f.route = { path: f.region === o.target ? [] : [...(o.via ?? []), o.target], seize: o.target, mp: 0 };
           for (const id of [...new Set(o.also ?? [])].filter(id => id !== o.fleet).slice(0, MAX_JOINERS)) {
-            const g = s.fleets.find(x => x.id === id && x.owner === p && x.ships.length);
+            const g = s.fleets.find(x => x.id === id && x.owner === p && x.ships.length && !x.limping);
             if (!g || g === f || routed.has(g)) continue;
             if (g.bornTurn === s.turn && s.turn > 1) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} was only just formed and can't join the assault` }); continue; }
             if (g.region !== o.target && !(s.regions[g.region].links ?? s.regions[g.region].neighbors).includes(o.target)) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is not next to ${s.regions[o.target].name} and can't join the assault` }); continue; }
@@ -437,7 +526,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         movers.push({ f, path: f.region === o.target ? [] : [...(o.via ?? []), o.target], idx: 0, seize: o.target, p, o });
         // combined assault: extra fleets adjacent to (or at) the target join in
         for (const id of [...new Set(o.also ?? [])].filter(id => id !== o.fleet).slice(0, MAX_JOINERS)) {
-          const g = s.fleets.find(x => x.id === id && x.owner === p && x.ships.length);
+          const g = s.fleets.find(x => x.id === id && x.owner === p && x.ships.length && !x.limping);
           if (!g || g === f || movers.some(m => m.f === g)) continue;
           if (g.bornTurn === s.turn && s.turn > 1) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} was only just formed and can't join the assault` }); continue; }
           if (g.region !== o.target && !(s.regions[g.region].links ?? s.regions[g.region].neighbors).includes(o.target)) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is not adjacent to ${s.regions[o.target].name} and can't join the assault` }); continue; }
@@ -486,8 +575,10 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       const dest = m.dest ?? m.path[m.path.length - 1];
       const txt = live ? `Fleet movement (${strengthBand(m.f.ships.length)}) ${s.regions[m.f.region].name} → ${s.regions[dest].name}, heading onward`
         : `Fleet movement (${strengthBand(m.f.ships.length)}) ${s.regions[m.f.region].name} → ${s.regions[dest].name}, ${R.orders.pulses > 1 ? `arriving pulse ${pulse}` : 'arriving this turn'}`;
+      const loose = soul && hasBane(s, m.f, 'looselips');
       for (const o of s.players) {
         if (o.id === m.p) continue;
+        if (loose) { signals.push({ turn: s.turn, pulse, observer: o.id, about: m.p, region: m.f.region, text: `${txt} (loose lips)`, confidence: 'confirmed' }); continue; }
         const seesFrom = covStart[o.id].has(m.f.region), seesTo = covStart[o.id].has(dest) || coverage(s, o.id).has(dest);
         if (!seesFrom && !seesTo) continue;
         signals.push({ turn: s.turn, pulse, observer: o.id, about: m.p, region: seesFrom ? m.f.region : dest, text: seesFrom ? txt : `${txt} (origin unclear)`, confidence: seesFrom ? 'confirmed' : 'inferred' });
@@ -503,6 +594,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         const a = stepping[i], b = stepping[j];
         if (clashed.has(a) || clashed.has(b)) continue;
         if (!hostile(s, a.f.owner, b.f.owner)) continue;
+        if (a.f.limping || b.f.limping) continue;   // a limping fleet slips past (and is caught if it ends among enemies)
         if (a.path[a.idx] !== b.f.region || b.path[b.idx] !== a.f.region) continue;
         if (a.f.doctrine.stance === 'evasive' && b.f.doctrine.stance === 'evasive') continue;
         clashed.add(a); clashed.add(b);
@@ -522,11 +614,23 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         if (m.idx >= m.path.length || !s.fleets.includes(m.f)) continue;
         if (clashed.has(m) && m.idx >= m.path.length) continue;
         const from = m.f.region, to = m.path[m.idx++];
+        const leavingFight = !!engagementAt(s, from) && wouldFight(s, from);
         if (engagementAt(s, from) && !disengage(s, rng, m.f, pulse, e => getReport(e, pulse))) {
           emit({ k: 'destroyed', pulse, fleet: m.f.id, owner: m.f.owner, region: from, name: m.f.name });
+          if (soul && m.f.owner >= 0) onFleetLost(s, m.f, from, 'destroyed', s.fleets.find(x => x.region === from && x !== m.f && x.ships.length && hostile(s, x.owner, m.f.owner))?.owner ?? null, null, pulse, emit);
           s.fleets = s.fleets.filter(f => f !== m.f);
           m.idx = m.path.length;
           continue;
+        }
+        if (soul && leavingFight && m.f.vow?.kind === 'never_retreat') breakVow(s, m.f, pulse, emit, `broke off from the fight at ${s.regions[from].name}`);
+        const routBy = (m.f as Fleet & { _routBy?: number })._routBy;
+        if (routBy !== undefined) {
+          // Soul: broke off under fire with its last hull: it routs (and limps on from where it is going)
+          delete (m.f as Fleet & { _routBy?: number })._routBy;
+          m.f.region = to;
+          if (applyRout(s, m.f, from, routBy, pulse, emit) === 'broken') { s.fleets = s.fleets.filter(f => f !== m.f); m.idx = m.path.length; continue; }
+          m.f.region = from;
+          m.idx = m.path.length;   // its old orders end here: it limps home on its own route
         }
         m.f.siege = null;
         cameFrom.set(m.f.id, from);
@@ -549,10 +653,10 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       for (const r of rotatedRegions) {
         if (r.owner === null) continue;
         const invaders = s.fleets.filter(x => x.region === r.id && x.ships.length && hostile(s, x.owner, r.owner!) && x.owner !== -1
-          && x.doctrine.stance !== 'evasive' && !x.ships.every(sh => sh.cls === 'scout'));
+          && x.doctrine.stance !== 'evasive' && !x.ships.every(sh => sh.cls === 'scout') && !x.limping);
         if (!invaders.length) continue;
         for (const g of s.fleets) {
-          if (g.owner !== r.owner || !g.doctrine.guard || g.guardUsed || !g.ships.length) continue;
+          if (g.owner !== r.owner || !g.doctrine.guard || g.guardUsed || !g.ships.length || g.limping) continue;
           if (g.region === r.id || !(r.links ?? r.neighbors).includes(g.region)) continue;
           if (movers.some(m => m.f === g && (m.idx < m.path.length || m.o.type === 'seize'))) continue;
           if (s.fleets.some(x => x.region === g.region && x.ships.length && hostile(s, x.owner, g.owner))) continue; // pinned
@@ -572,6 +676,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     if (wegoRoutes) for (const m of movers) {
       const f = m.f;
       if (!s.fleets.includes(f) || !f.route) continue;
+      if (f.limping && f.limping.since === s.turn && m.o.type !== 'move') continue;   // routed mid-move: its new route home stands
       f.route.overdrive = undefined;
       if (m.stopped || m.idx < m.path.length) { f.route = null; continue; }
       f.route.path = f.route.path.slice(m.path.length);
@@ -585,6 +690,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       if (!m.path.length) continue;
       const f = m.f;
       if (!s.fleets.includes(f) || !f.route) continue;
+      if (f.limping && f.limping.since === s.turn && f.route.path[0] !== m.path[0]) continue;   // routed mid-move: its route home stands
       // arriving at the end of the route also completes a seize (the mover above carried it)
       if (f.region === m.path[0]) { f.route.path.shift(); if (!f.route.path.length) f.route = null; }
       else f.route = null;
@@ -606,8 +712,16 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       }
       if (r.owner !== null && !hostile(s, p, r.owner)) {
         const victim = r.owner;
+        const broken = s.pacts.find(x => (x.a === p && x.b === victim) || (x.a === victim && x.b === p));
         s.pacts = s.pacts.filter(x => !((x.a === p && x.b === victim) || (x.a === victim && x.b === p)));
         addVp(s, p, -R.influence.pactBreakVp, `Broke the pact with ${s.players[victim].name}`);
+        if (soul && broken?.words?.length) {
+          // a sworn pact: the house is branded Oathbreaker and the Herald prints its words
+          const words = (broken.words.find(w => w.by === p) ?? broken.words[0]).text;
+          (s.players[p].oathbreaker ??= []).push({ turn: s.turn, victim, words });
+          emit({ k: 'soul', pulse, kind: 'oath', owner: null, text: `${s.players[p].name} breaks its sworn word to ${s.players[victim].name}: "${words}"`, region: r.id, players: [p, victim] });
+          beat(s, { kind: 'oath', text: headline(s, 'oath', { a: s.players[p].name, b: s.players[victim].name, x: words }), region: r.id, players: [p, victim], drama: 9, public: true });
+        }
         emit({ k: 'betrayal', pulse, by: p, victim, region: r.id });
         s.chronicle.push({ turn: s.turn, region: r.id, players: [p, victim], major: true, text: `${s.players[p].name} breaks its pact and falls on ${r.name}. ${s.players[victim].name} will remember.` });
       }
@@ -690,11 +804,21 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     }
     const midBattle = !!engagementAt(s, r.id) && wouldFight(s, r.id);   // no repairs mid-battle
     // out of supply means no repairs at all, even in a region you own (e.g. one cut off behind enemy lines)
-    const owned = r.owner === f.owner && inSupply && !midBattle;
-    const yard = owned && ((r.buildings.shipyard ?? 0) > 0 || (r.buildings.depot ?? 0) > 0);
+    let owned = r.owner === f.owner && inSupply && !midBattle;
+    let yard = owned && ((r.buildings.shipyard ?? 0) > 0 || (r.buildings.depot ?? 0) > 0);
     const regen = hasTech(s, f.owner, 'regen') && inSupply && !midBattle;
+    // Soul: Field Medics repair anywhere in supply, at shipyard speed on their own worlds; Slow Refits only at yards, at half speed
+    const medics = soul && hasBoon(s, f, 'medics') && inSupply && !midBattle;
+    const slow = soul && hasBane(s, f, 'slowrefit');
+    if (medics && owned) yard = true;
+    if (slow && !yard) owned = false;
     for (const sh of f.ships) {
-      if (owned || regen) sh.hp = Math.min(sh.maxHp, sh.hp + R.economy.shipRepairPerTurn + (yard ? R.economy.shipyardRepairBonus : 0) + (regen ? R.empire.regenRepair : 0));
+      const tr = sh.traits?.length ? traitFx(sh).repair : 0;
+      if (owned || regen || medics) {
+        let rep = (owned ? R.economy.shipRepairPerTurn : 0) + (yard ? R.economy.shipyardRepairBonus : 0) + (regen ? R.empire.regenRepair : 0) + (medics && !owned ? SR(s).medicsRepair : 0) + tr;
+        if (slow) rep = Math.floor(rep / 2);
+        sh.hp = Math.min(sh.maxHp, sh.hp + Math.max(0, rep));
+      }
       if (yard) sh.sys = { engines: true, weapons: true, shields: true };
       else if (owned && sh.hp === sh.maxHp) {
         // field repair restores one knocked-out subsystem per turn at full hull
@@ -713,7 +837,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     else if (r.owner !== null) {
       const o = r.owner;
       const bonus = (hasLaw(s, o, 'bastion') ? R.empire.lawRegenBonus : 0) + (hasLaw(s, o, 'martial') ? R.empire.lawRegenBonus : 0);
-      r.garrison = Math.min(maxGarrison(s, r.id), r.garrison + (R.garrison.regenPerTurn + bonus) * (hasTech(s, o, 'regen') ? 2 : 1));
+      r.garrison = Math.min(maxGarrison(s, r.id), r.garrison + (R.garrison.regenPerTurn + bonus) * (hasTech(s, o, 'regen') ? 2 : 1) + (soul ? soulRegen(s, r) : 0));
     } else if (r.garrison < (r.baseGarrison ?? 0)) {
       r.garrison = Math.min(r.baseGarrison, r.garrison + R.neutral.garrisonRegen);
     }
@@ -742,7 +866,11 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     if (o.pactOffers.includes(p.id) || (o.prevPactOffers ?? []).includes(p.id)) {
       signed.add(key);
       s.pacts = s.pacts.filter(x => !((x.a === p.id && x.b === q) || (x.a === q && x.b === p.id)));
-      s.pacts.push({ a: Math.min(p.id, q), b: Math.max(p.id, q), until: s.turn + R.influence.pactTurns });
+      const words = soul ? [{ by: p.id, text: p.pactWords?.[q] ?? '' }, { by: q, text: o.pactWords?.[p.id] ?? '' }].filter(w => w.text) : [];
+      if (p.pactWords) delete p.pactWords[q];
+      if (o.pactWords) delete o.pactWords[p.id];
+      s.pacts.push({ a: Math.min(p.id, q), b: Math.max(p.id, q), until: s.turn + R.influence.pactTurns, ...(words.length ? { words } : {}) });
+      if (words.length) s.chronicle.push({ turn: s.turn, players: [p.id, q], text: `They swear it: ${words.map(w => `${s.players[w.by].name}: "${w.text}"`).join(' ')}` });
       emit({ k: 'pact', pulse: endPulse, a: p.id, b: q, formed: true });
       s.chronicle.push({ turn: s.turn, players: [p.id, q], text: `${p.name} and ${s.players[q].name} sign a pact of non-aggression until turn ${s.turn + R.influence.pactTurns}.` });
       o.prevPactOffers = (o.prevPactOffers ?? []).filter(x => x !== p.id);
@@ -757,6 +885,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     const fleets = s.fleets.filter(f => f.owner === p.id);
     if (!owned.length && !fleets.length) {
       p.eliminated = true;
+      if (soul) beat(s, { kind: 'eliminated', text: headline(s, 'eliminated', { a: p.name }), players: [p.id], drama: 10, public: true });
       s.chronicle.push({ turn: s.turn, players: [p.id], major: true, text: `${p.name} is no more.` });
       continue;
     }
@@ -810,6 +939,10 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   }
 
   maybeWakeWarden(s, rng, endPulse, emit);
+  if (soul) {
+    soulReigns(s, endPulse, emit);
+    soulEndTurn(s, endPulse, emit, fought);
+  }
   }
   if (endCycle) {
 
@@ -830,7 +963,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   const finalSignals: Signal[] = [];
   const seen = new Map<string, { sig: Signal; n: number }>();
   for (const x of signals) {
-    if (!(x.about === null || !concealed.has(x.about) || x.text.startsWith('FALSE'))) continue;
+    if (!(x.about === null || !concealed.has(x.about) || x.text.startsWith('FALSE') || x.text.endsWith('(loose lips)'))) continue;
     const key = `${x.observer}|${x.pulse}|${x.text}`;
     const prev = seen.get(key);
     if (prev) { prev.n++; continue; }
@@ -847,6 +980,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   checkVictory(s, endCycle);
 
   if (endCycle) {
+    // the Herald goes to press (fog: each headline remembers who could see it)
+    if (soul) makeEdition(s, s.players.map(p => { const c = coverage(s, p.id); for (const x of covStart[p.id]) c.add(x); return c; }));
     s.scans = s.scans.filter(x => x.until > s.turn);
     // per-turn counters start fresh for the next turn's planning (research limit, revoke/enact switching cost)
     for (const p of s.players) { p.researched = 0; p.revokedThisTurn = []; }
@@ -886,10 +1021,16 @@ export function cleanOrder(s: GameState, o: unknown): Order | null {
       if (also === null) return null;
       return { type: 'seize', fleet: o.fleet, target: o.target, ...(also ? { also } : {}), ...(via?.length ? { via } : {}) };
     }
-    case 'build':
+    case 'build': {
       if (!rid(o.region) || typeof o.cls !== 'string' || !Object.hasOwn(s.rules.ships, o.cls)) return null;
       if (o.fleet !== null && o.fleet !== undefined && !isId(o.fleet)) return null;
-      return { type: 'build', region: o.region, cls: o.cls, fleet: isId(o.fleet) ? o.fleet : null };
+      const found = o.found === undefined || isId(o.fleet) ? undefined : cleanFound(o.found);
+      if (found === null) return null;
+      return { type: 'build', region: o.region, cls: o.cls, fleet: isId(o.fleet) ? o.fleet : null, ...(found ? { found } : {}) };
+    }
+    case 'retire': return isId(o.fleet) ? { type: 'retire', fleet: o.fleet } : null;
+    case 'engrave': return rid(o.region) && typeof o.deed === 'string' && Object.hasOwn(DEEDS, o.deed) ? { type: 'engrave', region: o.region, deed: o.deed } : null;
+    case 'raze': return rid(o.region) ? { type: 'raze', region: o.region } : null;
     case 'develop':
       if (!rid(o.region) || typeof o.project !== 'string' || !Object.hasOwn(s.rules.projects, o.project)) return null;
       return { type: 'develop', region: o.region, project: o.project };
@@ -898,8 +1039,11 @@ export function cleanOrder(s: GameState, o: unknown): Order | null {
     case 'influence': case 'scan': case 'feint':
       return rid(o.target) ? { type: o.type, target: o.target } : null;
     case 'conceal': return { type: 'conceal' };
-    case 'pact':
-      return isId(o.with) && o.with < s.players.length ? { type: 'pact', with: o.with } : null;
+    case 'pact': {
+      if (!(isId(o.with) && o.with < s.players.length)) return null;
+      const words = cleanText(o.words, s.rules.soul?.pactWordsMax ?? 120);
+      return words ? { type: 'pact', with: o.with, words } : { type: 'pact', with: o.with };
+    }
     case 'law':
       return typeof o.law === 'string' && Object.hasOwn(LAW, o.law) ? { type: 'law', law: o.law } : null;
     case 'refit':
@@ -908,8 +1052,24 @@ export function cleanOrder(s: GameState, o: unknown): Order | null {
   return null;
 }
 
+/** Founding data off the wire: known fields only, ids as short strings. null = malformed. */
+function cleanFound(x: unknown): FoundSpec | null {
+  if (!isRec(x)) return null;
+  const strs = (a: unknown) => (a === undefined ? [] : Array.isArray(a) && a.length <= 6 && a.every(v => typeof v === 'string' && v.length < 32) ? (a as string[]).slice() : null);
+  const boons = strs(x.boons), banes = strs(x.banes);
+  if (!boons || !banes) return null;
+  const out: FoundSpec = { boons, banes };
+  if (typeof x.name === 'string') out.name = cleanText(x.name, 40);
+  if (typeof x.sigil === 'string' && x.sigil.length < 32) out.sigil = x.sigil;
+  if (isId(x.grudgeVs) && x.grudgeVs < 3) out.grudgeVs = x.grudgeVs;
+  return out;
+}
+
 export function cleanFree(fa: unknown): FreeAction | null {
   if (!isRec(fa)) return null;
+  if (fa.type === 'dispatch') { const text = cleanText(fa.text, 140); return text ? { type: 'dispatch', text, ...(fa.as === 'source' ? { as: 'source' as const } : {}) } : null; }
+  if (fa.type === 'calling') return isId(fa.region) && (typeof fa.pick === 'string' && fa.pick.length < 32 || isId(fa.pick)) ? { type: 'calling', region: fa.region, pick: fa.pick as string | number } : null;
+  if (fa.type === 'raze') return isId(fa.region) ? { type: 'raze', region: fa.region } : null;
   if (fa.type === 'research') return typeof fa.tech === 'string' && Object.hasOwn(TECH, fa.tech) ? { type: 'research', tech: fa.tech } : null;
   if (fa.type === 'revoke') return typeof fa.law === 'string' && Object.hasOwn(LAW, fa.law) ? { type: 'revoke', law: fa.law } : null;
   if (fa.type === 'halt') return isId(fa.fleet) ? { type: 'halt', fleet: fa.fleet } : null;
@@ -920,7 +1080,16 @@ export function cleanFree(fa: unknown): FreeAction | null {
       const d = fa.doctrine;   // copy known fields only; applyFree validates their values
       return isRec(d) ? { type: 'doctrine', fleet: fa.fleet, doctrine: { stance: d.stance, retreatAt: d.retreatAt, target: d.target, guard: d.guard } as Doctrine } : null;
     }
-    case 'split': { const ships = idList(fa.ships, 64); return ships ? { type: 'split', fleet: fa.fleet, ships } : null; }
+    case 'split': {
+      const ships = idList(fa.ships, 64);
+      const found = fa.found === undefined ? undefined : cleanFound(fa.found);
+      return ships && found !== null ? { type: 'split', fleet: fa.fleet, ships, ...(found ? { found } : {}) } : null;
+    }
+    case 'vow': {
+      if (typeof fa.vow !== 'string' || !['throne', 'never_retreat', 'guard', 'avenge', 'relic'].includes(fa.vow)) return null;
+      return { type: 'vow', fleet: fa.fleet, vow: fa.vow as VowKind, ...(isId(fa.region) ? { region: fa.region } : {}), ...(isId(fa.target) ? { target: fa.target } : {}) };
+    }
+    case 'honour': return typeof fa.pick === 'string' && fa.pick.length < 32 || isId(fa.pick) ? { type: 'honour', fleet: fa.fleet, pick: fa.pick as string | number } : null;
     case 'merge': return isId(fa.into) ? { type: 'merge', fleet: fa.fleet, into: fa.into } : null;
     case 'rename': return typeof fa.name === 'string' ? { type: 'rename', fleet: fa.fleet, name: fa.name.slice(0, 40) } : null;
   }
@@ -939,8 +1108,35 @@ function sanitize(s: GameState, sub: Submission | undefined, tick = false): Subm
   return out;
 }
 
-function applyFree(s: GameState, rng: Rng, p: PlayerId, fa: Submission['free'][number]): string | null {
+function applyFree(s: GameState, rng: Rng, p: PlayerId, fa: Submission['free'][number], emit: (e: GameEvent) => void = () => {}): string | null {
   const pl = s.players[p];
+  // ---- Soul layer
+  if (fa.type === 'dispatch') return queueDispatch(s, p, fa.text, fa.as);
+  if (fa.type === 'calling') {
+    if (!soulOn(s)) return 'callings are off in these rules';
+    const r = s.regions[fa.region];
+    if (!r || r.owner !== p) return 'not your world';
+    return pickCalling(s, r, fa.pick);
+  }
+  if (fa.type === 'raze') {
+    const b = razeBlock(s, p, fa.region, true);
+    if (b) return b;
+    raze(s, p, s.regions[fa.region], 0, emit);
+    return null;
+  }
+  if (fa.type === 'vow') {
+    const f = s.fleets.find(x => x.id === fa.fleet && x.owner === p);
+    const t = fa.target !== undefined ? s.fleets.find(x => x.id === fa.target) : undefined;
+    const b = vowBlock(s, p, f, fa.vow, fa.region, fa.target);
+    if (b) return b;
+    swearVow(s, f!, fa.vow, fa.region, t);
+    return null;
+  }
+  if (fa.type === 'honour') {
+    const f = s.fleets.find(x => x.id === fa.fleet && x.owner === p);
+    if (!f) return 'no such fleet of yours';
+    return pickHonour(s, f, fa.pick);
+  }
   if (fa.type === 'research') {
     const b = researchBlock(s, p, fa.tech);
     if (b) return b;
@@ -980,7 +1176,8 @@ function applyFree(s: GameState, rng: Rng, p: PlayerId, fa: Submission['free'][n
       const d = fa.doctrine;
       if (!d || !['aggressive', 'defensive', 'evasive'].includes(d.stance)) return 'bad stance';
       if (!['weakest', 'strongest', 'cheapest', 'garrison'].includes(d.target)) return 'bad target priority';
-      f.doctrine = { stance: d.stance, target: d.target, guard: !!d.guard, retreatAt: Math.max(0, Math.min(0.9, Number(d.retreatAt) || 0)) };
+      f.doctrine = { stance: d.stance, target: d.target, guard: !!d.guard && !f.limping, retreatAt: Math.max(0, Math.min(0.9, Number(d.retreatAt) || 0)) };
+      if (f.doctrine.stance === 'evasive' && hasBane(s, f, 'reckless')) f.doctrine.stance = 'defensive';   // a Reckless fleet never runs
       return null;
     }
     case 'rename': f.name = String(fa.name).slice(0, 40) || f.name; return null;
@@ -990,12 +1187,22 @@ function applyFree(s: GameState, rng: Rng, p: PlayerId, fa: Submission['free'][n
       if (!moving.length) return 'no matching ships';
       if (moving.length === f.ships.length) return 'cannot split off every ship';
       if (s.fleets.filter(x => x.owner === p).length >= s.rules.maxFleets) return `at most ${s.rules.maxFleets} fleets`;
+      // Soul: a detachment of warships raises a new banner (scouts alone form a picket)
+      const needsBanner = soulOn(s) && (moving.some(x => x.cls !== 'scout') || !!fa.found);
+      let fd: ReturnType<typeof resolveFound> | null = null;
+      if (needsBanner) {
+        if (bannersFree(s, p) <= 0) return 'no free banner (hold more Crowns, or merge fleets)';
+        fd = resolveFound(s, p, f.region, fa.found);
+        if (typeof fd === 'string') return fd;
+      }
+      if (soulOn(s) && f.limping) return 'a limping fleet cannot split';
       const hpOf = (xs: typeof f.ships) => xs.reduce((a, x) => a + x.hp, 0);
       const before = hpOf(f.ships);
       f.ships = f.ships.filter(x => !ids.has(x.id));
       const nf = newFleet(s, rng, p, f.region);
       nf.ships = moving;
       nf.doctrine = { ...f.doctrine };
+      if (fd && typeof fd !== 'string') raiseBanner(s, nf, fd.name, fd.banner);
       // the detachment shares its parent's condition (no resetting supply attrition or fatigue by splitting)
       nf.fatigued = f.fatigued;
       if (f.oos) nf.oos = f.oos;
@@ -1017,6 +1224,7 @@ function applyFree(s: GameState, rng: Rng, p: PlayerId, fa: Submission['free'][n
       if (!into || into === f) return 'no such target fleet';
       if (into.region !== f.region) return 'fleets must be in the same region';
       if (into.ships.length + f.ships.length > s.rules.maxShipsPerFleet) return `fleet would exceed ${s.rules.maxShipsPerFleet} ships`;
+      if (soulOn(s) && !into.banner && f.ships.some(x => x.cls !== 'scout')) return 'a picket carries only scouts: merge it into a bannered fleet instead';
       into.ships.push(...f.ships);
       f.ships = [];
       if ((f.oos ?? 0) > (into.oos ?? 0)) into.oos = f.oos;
@@ -1024,6 +1232,7 @@ function applyFree(s: GameState, rng: Rng, p: PlayerId, fa: Submission['free'][n
       const E = engagementAt(s, f.region);
       if (E && E.fleets.includes(f.id) && E.fleets.includes(into.id)) E.startHp[into.id] = (E.startHp[into.id] ?? 0) + (E.startHp[f.id] ?? 0);
       if (f.commander.alive) (s.players[p].reserveCommanders ??= []).push(f.commander);
+      if (soulOn(s) && f.banner) { sagaBeat(f, s.turn, 'merged', `Furled its banner and merged into ${into.name}.`, f.region); archiveFleet(s, f, 'merged', f.region); }
       s.fleets = s.fleets.filter(x => x !== f);
       return null;
     }
@@ -1059,6 +1268,7 @@ export function incomeDetail(s: GameState, p: PlayerId) {
       if (r.id === pl.capital && hasLaw(s, p, 'central')) { ind *= E.centralMult; cr *= E.centralMult; inf *= E.centralMult; }
       if (!conn!.has(r.id)) { ind *= E.cutOffYield; cr *= E.cutOffYield; inf *= E.cutOffYield; cut++; }
     }
+    if (r.story) { const y2 = soulYield(s, r); ind += y2.industry; cr += y2.credits; inf += y2.influence; }
     out.industry += ind; out.credits += cr; out.influence += inf;
   }
   if (cut) why.push(`${cut} region${cut === 1 ? '' : 's'} cut off from your capital (half yield)`);
@@ -1099,11 +1309,12 @@ function capture(s: GameState, rid: RegionId, by: PlayerId, how: 'force' | 'infl
   r.heldSince = s.turn;
   r.project = null;
   r.loyalty = [0, 0, 0];
-  if (how === 'force' && r.dev > 1 && r.kind !== 'crown' && r.kind !== 'throne') r.dev--; // war scars
+  if (how === 'force' && r.dev > 1 && r.kind !== 'crown' && r.kind !== 'throne' && !r.story?.deeds.some(d => d.id === 'thrice')) r.dev--; // war scars (a Thrice-Taken world is used to it)
   r.garrison = how === 'force' ? s.rules.garrison.afterCapture + (s.rules.crowns.capturedGarrisonBonus[r.kind] ?? 0) : Math.max(s.rules.garrison.afterCapture, Math.floor(maxGarrison(s, rid) / 2));
   r.garrison = Math.min(r.garrison, Math.max(maxGarrison(s, rid), s.rules.garrison.afterCapture));
   s.turnStats.captures[by]++;
   emit({ k: 'capture', pulse, region: rid, by, from, how });
+  onCapture(s, r, by, from, how, pulse, emit);
   if (from !== null && (r.buildings.academy ?? 0) > 0 && s.rules.empire?.enabled !== false) {
     // seized archives: steal one technology the victim has and you could have (never a ★)
     const mine = s.players[by].techs ?? [];
@@ -1193,6 +1404,6 @@ export function creditRate(s: GameState, p: PlayerId) {
 
 /** Credits a player pays for their ships each turn. */
 export function upkeepOf(s: GameState, p: PlayerId): number {
-  const raw = s.fleets.filter(f => f.owner === p).reduce((a, f) => a + f.ships.reduce((b, sh) => b + (s.rules.ships[sh.cls]?.upkeep ?? 0), 0), 0);
+  const raw = s.fleets.filter(f => f.owner === p).reduce((a, f) => a + soulUpkeep(s, f, f.ships.reduce((b, sh) => b + Math.max(0, (s.rules.ships[sh.cls]?.upkeep ?? 0) + (sh.traits?.length ? traitFx(sh).upkeep : 0)), 0)), 0);
   return hasTech(s, p, 'depots') ? Math.round(raw * (1 - s.rules.empire.depotUpkeepCut)) : raw;
 }

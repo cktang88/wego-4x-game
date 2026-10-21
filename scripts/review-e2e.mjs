@@ -25,7 +25,7 @@ await page.addInitScript(() => {
   window.__rafs = () => rafs;
 });
 await page.goto(base);
-await page.evaluate(() => localStorage.clear());
+await page.evaluate(() => { localStorage.clear(); localStorage.setItem('tc.tutorial.wego', 'done'); localStorage.setItem('tc.tutorial.live', 'done'); });
 await page.reload();
 await page.waitForTimeout(300);
 
@@ -40,7 +40,7 @@ const t0 = Date.now();
 while (Date.now() - t0 < 240000) {
   const st = await page.evaluate(() => ({ turn: window.tc.state.turn, winner: window.tc.state.winner, replay: !!window.tc.screen.replay }));
   if (st.turn > TURNS || st.winner !== null) break;
-  const link = await page.$('.ticker [data-battle]');
+  const link = await page.$('.hud-bl [data-battle]');
   if (link && opened < 6) {
     await link.click().catch(() => {});
     await page.waitForTimeout(250);
@@ -75,24 +75,30 @@ if (await page.$('[data-victory]')) {
   check(!(await page.$('[data-victory]')), 'victory card closes with Look around');
 }
 // chronicle battle list opens viewer for every battle of last turn (garrison-only, 3-side…)
-await page.click('[data-tab=chronicle]');
-const bids = await page.$$eval('[data-battle]', es => es.map(e => e.dataset.battle));
+await page.evaluate(() => window.tc.screen.openModal('chronicle'));
+await page.waitForTimeout(300);
+const last = await page.evaluate(() => window.tc.state.last?.turn);
+const bids = await page.$$eval(`.mdl-root [data-a=battle][data-turn="${last}"]`, es => es.map(e => e.dataset.id));
 for (const id of bids.slice(0, 4)) {
-  await page.click(`.tabbody [data-battle="${id}"]`);
+  await page.click(`.mdl-root [data-a=battle][data-id="${id}"]`);
   await page.waitForTimeout(500);
   await page.click('.bv-btn:has-text("Skip")');
   await page.waitForTimeout(400);
   check(await page.$eval('.bv-end', e => e.style.display !== 'none'), `battle ${id} reaches result card`);
   await page.click('.bv-end [data-a=close]');
 }
+await page.keyboard.press('Escape');
 
 // ------------------------------------------------------------ leaks across route changes
+await page.waitForTimeout(700);
 const before = await page.evaluate(() => window.__listeners());
 for (let i = 0; i < 4; i++) {
-  await page.click('[data-act=help]');
+  await page.click('[data-act=menu]');
+  await page.click('.pop [data-m=help]');
+  await page.waitForTimeout(150);
   await page.evaluate(() => { location.hash = '#/'; });
-  await page.waitForTimeout(250);
-  check(!(await page.$('.overlay')), `overlay removed on route change (${i})`);
+  await page.waitForTimeout(350);
+  check(!(await page.$('.overlay, .mdl-root, .pop:not(.hidden)')), `overlay / modal removed on route change (${i})`);
   await page.evaluate(() => { location.hash = '#/watch'; });
   await page.waitForTimeout(400);
 }
@@ -113,8 +119,8 @@ await page.click('[data-l=start]');
 await page.waitForTimeout(800);
 await page.evaluate(() => {
   const s = window.tc.screen; const f = s.st.fleets.find(f => f.owner === s.you);
-  const t = s.st.regions[f.region].neighbors.find(n => s.st.regions[n].owner !== s.you);
-  s.select({ kind: 'fleet', id: f.id }); s.addOrder({ type: 'seize', fleet: f.id, target: t });
+  const t = s.st.regions[f.region].neighbors.find(n => s.st.regions[n].owner !== s.you && s.st.regions[n].kind !== 'lane');
+  s.select({ kind: 'fleet', id: f.id }); s.commit(s.intent({ fleet: f.id }, t)); s.deselect();
 });
 await page.click('[data-preview]');
 await page.waitForTimeout(300);
@@ -139,12 +145,18 @@ await page.waitForTimeout(100);
 check(await page.evaluate(() => !window.tc.screen.replay && !window.tc.screen.previewing), 'skip ends replay; preview flag cleared');
 check(await page.evaluate(() => window.tc.screen.plan.orders.filter(Boolean).length === 1), 'plan unchanged by preview');
 // typing in chat must not trigger shortcuts
-await page.click('[data-tab=chat]');
-await page.click('[data-msg]');
+await page.evaluate(() => window.tc.screen.openModal('score'));
+await page.waitForTimeout(200);
+await page.click('[data-a=chat-toggle]');
+await page.click('[data-chat-msg]');
 await page.keyboard.type('mrsfiph 12');
-check(await page.evaluate(() => !document.querySelector('.overlay') && !window.tc.screen.replay && window.tc.screen.mode === null), 'typing in chat triggers no shortcuts');
+check(await page.evaluate(() => !document.querySelector('.overlay') && !window.tc.screen.replay && window.tc.screen.mode === null && window.tc.screen.lens === 'political'), 'typing in chat triggers no shortcuts');
 await page.keyboard.press('Enter');
-check((await page.textContent('.chatlog')).includes('mrsfiph 12'), 'chat message sent');
+await page.waitForTimeout(150);
+check((await page.textContent('.chat-log')).includes('mrsfiph 12'), 'chat message sent');
+await page.keyboard.press('Escape');
+await page.evaluate(() => { if (window.tc.screen.hud.modalOpen()) document.querySelector('.mdl-back')?.click(); });
+await page.waitForTimeout(200);
 // ctrl+r style combos are ignored
 await page.click('canvas', { position: { x: 5, y: 5 } });
 await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true })));
@@ -170,7 +182,6 @@ await page.selectOption('[data-l=ai1]', 'human');
 await page.fill('[data-l=seed]', '');
 await page.click('[data-l=start]');
 await page.waitForTimeout(800);
-await page.click('[data-tab=orders]');
 await page.click('[data-submit]');
 await page.click('[data-y]');
 await page.waitForTimeout(200);
@@ -179,7 +190,6 @@ check(cur !== null && !/rgba\(.*0\.\d+\)/.test(cur), `hotseat curtain is opaque 
 await page.keyboard.press('Escape');
 check(!!(await page.$('.overlay.curtain')), 'Esc does not lift the curtain');
 await page.click('.curtain [data-x]');
-await page.click('[data-tab=orders]');
 await page.click('[data-submit]');
 await page.click('[data-y]');
 await page.waitForTimeout(300);

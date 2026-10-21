@@ -2,7 +2,10 @@
 // reduced motion, LIVE glide) and the battle viewer (open/close, stacking, keyboard, leaks), then prints
 // frame-time numbers and a list of failed checks. Exits 1 if any check failed or the page threw.
 // node scripts/render-check.mjs [outdir] [baseUrl]      (needs `npm run dev`; screenshots only if outdir is given)
+// UX v2 map checks (tiers, crossfade, tokenAt/bannerAt, lenses, peek, expanded stacks, drag verbs, cache) run first
+// on a self-contained harness (scripts/map-harness.mjs); V2ONLY=1 stops after them.
 import { chromium } from 'playwright-core';
+import { bootHarness } from './map-harness.mjs';
 const out = process.argv[2] ?? null;
 const base = process.argv[3] ?? 'http://localhost:5173/';
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
@@ -64,6 +67,7 @@ async function hitTests(page, label) {
     for (const z of [0.12, 0.25, 0.5, 1, 2, 3]) {
       m.cam.z = z;
       for (const r of st.regions) {
+        if (r.kind === 'lane' || r.poly.length < 3) continue; // hyperlane waypoints have no area (not hit by regionAt)
         m.cam.x = r.site.x; m.cam.y = r.site.y;
         const p = m.toScreen(r.site);
         const got = m.regionAt(st, p.x, p.y);
@@ -223,6 +227,103 @@ async function battleTests(page, label) {
   await page.waitForTimeout(300);
   check(await page.evaluate(() => document.querySelectorAll('.bv-overlay,.bv-closing').length) === 0, `${label}: Escape did not close the viewer`);
 }
+
+// ---------------------------------------------------------------- UX v2 map (harness: MapRenderer built directly from a simulated game)
+async function v2MapTests(label, dev) {
+  console.log(`== v2 map (${label})`);
+  const ctx = await browser.newContext(dev);
+  const page = await ctx.newPage();
+  const errs = [];
+  await bootHarness(page, base, errs, label.includes('lanes'));
+  const r = await page.evaluate(async () => {
+    const H = window.H, m = H.map, s = H.full;
+    const out = { fails: [] };
+    const fail = t => out.fails.push(t);
+    const step = () => new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
+    const med = (() => { const rs = s.regions.filter(r => r.poly.length > 2 && r.kind !== 'void').map(r => { let a = 0; const p = r.poly; for (let i = 0; i < p.length; i++) { const q = p[i], w = p[(i + 1) % p.length]; a += q.x * w.y - w.x * q.y; } return Math.sqrt(Math.abs(a / 2) / Math.PI); }).sort((a, b) => a - b); return rs[rs.length >> 1]; })();
+    const ods = m.drawStatic; let rebuilds = 0; m.drawStatic = function (I) { rebuilds++; return ods.call(this, I); };
+    // ---- tiers by on-screen region size, with a crossfade on switch
+    for (const [Rs, want] of [[40, 'strategic'], [60, 'strategic'], [95, 'operational'], [130, 'operational'], [200, 'detail'], [320, 'detail']]) {
+      m.cam.z = Rs / med; await step();
+      if (m.tier !== want) fail(`tier at Rs=${Rs}: ${m.tier} != ${want}`);
+    }
+    m.cam.z = 95 / med; await step(); await step();
+    m.cam.z = 50 / med; await step();
+    if (!m.fade && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) fail('no crossfade on tier switch');
+    await new Promise(res => setTimeout(res, 250)); await step();
+    if (m.fade) fail('crossfade did not finish in 150ms');
+    // ---- idle: no static rebuilds
+    m.cam.z = 95 / med; await step(); await step();
+    rebuilds = 0; await step(); await step();
+    if (rebuilds) fail(`static layer rebuilt while idle (${rebuilds})`);
+    // ---- lenses / peek / selection rebuild the static layer and draw without errors
+    for (const o of [{ lens: 'supply' }, { lens: 'economy' }, { lens: 'military' }, { peek: true }, { selRegion: s.engagements[0]?.region ?? 0 }, {}]) {
+      rebuilds = 0; H.opts = o; await step();
+      if (!rebuilds) fail(`no rebuild for ${JSON.stringify(o)}`);
+    }
+    // ---- tokens: one per owner per region, every visible fleet is in exactly one token, tokenAt finds each
+    for (const [tier, Rs] of [['strategic', 55], ['operational', 95], ['detail', 230]]) {
+      m.cam.z = Rs / med; H.opts = {}; await step(); await step();
+      const st = H.view.state;
+      const seen = new Map();
+      for (const h of m.tokHits) for (const id of h.hit.fleetIds) seen.set(id, (seen.get(id) ?? 0) + 1);
+      for (const f of st.fleets) if (!seen.has(f.id)) fail(`${tier}: fleet ${f.id} in no token`);
+      for (const [id, n] of seen) if (n > 1) fail(`${tier}: fleet ${id} in ${n} tokens`);
+      const keys = new Set();
+      for (const h of m.tokHits) {
+        const k = `${h.hit.owner}:${h.hit.region}`;
+        const fanned = tier === 'detail' && h.hit.owner === H.you;
+        if (keys.has(k) && !fanned && !st.engagements.some(e => e.region === h.hit.region)) fail(`${tier}: two tokens for ${k}`);
+        keys.add(k);
+        const p = m.toScreen(h);
+        const got = m.tokenAt(p.x, p.y);
+        if (!got || got.region !== h.hit.region || got.owner !== h.hit.owner) fail(`${tier}: tokenAt(${k}) -> ${JSON.stringify(got)}`);
+        const tp = m.tokenScreenPos(h.hit.region, h.hit.owner);
+        if (!Number.isFinite(tp.x) || !Number.isFinite(tp.y)) fail('tokenScreenPos NaN');
+        const near = m.tokenAt(p.x + 15, p.y + 4);
+        if (!near) fail(`${tier}: tokenAt radius < 15px for ${k}`);
+      }
+      // banners hit-test to their own region
+      for (const b of m.bannerHits) {
+        const c = m.toScreen(b);
+        const got = m.bannerAt(c.x + (b.l + b.r) / 2, c.y + (b.t + b.b) / 2);
+        if (got === null) fail(`${tier}: bannerAt miss region ${b.rid}`);
+      }
+      const so = m.screenOfRegion(0);
+      if (!Number.isFinite(so.x)) fail('screenOfRegion NaN');
+      out[tier] = { tokens: m.tokHits.length, banners: m.bannerHits.length };
+    }
+    // ---- expanded stack fans your fleets into per-fleet tokens
+    {
+      const st = H.view.state;
+      const by = new Map(); for (const f of st.fleets) if (f.owner === H.you) by.set(f.region, (by.get(f.region) ?? 0) + 1);
+      const rid = [...by].find(([, n]) => n > 1)?.[0];
+      if (rid !== undefined && !st.engagements.some(e => e.region === rid)) {
+        m.cam.z = 95 / med; H.opts = { expanded: rid }; await step(); await step();
+        const n = m.tokHits.filter(h => h.hit.region === rid && h.hit.owner === H.you).length;
+        if (n !== by.get(rid)) fail(`expanded stack: ${n} tokens for ${by.get(rid)} fleets`);
+        out.expanded = n;
+      }
+    }
+    // ---- drag arrows for every verb
+    const a = s.regions[s.players[0].capital].site, b = s.regions[s.regions[s.players[0].capital].neighbors[0]].site;
+    for (const verb of ['move', 'od', 'seize', 'join', 'merge', 'split', 'invalid']) { H.opts = { drag: { from: a, to: b, verb, color: '#3fd0ff' } }; await step(); }
+    H.opts = {};
+    m.drawStatic = ods;
+    const c = m.frameCost ?? H.frameCost.slice(-60).sort((x, y) => x - y);
+    out.frame = { avg: +(c.reduce((x, y) => x + y, 0) / c.length).toFixed(2), p95: +c[Math.floor(c.length * 0.95)].toFixed(2) };
+    return out;
+  });
+  for (const f of r.fails) check(false, `v2 ${label}: ${f}`);
+  console.log(`  v2 ${label}`, JSON.stringify({ ...r, fails: r.fails.length }));
+  const pageErrs = errs.filter(e => !/Failed to load resource/.test(e));
+  check(pageErrs.length === 0, `v2 ${label}: page errors ${JSON.stringify(pageErrs.slice(0, 3))}`);
+  await ctx.close();
+}
+await v2MapTests('desktop', DEVICES.desktop);
+await v2MapTests('phone', DEVICES.phone);
+await v2MapTests('desktop-lanes', DEVICES.desktop);
+if (process.env.V2ONLY) { await browser.close(); console.log(fails.length ? `\n${fails.length} check(s) failed` : '\nall v2 map checks passed'); process.exit(fails.length ? 1 : 0); }
 
 for (const [name, dev] of Object.entries(DEVICES)) {
   console.log(`== ${name}`);
