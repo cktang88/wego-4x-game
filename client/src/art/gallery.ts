@@ -1,6 +1,7 @@
 // Dev-only art gallery (scripts/art-gallery.mjs imports this): lays every painter out on one canvas.
 import { drawShip } from './ships.ts';
 import { drawPlanet, drawStar, type WorldType, type StarType } from './planets.ts';
+import { drawStarNode, drawTwinkle, drawPulsarBeams, drawAccretionShimmer, drawOrbitLines, drawSpecks, type StarKind } from './stars.ts';
 
 const TEAM = ['#3fd0ff', '#ff4f7b', '#ffd23f', '#8a8aa8'];
 const CLS = ['scout', 'corvette', 'frigate', 'bombard', 'cruiser', 'dread'];
@@ -24,6 +25,27 @@ export async function gallery(g: CanvasRenderingContext2D, section: string, dpr:
         drawShip(g, x, y, 26, 26 * dpr, CLS[(i + 2) % 6], o, TEAM[o < 0 ? 3 : o], i * 0.7, { shadow: { dx: 2, dy: 3, alpha: 0.5 } });
       }
     });
+  }
+  if (section === 'stars') {
+    const kinds: StarKind[] = ['yellow', 'red', 'blue', 'white', 'binary', 'pulsar', 'blackhole', 'throne'];
+    const t = 2.3;
+    kinds.forEach((k, i) => {
+      const x = 90 + i * 165;
+      for (const [row, r, fog] of [[0, 22, false], [1, 9, false], [2, 5, false], [3, 9, true]] as [number, number, boolean][]) {
+        const y = [110, 300, 420, 520][row];
+        drawStarNode(g, x, y, r, r * dpr, k, fog);
+        if (row === 0) { if (k === 'pulsar') drawPulsarBeams(g, x, y, r, t, 7); else if (k === 'blackhole') drawAccretionShimmer(g, x, y, r, t, 3); else drawTwinkle(g, x, y, r, k, t, 5); }
+      }
+      g.fillStyle = '#cfd6ff'; g.fillText(k, x - 20, 220);
+    });
+    // detail tier: a star with orbits and specks
+    const bodies = [{ kind: 'habitable', q: 'rich', adj: 'ocean' }, { kind: 'gas' }, { kind: 'belt' }];
+    drawOrbitLines(g, 300, 720, 40, 3, 1);
+    drawStarNode(g, 300, 720, 22, 22 * dpr, 'yellow');
+    drawSpecks(g, 300, 720, 40, bodies, t, 11, 1.6, dpr, 'colony', 'X');
+    drawOrbitLines(g, 800, 720, 40, 3, 1);
+    drawStarNode(g, 800, 720, 16, 16 * dpr, 'blackhole');
+    drawSpecks(g, 800, 720, 40, [{ kind: 'barren', q: 'rich' }, { kind: 'moon' }, { kind: 'ruin' }, { kind: 'station' }], t, 5, 1.6, dpr, 'colony', 'X');
   }
   if (section === 'planets') {
     const types: WorldType[] = ['terran', 'garden', 'ocean', 'desert', 'ice', 'lava', 'barren', 'gas', 'toxic', 'ash', 'crystal', 'thorn'];

@@ -1,7 +1,7 @@
-// Star systems on the world card (docs/SYSTEMS.md): a star line, one compact row per body, the derived role
-// badge, citizens x/cap and slots used/total. Stars and bodies are public map knowledge; slots too (buildings are).
+// Star systems on the world card (docs/SYSTEMS.md): a star header (icon, type, effect), the bodies as compact stat
+// chips in one wrapping row, the derived role badge, citizens x/cap and slots used/total. Stars and bodies are public map knowledge; slots too (buildings are).
 // Step 3: the system's status (Held / Contested / Occupied / Tribute), each body's output and who gets it, contested
-// turns and the refugee warning, and the Tribute offer / accept controls. Step 4: body tags on the body rows.
+// turns and the refugee warning, and the Tribute offer / accept controls. Step 4: body tags on the body chips.
 import type { GameScreen } from '../game.ts';
 import type { Body, FreeAction, Region } from '../../../shared/sim/types.ts';
 import { BODIES, ROLES, STARS, STATION } from '../../../shared/config/systems.ts';
@@ -39,25 +39,57 @@ export function roleBadge(g: GameScreen, r: Region): string {
   return `<span class="sysrole role-${info.role}"${tip(`${R.name}: ${R.desc} (derived from the bodies, never chosen)`)}>${ic(icFor('role', info.role, R.icon))} ${R.name}</span>`;
 }
 
-/** Star line + body rows + citizens and slots. Empty for lane waypoints and old maps. */
+const cap1 = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+const bare = (n: string) => n.replace(/^the\s+/i, '');
+/** A body's chip label and its intrinsic hint ("cap 4", "+4¢", a Mine-site pick), for the chip row. */
+function chipText(g: GameScreen, r: Region, b: Body): { label: string; hint: string } {
+  const cap = bodyCap(g, r, b);
+  const capTxt = cap ? `cap ${b.kind === 'habitable' ? cap : `+${cap}`}` : '';
+  switch (b.kind) {
+    case 'habitable': return { label: cap1(`${b.q ? `${b.q} ` : ''}${b.adj ?? ''} world`.replace(/\s+/g, ' ').trim()), hint: capTxt };
+    case 'gas': return { label: 'Gas giant', hint: `+${g.st.rules.empire?.gasCredits ?? 4}${ic('credits')}` };
+    case 'belt': return { label: bare(b.name), hint: ic('forge', { title: 'Mine site' }) };
+    case 'moon': return { label: `${bare(b.name)} <small>moon</small>`, hint: capTxt };
+    case 'barren': return b.q === 'rich' ? { label: 'Forge world', hint: ic('forge', { title: 'Forge: +1 industry per citizen' }) } : { label: 'Barren rock', hint: capTxt };
+    case 'ruin': return { label: bare(b.name), hint: ic('relic', { title: 'Relics are dug here' }) };
+  }
+}
+
+/** Star header + one wrapping row of body chips (+ the contested output split) + citizens and slots. Empty for lane
+ *  waypoints and old maps. */
 export function systemRows(g: GameScreen, r: Region): string {
   if (!r.star || r.kind === 'lane') return '';
   const st = g.st;
   const S = STARS[r.star];
   const info = systemInfo(st, r.id);
   const pip = (n: number, max: number) => `<span class="cpips">${Array.from({ length: max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</span>`;
-  const top = `<div class="sysrow star"><i style="color:${S.color}">${ic(icFor('star', r.star, S.icon))}</i><b>${esc(S.name)}</b><small>${esc(S.desc)}</small></div>`;
+  const top = `<div class="sysrow star star-${esc(r.star)}"${tip(`${S.name}: ${S.desc}`)}><i class="sstar" style="color:${S.color}">${ic(icFor('star', r.star, S.icon))}</i><b>${esc(S.name)}</b><small>${esc(S.desc)}</small></div>`;
   const out = bodyOutputs(g, r);
-  const rows = (r.bodies ?? []).map((b, i) => {
+  const split = out.size && [...out.values()].some(o => o.rcv);
+  const chip = (key: number, kind: string, icon: string, label: string, hint: string, tipTxt: string, extra = '') => {
+    const o = out.get(key);
+    return `<span class="bchip b-${kind}"${tip(tipTxt)}><i>${icon}</i><b>${label}</b>${hint ? `<em class="bhint">${hint}</em>` : ''}${extra}${o?.vals ? `<span class="bout">${o.vals}</span>` : ''}</span>`;
+  };
+  const chips = (r.bodies ?? []).map((b, i) => {
     const D = BODIES[b.kind];
-    const cap = bodyCap(g, r, b);
-    const vein = b.vein ? ` <em class="vein v-${esc(b.vein)}">${ic(icFor('vein', b.vein))}</em>` : '';
+    const vein = b.vein ? `<em class="vein v-${esc(b.vein)}">${ic(icFor('vein', b.vein))}</em>` : '';
     const tag = bodyTag(st, r, i);
-    return `<div class="sysrow body"${tip(`${D.name}${tag ? ` · ${tag}` : ''}: ${D.desc}${D.orbital ? ' Orbital: its output goes to whoever holds space.' : ' Surface: blockaded while an enemy holds space.'}`)}><i>${ic(icFor('body', b.kind, D.icon))}</i><b>${esc(b.name)}</b>${tag ? `<em class="btag">${esc(tag)}</em>` : ''}<small>${esc(bodyLine(b))}${cap ? ` · cap +${cap}` : ''}</small>${vein}${out.get(i) ?? ''}</div>`;
-  }).join('');
-  const stTag = (r.buildings.station ?? 0) > 0 ? bodyTag(st, r, BODY_STATION) : null;
-  const station = (r.buildings.station ?? 0) > 0 ? `<div class="sysrow body"${tip(`${STATION.desc} Orbital.`)}><i>${ic('station')}</i><b>Station</b>${stTag ? `<em class="btag">${esc(stTag)}</em>` : ''}<small>built · cap +${sysOn(st) ? SY(st).capStation : 1}</small>${out.get(BODY_STATION) ?? ''}</div>` : '';
-  const space = out.get(-1) ? `<div class="sysrow body"${tip('Output with no body of its own (a Depot without a Station): orbital')}><i>${ic('star')}</i><b>Open space</b><small>orbital</small>${out.get(-1)}</div>` : '';
+    const { label, hint } = chipText(g, r, b);
+    return chip(i, b.kind, ic(icFor('body', b.kind, D.icon)), label, hint,
+      `${b.name} · ${bodyLine(b)}${tag ? ` · ${tag}` : ''}: ${D.desc}${D.orbital ? ' Orbital: its output goes to whoever holds space.' : ' Surface: blockaded while an enemy holds space.'}`,
+      `${vein}${tag ? `<em class="btag">${esc(tag)}</em>` : ''}`);
+  });
+  if ((r.buildings.station ?? 0) > 0) {
+    const stTag = bodyTag(st, r, BODY_STATION);
+    chips.push(chip(BODY_STATION, 'station', ic('station'), 'Station', `cap +${sysOn(st) ? SY(st).capStation : 1}`, `${STATION.desc} Orbital.${stTag ? ` ${stTag}.` : ''}`, stTag ? `<em class="btag">${esc(stTag)}</em>` : ''));
+  }
+  if (out.get(-1)) chips.push(chip(-1, 'space', ic('star'), 'Open space', '', 'Output with no body of its own (a Depot without a Station): orbital'));
+  const body = chips.length ? `<div class="syschips">${chips.join('')}</div>` : '';
+  // contested: who gets each body's output, as one compact line under the chips
+  const splitRow = split ? `<div class="syssplit"${tip('Contested: each body\'s output per turn and who gets it')}>${[...out.entries()].filter(([, o]) => o.rcv).map(([k, o]) => {
+    const kind = k === BODY_STATION ? 'station' : k === -1 ? null : r.bodies?.[k]?.kind;
+    return `<span class="bsplit"><i>${kind ? ic(icFor('body', kind)) : ic('star')}</i><span class="bout">${o.vals}${o.rcv}</span></span>`;
+  }).join('')}</div>` : '';
   let foot = '';
   if (info) {
     const sl = info.slots;
@@ -67,7 +99,7 @@ export function systemRows(g: GameScreen, r: Region): string {
       `<span class="sysslot"${tip('Civil slots (from bodies; a Station adds one): Mine, Trade Hub, Extractor, Academy, Shipyard')}>⚙ ${sl.civilUsed}/${sl.civil}</span>` +
       `<span class="sysslot"${tip(`Military/logistics slots: ${SY(st).milSlots} everywhere, +${SY(st).chokeSlots} at a chokepoint`)}>⛨ ${sl.milUsed}/${sl.mil}${info.choke ? ` ${ic('choke')}` : ''}</span>${disc}</div>`;
   }
-  return `<div class="sys">${statusLine(g, r)}${top}${rows}${station}${space}${foot}</div>`;
+  return `<div class="sys">${statusLine(g, r)}${top}${body}${splitRow}${foot}</div>`;
 }
 
 // ------------------------------------------------------------------ step 3: status, output split, tribute
@@ -96,9 +128,10 @@ function statusLine(g: GameScreen, r: Region): string {
   return `<div class="sysstat s-${cls}">${bits.join('')}</div>`;
 }
 
-/** Each body's output (⚙ ¢ ✦) and who gets it, as row tails; key -1 = open space. Owned systems only. */
-function bodyOutputs(g: GameScreen, r: Region): Map<number, string> {
-  const out = new Map<number, string>();
+/** Each body's output (industry, credits, influence) and, while shared, who gets it; key -1 = open space. Owned
+ *  systems only. */
+function bodyOutputs(g: GameScreen, r: Region): Map<number, { vals: string; rcv: string }> {
+  const out = new Map<number, { vals: string; rcv: string }>();
   const st = g.st;
   if (!sysOn(st) || r.owner === null || !r.bodies || r.kind === 'lane') return out;
   let y;
@@ -111,7 +144,7 @@ function bodyOutputs(g: GameScreen, r: Region): Map<number, string> {
     const i = ps.reduce((a, x) => a + x.i, 0), c = ps.reduce((a, x) => a + x.c, 0), f = ps.reduce((a, x) => a + x.f, 0);
     if (Math.round(i) + Math.round(c) + Math.round(f) <= 0) continue;
     const orb = ps[0].orbital;
-    const vals = `${i >= 0.5 ? `⚙${Math.round(i)}` : ''}${c >= 0.5 ? ` ¢${Math.round(c)}` : ''}${f >= 0.5 ? ` ✦${Math.round(f)}` : ''}`.trim();
+    const vals = [i >= 0.5 ? `${ic('industry')}${Math.round(i)}` : '', c >= 0.5 ? `${ic('credits')}${Math.round(c)}` : '', f >= 0.5 ? `${ic('influence')}${Math.round(f)}` : ''].filter(Boolean).join(' ');
     let rcv = '';
     if (sh) {
       const lane = (x: Share) => (orb ? x.o : x.s);
@@ -119,9 +152,9 @@ function bodyOutputs(g: GameScreen, r: Region): Map<number, string> {
       const parts = [...sh.get].map(([p, x]) => ({ p, k: cut(x) })).filter(x => x.k > 0.001);
       const kept = parts.reduce((a, x) => a + x.k, 0);
       rcv = parts.map(x => `<i class="rcv" style="--pc:${esc(g.color(x.p))}"${tip(`${g.pname(x.p)} gets ${Math.round(x.k * 100)}%`)}>${pct(x.k) || '●'}</i>`).join('') +
-        (kept < 0.999 ? `<i class="rcv lost"${tip(`${Math.round((1 - kept) * 100)}% is lost${orb ? '' : ' to the blockade'}`)}>✕${pct(1 - kept)}</i>` : '');
+        (kept < 0.999 ? `<i class="rcv lost"${tip(`${Math.round((1 - kept) * 100)}% is lost${orb ? '' : ' to the blockade'}`)}>${ic('close')}${pct(1 - kept)}</i>` : '');
     }
-    out.set(k, `<span class="bout"${tip(`${orb ? 'Orbital' : 'Surface'} output per turn${sh ? ' and who gets it' : ''}`)}>${vals}${rcv}</span>`);
+    out.set(k, { vals, rcv });
   }
   return out;
 }

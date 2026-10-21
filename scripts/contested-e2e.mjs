@@ -78,9 +78,9 @@ async function run(tag, phone) {
   check(/Contested/.test(t), `${tag}: status line says Contested`);
   check(/holds space/.test(t), `${tag}: status line names who holds space`);
   check(/refugees in 1t/.test(t), `${tag}: refugee warning (refugees in 1t)`);
-  check(/the Burned World/.test(t), `${tag}: Vel II's body row shows its tag`);
-  const rcv = await ev(() => [...document.querySelectorAll('.card .sysrow.body .bout')].map(b => b.textContent));
-  check(rcv.length >= 2 && rcv.some(x => /½/.test(x)) && await ev(() => !!document.querySelector('.card .sysrow.body .rcv.lost .ic-close')), `${tag}: body rows show the output split (${rcv.join(' | ')})`);
+  check(/the Burned World/.test(t), `${tag}: Vel II's body chip shows its tag`);
+  const rcv = await ev(() => [...document.querySelectorAll('.card .syssplit .bout')].map(b => b.textContent));
+  check(rcv.length >= 2 && rcv.some(x => /½/.test(x)) && await ev(() => !!document.querySelector('.card .syssplit .rcv.lost .ic-close')), `${tag}: the split line shows each body's output split (${rcv.join(' | ')})`);
   check(/offers terms/.test(t) && !!(await ev(() => document.querySelector('.card [data-a=tribute-accept]'))), `${tag}: the Tribute offer with an Accept button`);
   const f1 = await fits();
   check(f1.page && f1.card && f1.parts, `${tag}: card fits the screen (${JSON.stringify(f1)})`);

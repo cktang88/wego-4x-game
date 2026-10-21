@@ -1,6 +1,6 @@
 // Painted planets and stars. Planets are shaded per pixel once (terminator, surface by world type, clouds, city
 // lights on the night side for developed worlds, emissive lava, atmosphere rim, rings) and cached per size bucket.
-// The API is body-based so a star system can later be drawn as one star plus 1–3 bodies (docs/SYSTEMS.md).
+// On the map a system is its star (art/stars.ts); bodies are tiny orbiting specks at detail zoom only.
 import { type RGB, LIGHT3, TAU, css, mix, canvas, SpriteCache, fbm3, noise3, h2, rgb, strHash } from './util.ts';
 
 export type WorldType = 'terran' | 'garden' | 'ocean' | 'desert' | 'ice' | 'lava' | 'barren' | 'gas' | 'toxic' | 'ash' | 'crystal' | 'thorn';
@@ -177,6 +177,11 @@ function pump() {
   setTimeout(step, 40);
 }
 const sizesOf = new Map<string, Set<number>>();
+/** Queue a sprite bake for idle time (shared with art/stars.ts); listeners are told when it lands. */
+export function bakeLater(key: string, R: number, job: () => void) {
+  const p = pending.get(key);
+  if (p) p.gen = gen; else { pending.set(key, { job, gen, R }); pump(); }
+}
 
 /** A planet sprite of radius ~Rdev device px (bucketed). Rings are baked in for ringed bodies. With `lazy`, a
  *  missing size is substituted (nearest baked size, else a quick small bake) and painted later. */

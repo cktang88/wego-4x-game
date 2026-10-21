@@ -375,13 +375,12 @@
 .dragcard.no { border-left-color: var(--bad); }
 .dragcard.no i { color: var(--bad); }
 
-/* ---- star systems on the world card (docs/SYSTEMS.md): star line, body rows, role / citizens / slots */
+/* ---- star systems on the world card (docs/SYSTEMS.md): star header, body chips, role / citizens / slots */
 .card .sys { margin: 0.375rem 0 0.125rem; padding: 0.3125rem 0.4375rem; border-radius: 0.5rem; background: rgba(0, 0, 0, 0.22); border: 1px solid rgba(214, 173, 98, 0.18); }
 .card .sysrow { display: flex; align-items: baseline; gap: 0.375rem; min-width: 0; font-size: var(--t1); line-height: 1.5; white-space: nowrap; }
 .card .sysrow > i { font-style: normal; width: 1.1em; text-align: center; color: var(--brass, var(--accent)); flex: none; }
 .card .sysrow b { font-weight: 700; flex: none; }
 .card .sysrow small { color: var(--dim); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.card .sysrow.body { padding-left: 0.625rem; }
 .card .sysrow .vein { font-style: normal; flex: none; }
 .card .sysrow .v-antimatter { color: #ff7ad9; } .card .sysrow .v-crystal { color: #6ff3ff; }
 .card .sysfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.1875rem 0.625rem; margin-top: 0.25rem; font-size: var(--t1); }
@@ -400,10 +399,29 @@
 .card .sysstat .hold { display: inline-flex; align-items: center; gap: 0.25rem; }
 .card .sysstat .hold i { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--pc); border: 1px solid rgba(0, 0, 0, 0.6); }
 .card .sysstat .warn { color: var(--bad); font-weight: 700; }
-.card .sysrow .btag { font-style: italic; color: #e6c98a; flex: none; max-width: 42%; overflow: hidden; text-overflow: ellipsis; }
-.card .sysrow .bout { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 0.1875rem; font-variant-numeric: tabular-nums; color: #e9e2c8; padding-left: 0.25rem; }
-.card .sysrow .rcv { font-style: normal; font-size: 0.85em; font-weight: 700; padding: 0 0.25rem; border-radius: 0.4375rem; background: rgba(0, 0, 0, 0.45); border: 1px solid var(--pc, #888); color: #fff; min-width: 1em; text-align: center; }
-.card .sysrow .rcv.lost { --pc: rgba(255, 120, 100, 0.6); color: #ffb4a4; }
+.card .sysrow.star { white-space: normal; align-items: center; }
+.card .sysrow.star small { overflow: visible; }
+.card .sysrow.star .sstar { font-size: 1.15em; filter: drop-shadow(0 0 4px currentColor); }
+/* bodies: compact stat chips in one wrapping row */
+.card .syschips { display: flex; flex-wrap: wrap; gap: 0.25rem 0.3125rem; margin: 0.25rem 0 0.125rem; }
+.card .bchip { display: inline-flex; align-items: center; gap: 0.25rem; max-width: 100%; min-width: 0; padding: 0.0625rem 0.4375rem 0.0625rem 0.3125rem; border-radius: 0.75rem; font-size: var(--t1); line-height: 1.45; white-space: nowrap; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(214, 173, 98, 0.22); }
+.card .bchip > i { font-style: normal; flex: none; color: var(--brass, var(--accent)); }
+.card .bchip b { font-weight: 700; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.card .bchip b small { font-weight: 500; color: var(--dim); }
+.card .bchip .bhint { font-style: normal; color: #f1d9a0; flex: none; display: inline-flex; align-items: center; }
+.card .bchip.b-habitable > i { color: #7fd6a0; } .card .bchip.b-gas > i { color: #e7b67a; } .card .bchip.b-belt > i { color: #cdbfa4; }
+.card .bchip.b-moon > i { color: #cfd6e2; } .card .bchip.b-barren > i { color: #ff9a62; } .card .bchip.b-ruin > i { color: #e8c45e; } .card .bchip.b-station > i { color: #dfe4f2; }
+.card .bchip .vein { font-style: normal; flex: none; }
+.card .bchip .v-antimatter { color: #ff7ad9; } .card .bchip .v-crystal { color: #6ff3ff; }
+.card .bchip .btag { font-style: italic; color: #e6c98a; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.card .bchip .bout, .card .syssplit .bout { flex: none; display: inline-flex; align-items: center; gap: 0.1875rem; font-variant-numeric: tabular-nums; color: #e9e2c8; }
+.card .bchip .bout { padding-left: 0.25rem; margin-left: 0.0625rem; border-left: 1px solid rgba(214, 173, 98, 0.25); }
+/* contested: who gets each body's output, one compact line */
+.card .syssplit { display: flex; flex-wrap: wrap; gap: 0.125rem 0.625rem; margin: 0.125rem 0; font-size: var(--t1); }
+.card .bsplit { display: inline-flex; align-items: center; gap: 0.25rem; }
+.card .bsplit > i { font-style: normal; color: var(--dim); }
+.card .syssplit .rcv { font-style: normal; font-size: 0.85em; font-weight: 700; padding: 0 0.25rem; border-radius: 0.4375rem; background: rgba(0, 0, 0, 0.45); border: 1px solid var(--pc, #888); color: #fff; min-width: 1em; text-align: center; }
+.card .syssplit .rcv.lost { --pc: rgba(255, 120, 100, 0.6); color: #ffb4a4; }
 .card .tribute { margin: 0.375rem 0 0.125rem; padding: 0.375rem 0.5rem; border-radius: 0.5rem; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(214, 173, 98, 0.35); border-left: 0.1875rem solid var(--pc, var(--gold)); display: grid; grid-template-columns: 1fr auto; gap: 0.125rem 0.5rem; align-items: center; }
 .card .tribute .trib-h { display: flex; align-items: center; gap: 0.375rem; font-size: var(--t1); }
 .card .tribute .trib-h i { font-style: normal; color: var(--gold); }

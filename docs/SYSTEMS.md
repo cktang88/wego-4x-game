@@ -88,9 +88,22 @@ Bodies are **Orbital** (gas giant, belt, station) or **Surface** (habitable, moo
 **Parley/Tribute:** the attacker offers terms. If accepted, the siege lifts, the attacker gets ⅓ of the output for 5 turns, and a pact covers that system. The ledger records it as "Vel paid tribute to Kith".
 
 ## Map/UI
-- **Strategic zoom:** star glyph by type, up to 3 body dots on an arc, role badge and citizen pips.
-- **Operational zoom:** one row of body chips tinted by controller (`◉ Vel II ▪▪▪ │ ⁘ Ashen Belt ⚒ │ ◍ Tyr`).
-- **Detail view:** a sheet with a star line and up to 3 body rows.
+- **The map is a field of stars: each system IS its star** (`client/src/art/stars.ts`). A painted star sprite
+  whose type reads at a glance: yellow dwarf warm gold; red dwarf small and deep red; blue giant large and
+  blue-white with diffraction spikes; binary two touching suns; pulsar a small white core with sweeping beams and
+  a faint remnant shell; black hole a dark disc with a Doppler-bright accretion disk, lensed far side and photon
+  ring. The Throne is a grand gold eight-rayed star inside the Ring Ruin; Crowns wear a crown; capitals fly the
+  owner's pennant. Owner colour: a thin ring round the star plus the territory fill. Fogged stars are baked
+  half-desaturated and dim. Cheap per-frame animation (culled to the view, frozen with reduced motion): twinkle,
+  pulsar beam sweep, accretion shimmer.
+- **Strategic zoom:** the garrison plate is the marker; the system's star sits painted on its shoulder, with
+  citizen pips.
+- **Operational zoom:** the star alone (no planets), sized by type, with citizen pips and contested tags.
+- **Detail zoom only:** the bodies as 1-3 tiny specks on faint orbits (habitable/rocky worlds as painted specks, a
+  gas giant banded and ringed, a belt as a dotted arc, ruins a gold glint, a Station a hex), slowly orbiting.
+- **World card:** a star header (icon, type, effect), then the bodies as compact stat chips in one wrapping row
+  ("Rich ocean world cap 4", "Gas giant +4¢", "Ashen Belt ⚒", owned: + their output); while contested, one
+  compact line of each body's output split.
 
 ## Migration (each step ships on its own)
 - **Data model:**
@@ -106,8 +119,9 @@ Bodies are **Orbital** (gas giant, belt, station) or **Surface** (habitable, moo
 
 ## As built (steps 1 and 2)
 Code: `shared/sim/systems.ts` (helpers, generation, growth), `shared/config/systems.ts` (names, icons, one-liners),
-numbers in `rules.systems`. Client: `client/src/hud/systems.ts` (card rows), `drawSystemMarks` in
-`client/src/render/map.ts`, `regionArt` in `client/src/art/planets.ts` (paints the real star and bodies).
+numbers in `rules.systems`. Client: `client/src/hud/systems.ts` (card header + body chips), `drawSiteAndCap`,
+`drawSystemMarks` and `drawSiteAnim` in `client/src/render/map.ts`, `client/src/art/stars.ts` (star sprites,
+animation, body specks; specks reuse the planet painter in `client/src/art/planets.ts`).
 
 **Switch.** `sysOn(s)` = `rules.systems` present with `enabled !== false` **and** a map generated with stars
 (`regions[0].star`). The server backfills missing rule groups on old saves, so the map check is what keeps old

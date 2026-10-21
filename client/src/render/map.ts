@@ -9,7 +9,8 @@ import { drawShip, drawPlumes, gunPoints } from '../art/ships.ts';
 import { scheme } from '../art/palette.ts';
 import { CLASS_RANK, classLen } from '../art/palette.ts';
 import { drawBase, drawStand, formation, BASE_SQUASH } from '../art/minis.ts';
-import { drawPlanet, drawStar, drawBodyShadow, regionArt, onArtReady, artGeneration } from '../art/planets.ts';
+import { drawBodyShadow, onArtReady, artGeneration } from '../art/planets.ts';
+import { drawStarNode, starKindOf, STAR_NODE, drawOrbitLines, drawSpecks, drawTwinkle, drawPulsarBeams, drawAccretionShimmer } from '../art/stars.ts';
 import { matBackdrop, lampOverlay, weaveTile, nebulaPrint, starfield } from '../art/mat.ts';
 import { drawGlow, beam, tracer, fireball, smoke, stamp, shieldHit } from '../art/fx.ts';
 import { enamel, gunmetal, topGlint, stampedText, type Rim } from '../art/plates.ts';
@@ -459,7 +460,8 @@ export class MapRenderer {
       for (const rid of I.unsupplied) { const r = st.regions[rid]; if (!r || r.kind === 'void') continue; path(ctx, r.poly); ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fill(); }
     }
     this.drawRegionSelection(I);
-    // animated parts of sites
+    // animated parts of sites (culled to the view)
+    { const a = this.toWorld(-40, -40), b = this.toWorld(this.w + 40, this.h + 40); this.view = { x0: a.x, y0: a.y, x1: b.x, y1: b.y }; }
     for (const r of st.regions) this.drawSiteAnim(r, I, this.colorOf(st, I.owners[r.id]));
     this.drawDynamic(I);
     ctx.restore();
@@ -813,8 +815,27 @@ export class MapRenderer {
   private siteR(r: Region, bt: Tier): number {
     if (r.kind === 'void') return 2.5;
     if (bt === 'strategic') return 4;
-    const big = r.kind === 'throne' ? 14 : r.kind === 'home' || r.kind === 'crown' ? 14 : r.trait === 'gas' ? 12.5 : 9.5 + Math.min(4, r.dev) * 0.7;
+    // the star's footprint by type (a blue giant is big, a red dwarf small); Crowns and capitals a touch grander
+    const kind = starKindOf(r);
+    const big = STAR_NODE[kind].foot + (r.kind === 'crown' ? 2 : r.kind === 'home' ? 1.5 : 0);
     return bt === 'detail' ? big * 1.6 * this.artK() : big;
+  }
+  /** A star you can't currently see (fog of war): drawn desaturated and dim. */
+  private starFogged(r: Region, I: DrawInput): boolean {
+    return I.you !== null && !I.visible.has(r.id) && I.owners[r.id] !== I.you;
+  }
+  /** A capital's banner: a little pole with a swallow-tailed pennant in the owner's colour. */
+  private pennant(x: number, y: number, h: number, col: string, S: number) {
+    const { ctx } = this;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(5,3,12,0.85)'; ctx.lineWidth = 2.6 * S; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - h); ctx.stroke();
+    ctx.strokeStyle = '#e8dcc0'; ctx.lineWidth = 1.2 * S; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - h); ctx.stroke();
+    const fw = h * 0.7, fh = h * 0.42, top = y - h;
+    ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x - fw, top + fh * 0.1); ctx.lineTo(x - fw * 0.72, top + fh * 0.5); ctx.lineTo(x - fw, top + fh * 0.95); ctx.lineTo(x, top + fh); ctx.closePath();
+    ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = 'rgba(5,3,12,0.85)'; ctx.lineWidth = 0.9 * S; ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, top, 1.4 * S, 0, TAU); ctx.fillStyle = '#ffe08a'; ctx.fill();
+    ctx.restore();
   }
 
   /** Banner geometry (screen px relative to the site) for region r at banner tier bt. */
@@ -918,55 +939,62 @@ export class MapRenderer {
       this.drawSystemMarks(r, I, bt, p.x, p.y, Math.max(hw, hh) * S);
       return;
     }
-    // ---- the world: a painted body floating over the mat (or the Throne's star, a relic site's dark star)
+    // ---- the system IS its star: a painted star sprite (type at a glance), an owner ring, fogged stars dimmed
     const pr = this.siteR(r, bt) * S;
-    const prDev = this.siteR(r, bt) * this.rdpr;
-    const art = regionArt(r, I.state.seed);
-    const halo = ctx.createRadialGradient(p.x, p.y, pr * 0.8, p.x, p.y, pr * 2.6);
-    halo.addColorStop(0, hexA(c, owner === null || owner === undefined ? 0.06 : 0.22)); halo.addColorStop(1, hexA(c, 0));
-    ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(p.x, p.y, pr * 2.6, 0, TAU); ctx.fill();
-    if (art.star) {
-      const sk = r.kind === 'throne' ? 0.75 : art.star === 'pulsar' ? 0.32 : 0.5;
-      drawStar(ctx, p.x, p.y, pr * sk, prDev * sk, art.star);
-      if (r.kind === 'throne') {
-        // the Ring Ruin: broken golden arcs around the throne star
-        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(-0.3);
-        ctx.lineCap = 'butt';
-        for (let i = 0; i < 7; i++) {
-          const a0 = (i / 7) * TAU + 0.15, a1 = a0 + TAU / 7 - 0.32;
-          ctx.strokeStyle = 'rgba(20,12,4,0.85)'; ctx.lineWidth = 3.4 * S; ctx.beginPath(); ctx.ellipse(0, 0, pr * 1.6, pr * 0.62, 0, a0, a1); ctx.stroke();
-          ctx.strokeStyle = i % 2 ? '#e0aa3c' : '#ffe08a'; ctx.lineWidth = 2 * S; ctx.beginPath(); ctx.ellipse(0, 0, pr * 1.6, pr * 0.62, 0, a0, a1); ctx.stroke();
-        }
-        ctx.restore();
-      }
-      if (r.kind === 'relic' && r.relic && bt !== 'detail') drawGlow(ctx, p.x + pr * 0.9, p.y + pr * 0.3, 7 * S, [200, 230, 255], 0.55);
-      if (r.kind === 'relic' && r.relic && bt === 'detail') {
-        // an unexcavated relic: a glinting monolith drifting by the dark star
-        const mx = p.x + pr * 1.1, my = p.y + pr * 0.5;
-        ctx.save(); ctx.translate(mx, my); ctx.rotate(0.35);
-        const mg = ctx.createLinearGradient(-3 * S, 0, 3 * S, 0); mg.addColorStop(0, '#f4f7ff'); mg.addColorStop(0.5, '#7d86a8'); mg.addColorStop(1, '#1a1c28');
-        ctx.fillStyle = mg; ctx.fillRect(-2.5 * S, -6 * S, 5 * S, 12 * S);
-        ctx.restore();
-        drawGlow(ctx, mx, my - 5 * S, 9 * S, [200, 230, 255], 0.6);
-      }
-    } else if (art.body) {
-      drawBodyShadow(ctx, p.x + pr * 0.45, p.y + pr * 0.9, pr * 1.15, 0.55);
-      if (bt === 'detail' && art.moon) {
-        const mx = p.x - pr * 1.75, my = p.y + pr * 0.85;
-        drawBodyShadow(ctx, mx + pr * 0.15, my + pr * 0.32, pr * 0.36, 0.45);
-        drawPlanet(ctx, mx, my, pr * 0.3, prDev * 0.3, art.moon, true);
-      }
-      drawPlanet(ctx, p.x, p.y, pr, prDev, art.body, true);
-      if (r.kind === 'crown') {
-        ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 3 * S; ctx.shadowOffsetY = 1 * S;
-        const cr = Math.max(5 * S, pr * 0.36), cy0 = p.y - pr - cr * 0.9;
-        const cg = ctx.createLinearGradient(0, cy0 - cr, 0, cy0 + cr);
-        cg.addColorStop(0, '#fff3b8'); cg.addColorStop(0.45, '#e2aa3a'); cg.addColorStop(1, '#7a4c10');
-        crownGlyph(ctx, p.x, cy0, cr, cg); ctx.strokeStyle = "rgba(40,24,4,0.85)"; ctx.lineWidth = 0.8 * S; ctx.stroke();
-        ctx.restore();
-      }
+    const kind = starKindOf(r);
+    // at detail zoom the star draws back a little so its orbiting bodies have room
+    const core = STAR_NODE[kind].core * (bt === 'detail' ? 0.62 : 1);
+    const starFog = this.starFogged(r, I);
+    if (!neutral && !starFog) {
+      const halo = ctx.createRadialGradient(p.x, p.y, pr * 0.6, p.x, p.y, pr * 2.2);
+      halo.addColorStop(0, hexA(c, 0.16)); halo.addColorStop(1, hexA(c, 0));
+      ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(p.x, p.y, pr * 2.2, 0, TAU); ctx.fill();
     }
-    this.drawSystemMarks(r, I, bt, p.x, p.y, pr * (art.star ? (r.kind === 'throne' ? 1.2 : 0.8) : 1));
+    // detail zoom: faint orbits for the bodies (the specks themselves ride them in the animated pass)
+    const nb = Math.min(3, (r.bodies?.length ?? 0) + ((r.buildings.station ?? 0) > 0 ? 1 : 0));
+    if (bt === 'detail' && nb) drawOrbitLines(ctx, p.x, p.y, pr, nb, 0.8 * S, starFog);
+    drawStarNode(ctx, p.x, p.y, pr * core, pr * core * this.rdpr / S, kind, starFog);
+    if (reducedMotion() && kind === 'pulsar') drawPulsarBeams(ctx, p.x, p.y, pr * core, 0.6, r.id, starFog ? 0.35 : 1);
+    // the owner's ring: a thin enamel band in their colour round the star (Crowns and the Throne in gold-edged)
+    const rr = pr * core * 1.28;
+    if (!neutral) {
+      ctx.save();
+      ctx.lineWidth = 3.2 * S; ctx.strokeStyle = 'rgba(5,3,12,0.7)'; ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, TAU); ctx.stroke();
+      ctx.lineWidth = 1.7 * S; ctx.strokeStyle = hexA(c, starFog ? 0.5 : 0.95); ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, TAU); ctx.stroke();
+      ctx.restore();
+    }
+    if (r.kind === 'throne') {
+      // the Ring Ruin: broken golden arcs around the throne star
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(-0.3);
+      ctx.lineCap = 'butt';
+      for (let i = 0; i < 7; i++) {
+        const a0 = (i / 7) * TAU + 0.15, a1 = a0 + TAU / 7 - 0.32;
+        ctx.strokeStyle = 'rgba(20,12,4,0.85)'; ctx.lineWidth = 3.4 * S; ctx.beginPath(); ctx.ellipse(0, 0, pr * 1.6, pr * 0.62, 0, a0, a1); ctx.stroke();
+        ctx.strokeStyle = i % 2 ? '#e0aa3c' : '#ffe08a'; ctx.lineWidth = 2 * S; ctx.beginPath(); ctx.ellipse(0, 0, pr * 1.6, pr * 0.62, 0, a0, a1); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    if (r.kind === 'relic' && r.relic && bt !== 'detail') drawGlow(ctx, p.x + pr * 0.9, p.y + pr * 0.3, 7 * S, [200, 230, 255], 0.55);
+    if (r.kind === 'relic' && r.relic && bt === 'detail') {
+      // an unexcavated relic: a glinting monolith drifting by the star
+      const mx = p.x + pr * 1.1, my = p.y + pr * 0.5;
+      ctx.save(); ctx.translate(mx, my); ctx.rotate(0.35);
+      const mg = ctx.createLinearGradient(-3 * S, 0, 3 * S, 0); mg.addColorStop(0, '#f4f7ff'); mg.addColorStop(0.5, '#7d86a8'); mg.addColorStop(1, '#1a1c28');
+      ctx.fillStyle = mg; ctx.fillRect(-2.5 * S, -6 * S, 5 * S, 12 * S);
+      ctx.restore();
+      drawGlow(ctx, mx, my - 5 * S, 9 * S, [200, 230, 255], 0.6);
+    }
+    if (r.kind === 'crown') {
+      // a Crown star wears its crown
+      ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 3 * S; ctx.shadowOffsetY = 1 * S;
+      const cr = Math.max(5 * S, pr * 0.42), cy0 = p.y - pr - cr * 0.75;
+      const cg = ctx.createLinearGradient(0, cy0 - cr, 0, cy0 + cr);
+      cg.addColorStop(0, '#fff3b8'); cg.addColorStop(0.45, '#e2aa3a'); cg.addColorStop(1, '#7a4c10');
+      crownGlyph(ctx, p.x, cy0, cr, cg); ctx.strokeStyle = 'rgba(40,24,4,0.85)'; ctx.lineWidth = 0.8 * S; ctx.stroke();
+      ctx.restore();
+    }
+    if (r.kind === 'home' && !neutral) this.pennant(p.x + rr * 0.5, p.y - rr * 0.87, 15 * S * (bt === 'detail' ? Math.sqrt(this.artK()) : 1), c, S);
+    this.drawSystemMarks(r, I, bt, p.x, p.y, pr);
     // ---- detail tier: the system's orbital pieces as little modelled structures
     if (bt === 'detail' && !fog) {
       const b = r.buildings;
@@ -980,7 +1008,7 @@ export class MapRenderer {
       const angs = [0.32, 2.82, 0.85, 2.3, 1.2, 1.95, 0.0];
       const team = this.regionColor(st, owner);
       list.slice(0, angs.length).forEach((k, i) => {
-        const a = angs[i] + (art.moon && i === 1 ? 0.3 : 0);
+        const a = angs[i];
         const R = pr * (1.55 + (i % 2) * 0.12) + 6 * S;
         const sx = p.x + Math.cos(a) * R, sy = p.y + Math.sin(a) * R * 0.85;
         const sz = (k === 'gate' ? 7 : k === 'shipyard' ? 7 : 5.5) * S * this.artK();
@@ -1026,9 +1054,9 @@ export class MapRenderer {
   }
 
   /**
-   * Star systems (docs/SYSTEMS.md) around a system's node: a star glyph by type (upper left), up to 3 body dots
-   * and a built Station on an arc on the left, and citizen pips (filled) up to the cap (hollow) on an arc upper
-   * right. Stars and bodies are public map knowledge, so fog never hides them.
+   * Star systems (docs/SYSTEMS.md) around a system's node: at strategic zoom the painted star on the plate's
+   * shoulder; citizen pips (filled) up to the cap (hollow) on an arc upper right; the contested ring and tags.
+   * Stars are public map knowledge, so fog only dims them.
    */
   private drawSystemMarks(r: Region, I: DrawInput, bt: Tier, x: number, y: number, rad: number) {
     if (!r.star || r.kind === 'lane') return;
@@ -1040,47 +1068,14 @@ export class MapRenderer {
     const ring = rad + (strat ? 5 : 7) * S * k;
     const at = (deg: number, rr = ring) => ({ x: x + Math.cos((deg * Math.PI) / 180) * rr, y: y + Math.sin((deg * Math.PI) / 180) * rr });
     ctx.save();
-    // ---- the star (art stars already draw the Throne's, a relic site's and an empty system's own)
-    const art = r.kind === 'throne' || r.kind === 'relic';
-    if (!art) {
-      const sp = at(232, ring + 2 * S * k);
-      const sr = 2.6 * S * k;
-      const col = STARS[r.star]?.color ?? '#ffd76a';
-      if (r.star === 'blackhole') {
-        ctx.beginPath(); ctx.arc(sp.x, sp.y, sr * 1.1, 0, TAU); ctx.fillStyle = '#000'; ctx.fill();
-        ctx.strokeStyle = '#ffb46a'; ctx.lineWidth = 1.1 * S * k; ctx.beginPath(); ctx.ellipse(sp.x, sp.y, sr * 2, sr * 0.7, -0.35, 0, TAU); ctx.stroke();
-      } else {
-        drawGlow(ctx, sp.x, sp.y, sr * 3.2, col, 0.55);
-        ctx.fillStyle = col; ctx.beginPath(); ctx.arc(sp.x, sp.y, sr, 0, TAU); ctx.fill();
-        ctx.fillStyle = '#fffaf0'; ctx.beginPath(); ctx.arc(sp.x - sr * 0.25, sp.y - sr * 0.25, sr * 0.45, 0, TAU); ctx.fill();
-        if (r.star === 'binary') { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(sp.x + sr * 1.8, sp.y + sr * 0.9, sr * 0.6, 0, TAU); ctx.fill(); }
-        if (r.star === 'pulsar') { ctx.strokeStyle = col; ctx.lineWidth = 0.9 * S * k; ctx.beginPath(); ctx.moveTo(sp.x - sr * 3, sp.y + sr * 1.2); ctx.lineTo(sp.x + sr * 3, sp.y - sr * 1.2); ctx.stroke(); }
-      }
+    // ---- strategic zoom: the plate is the marker, so the system's star sits painted on its shoulder (at closer
+    //      zoom the node itself is the star). Bodies are only drawn at detail zoom, as orbiting specks.
+    if (strat) {
+      const kind = starKindOf(r);
+      const sp = at(232, ring + 1 * S * k);
+      const sr = (kind === 'blue' || kind === 'throne' ? 4.6 : kind === 'red' || kind === 'pulsar' ? 3.2 : 3.9) * S * k;
+      drawStarNode(ctx, sp.x, sp.y, sr, sr * this.rdpr / S, kind, this.starFogged(r, I));
     }
-    // ---- bodies: dots on an arc on the left (a built Station last)
-    const bodies: { kind: string; q?: string }[] = [...(r.bodies ?? [])];
-    if ((r.buildings.station ?? 0) > 0) bodies.push({ kind: 'station' });
-    const angs = [158, 182, 206, 230];
-    bodies.slice(0, 4).forEach((b, i) => {
-      const bp = at(angs[i]);
-      const br = (b.kind === 'gas' ? 2.6 : b.kind === 'habitable' ? 2.3 : 1.8) * S * k;
-      ctx.lineWidth = 0.9 * S * k; ctx.strokeStyle = 'rgba(5,3,12,0.9)';
-      if (b.kind === 'belt') {
-        ctx.fillStyle = '#b5ab98';
-        for (const [dx, dy] of [[-1.6, 0.6], [0, -0.6], [1.6, 0.4]]) { ctx.beginPath(); ctx.arc(bp.x + dx * S * k, bp.y + dy * S * k, 0.95 * S * k, 0, TAU); ctx.fill(); }
-        return;
-      }
-      if (b.kind === 'ruin') { diamondPath(ctx, bp.x, bp.y, br, br * 1.2); ctx.fillStyle = '#e6c35c'; ctx.fill(); ctx.stroke(); return; }
-      if (b.kind === 'station') {
-        ctx.beginPath();
-        for (let j = 0; j < 6; j++) { const a = (j / 6) * TAU; const px = bp.x + Math.cos(a) * br * 1.2, py = bp.y + Math.sin(a) * br * 1.2; if (j) ctx.lineTo(px, py); else ctx.moveTo(px, py); }
-        ctx.closePath(); ctx.fillStyle = '#dfe4f2'; ctx.fill(); ctx.stroke(); return;
-      }
-      const col = b.kind === 'habitable' ? (b.q === 'rich' ? '#7fe0a0' : b.q === 'fair' ? '#6fb7e8' : '#c9a77a')
-        : b.kind === 'gas' ? '#e0b47a' : b.kind === 'moon' ? '#cfd6e2' : b.kind === 'barren' ? (b.q === 'rich' ? '#ff8a4a' : '#8c8580') : '#aaa';
-      ctx.beginPath(); ctx.arc(bp.x, bp.y, br, 0, TAU); ctx.fillStyle = col; ctx.fill(); ctx.stroke();
-      if (b.kind === 'gas') { ctx.strokeStyle = 'rgba(255,230,190,0.8)'; ctx.lineWidth = 0.7 * S * k; ctx.beginPath(); ctx.ellipse(bp.x, bp.y, br * 1.7, br * 0.45, -0.35, 0, TAU); ctx.stroke(); }
-    });
     // ---- citizens: filled pips up to the cap (hollow) on an arc, upper right
     if (sysOn(st) && r.kind !== 'void') {
       const cap = citizenCap(st, r) ?? 0;
@@ -2509,14 +2504,14 @@ export class MapRenderer {
 
   /** The animated parts of a site (the Throne's breath, crown shimmer, capital ring): over the cached layer. */
   private drawSiteAnim(r: Region, I: DrawInput, c: string) {
-    if (reducedMotion()) return;
+    const reduced = reducedMotion();
     const { ctx } = this;
     const p = r.site;
     const t = I.now / 1000;
     const S = this.px(1);
     const bt = this.bannerTier(r, I);
     if (bt === 'strategic') {
-      if (r.kind === 'throne') {
+      if (r.kind === 'throne' && !reduced) {
         const br = 0.5 + 0.5 * Math.sin(t * 1.4);
         const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 44 * S);
         g.addColorStop(0, `rgba(255,236,170,${0.12 + 0.1 * br})`); g.addColorStop(1, 'rgba(255,200,90,0)');
@@ -2524,15 +2519,35 @@ export class MapRenderer {
       }
       return;
     }
-    if (r.kind === 'throne') {
-      const size = this.siteR(r, bt) * S;
-      const br = 0.5 + 0.5 * Math.sin(t * 1.4);
-      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, size * 4.5);
-      g.addColorStop(0, `rgba(255,236,170,${0.2 + 0.14 * br})`); g.addColorStop(1, 'rgba(255,200,90,0)');
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, size * 4.5, 0, TAU); ctx.fill();
+    if (r.kind === 'void' || isLane(r)) return;
+    const pr = this.siteR(r, bt) * S;
+    // off screen: nothing to animate (the map has many stars; phones must stay smooth)
+    const v = this.view;
+    const m = pr * 3;
+    if (p.x + m < v.x0 || p.x - m > v.x1 || p.y + m < v.y0 || p.y - m > v.y1) return;
+    const kind = starKindOf(r);
+    const core = pr * STAR_NODE[kind].core * (bt === 'detail' ? 0.62 : 1);
+    const fog = this.starFogged(r, I);
+    if (!reduced) {
+      if (r.kind === 'throne') {
+        const br = 0.5 + 0.5 * Math.sin(t * 1.4);
+        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, pr * 4.5);
+        g.addColorStop(0, `rgba(255,236,170,${0.2 + 0.14 * br})`); g.addColorStop(1, 'rgba(255,200,90,0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, pr * 4.5, 0, TAU); ctx.fill();
+      } else if (kind === 'pulsar') drawPulsarBeams(ctx, p.x, p.y, core, t, r.id, fog ? 0.35 : 1);
+      else if (kind === 'blackhole') drawAccretionShimmer(ctx, p.x, p.y, core, t, r.id, fog ? 0.4 : 1);
+      else if (!fog) drawTwinkle(ctx, p.x, p.y, core, kind, t, r.id);
+    }
+    // detail zoom: the bodies as tiny specks riding their orbits (frozen with reduced motion)
+    if (bt === 'detail' && r.bodies) {
+      const bodies: { kind: string; q?: string; adj?: string }[] = r.bodies.slice(0, 3);
+      if ((r.buildings.station ?? 0) > 0) bodies.push({ kind: 'station' });
+      if (bodies.length) drawSpecks(ctx, p.x, p.y, pr, bodies.slice(0, 3), reduced ? 0 : t, r.id * 7919 + 13, S * Math.sqrt(this.artK()), this.rdpr / S, r.kind, r.name, fog);
     }
     void c;
   }
+  /** The visible world rectangle this frame (with a margin), for culling animated parts (set in draw). */
+  private view = { x0: -1e9, y0: -1e9, x1: 1e9, y1: 1e9 };
 
   // ================================================================ arrows
   /** A planned-order arrow: owner colour, roman slot badge at the midpoint, swords head for a seize, dashed for a

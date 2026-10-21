@@ -1,6 +1,6 @@
-// Star systems through the UI (docs/SYSTEMS.md, steps 1-2): the world card's star line, body rows, role badge,
+// Star systems through the UI (docs/SYSTEMS.md, steps 1-2): the world card's star header, body chips, role badge,
 // citizens x/cap and slots; the develop tray's gate/slot reasons and the waystation discount; the Station tile;
-// map marks (star glyph, body dots, citizen pips) at strategic and operational zoom. Desktop 1440x900 + iPhone 15 Pro.
+// map marks (the painted stars, citizen pips) at strategic and operational zoom. Desktop 1440x900 + iPhone 15 Pro.
 // node scripts/systems-e2e.mjs [outdir] [base] [desk|phone]
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
@@ -58,7 +58,7 @@ async function run(tag, phone) {
   await select(info.cap);
   const capTxt = await cardText();
   check(/Yellow dwarf/.test(capTxt), `${tag}: capital card shows its star`);
-  check(await ev(() => document.querySelectorAll('.card .sysrow.body').length === 3), `${tag}: capital card shows 3 body rows`);
+  check(await ev(() => document.querySelectorAll('.card .syschips .bchip').length === 3), `${tag}: capital card shows 3 body chips`);
   check(/Core/.test(capTxt), `${tag}: role badge Core`);
   check(/3\/5/.test(capTxt) && await ev(() => !!document.querySelector('.card .syscit .ic-citizen')), `${tag}: citizens 3/5`);
   check(/1\/3/.test(capTxt) && /1\/[23]/.test(capTxt) && await ev(() => !!document.querySelector('.card .sysslot .ic-industry') && !!document.querySelector('.card .sysslot .ic-garrison')), `${tag}: civil and military slots used/total`);
