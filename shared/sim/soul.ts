@@ -84,6 +84,11 @@ export function modPoints(boons: string[], banes: string[]) {
   const value = banes.reduce((a, b) => a + (Object.hasOwn(BANES, b) ? BANES[b].cost : 0), 0);
   return { cost, value };
 }
+/** The house a Grudge-bound fleet hates when none is named: the next living rival in seat order. */
+const defaultGrudge = (s: GameState, p: PlayerId) => {
+  for (let i = 1; i < s.players.length; i++) { const q = s.players[(p + i) % s.players.length]; if (!q.eliminated) return q; }
+  return undefined;
+};
 /** Why this boon/bane selection is not allowed, or null. */
 export function modsBlock(s: GameState, p: PlayerId, boons: unknown, banes: unknown, grudgeVs?: unknown): string | null {
   const S = SR(s);
@@ -97,6 +102,9 @@ export function modsBlock(s: GameState, p: PlayerId, boons: unknown, banes: unkn
   if (cost > value + S.freePoints) return `boons cost ${cost} points but banes give only ${value}${S.freePoints ? ` (+${S.freePoints} free)` : ''}`;
   if (banes.includes('grudgebound')) {
     if (grudgeVs !== undefined && (!Number.isInteger(grudgeVs) || grudgeVs === p || !s.players[grudgeVs as number])) return 'Grudge-bound needs a rival house';
+    // a grudge against a fallen house never bites: its points would be free
+    const vs = grudgeVs !== undefined ? s.players[grudgeVs as number] : defaultGrudge(s, p);
+    if (!vs || vs.eliminated) return 'Grudge-bound needs a living rival house';
   }
   if (boons.includes('ghosts') && banes.includes('conspicuous')) return 'a fleet cannot be both Ghosts and Conspicuous';
   return null;
@@ -126,7 +134,7 @@ export function resolveFound(s: GameState, p: PlayerId, region: RegionId, spec?:
   if (err) return err;
   const sigil = spec?.sigil && SIGILS.some(x => x.id === spec.sigil) ? spec.sigil : off.sigil;
   const name = cleanText(spec?.name ?? '', 40) || off.names[0] || 'New Banner';
-  const grudgeVs = banes.includes('grudgebound') ? (Number.isInteger(spec?.grudgeVs) ? spec!.grudgeVs! : (p + 1) % s.players.length) : null;
+  const grudgeVs = banes.includes('grudgebound') ? (Number.isInteger(spec?.grudgeVs) ? spec!.grudgeVs! : defaultGrudge(s, p)?.id ?? (p + 1) % s.players.length) : null;
   return { name, banner: { sigil, boons: boons.slice(), banes: banes.slice(), grudgeVs, home: region, foundedTurn: s.turn } };
 }
 
@@ -143,7 +151,12 @@ export function raiseBanner(s: GameState, f: Fleet, name: string, banner: Banner
 export function cleanText(x: unknown, max: number): string {
   if (typeof x !== 'string') return '';
   // eslint-disable-next-line no-control-regex
-  return x.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trim();
+  const t = x.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff<>]/g, ' ')
+    .replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, '')   // lone surrogates
+    .replace(/\s+/g, ' ').trim();
+  let out = t.slice(0, max);
+  if (/[\ud800-\udbff]$/.test(out)) out = out.slice(0, -1);   // don't cut an emoji in half
+  return out.trim();
 }
 
 // ------------------------------------------------------------------ modifiers
@@ -217,7 +230,7 @@ export function soulDmg(s: GameState, f: Fleet | null, tf: Fleet | null): number
   if (!soulOn(s) || !tf) return 0;
   const S = SR(s);
   let d = 0;
-  if (f && f.vow?.kind === 'avenge' && f.vow.target === tf.commander.name) d += S.vowAvengeDmg;
+  if (f && f.vow?.kind === 'avenge' && avengeHits(f.vow, tf.commander.name, tf.owner)) d += S.vowAvengeDmg;
   const g = scarOf(f, 'grudge');
   if (g && g.vs === tf.owner) d += S.grudgeDmg;
   if (hasBane(s, tf, 'glass')) d += S.glassDmg;
@@ -301,6 +314,8 @@ export function routExit(s: GameState, f: Fleet, from: RegionId, cameFrom: Regio
   if (own.length) return own[0];
   return links.find(safe) ?? null;
 }
+/** Can a limping fleet of `p` end its limp here (its own shipyard or depot)? */
+const isYard = (s: GameState, rid: RegionId, p: PlayerId) => { const r = s.regions[rid]; return !!r && r.owner === p && ((r.buildings.shipyard ?? 0) > 0 || (r.buildings.depot ?? 0) > 0); };
 /** Nearest friendly shipyard (else owned world) along a safe path. */
 export function limpRoute(s: GameState, f: Fleet): { to: RegionId; path: RegionId[] } | null {
   const blocked = (rid: RegionId) => {
@@ -308,7 +323,7 @@ export function limpRoute(s: GameState, f: Fleet): { to: RegionId; path: RegionI
     if (s.fleets.some(x => x.region === rid && x.ships.length && !x.limping && hostileP(s, x.owner, f.owner))) return true;
     return r.owner !== null && r.garrison > 0 && hostileP(s, r.owner, f.owner);
   };
-  const yard = (rid: RegionId) => { const r = s.regions[rid]; return r.owner === f.owner && ((r.buildings.shipyard ?? 0) > 0 || (r.buildings.depot ?? 0) > 0); };
+  const yard = (rid: RegionId) => isYard(s, rid, f.owner);
   const owned = (rid: RegionId) => s.regions[rid].owner === f.owner && s.regions[rid].kind !== 'lane';
   for (const goal of [yard, owned]) {
     if (goal(f.region)) return { to: f.region, path: [] };
@@ -354,6 +369,8 @@ export function applyRout(s: GameState, f: Fleet, from: RegionId, by: PlayerId |
   emit({ k: 'rout', pulse, fleet: f.id, owner: f.owner, from, to: f.region, by, scar });
   if ((f.scars?.length ?? 0) >= S.breakAtScars) {
     breakFleet(s, f, from, pulse, emit);
+    // broken is still beaten: blood-debts owed to the winner clear, avenge vows on this commander are kept
+    if (by >= 0) onBeaten(s, f.owner, by, f.commander.name, from, pulse, emit);
     return 'broken';
   }
   for (const sh of f.ships) sh.hp = Math.max(1, Math.min(sh.hp, Math.floor(sh.maxHp * S.routHullCap)));
@@ -373,8 +390,9 @@ export function breakFleet(s: GameState, f: Fleet, at: RegionId, pulse: number, 
   if (home?.story) addDeed(s, home, { id: 'fell', turn: s.turn, name: `Where ${f.name} Fell`, by: f.owner, fleet: f.name });
   if (f.commander.alive && !f.commander.name.endsWith('flag captain')) (s.players[f.owner].reserveCommanders ??= []).push(f.commander);
   sagaBeat(f, s.turn, 'broken', `Broken by its third scar and disbanded with honours.`, at);
-  emit({ k: 'soul', pulse, kind: 'broken', owner: null, text: `${f.name} is broken by its third scar and disbanded with honours.`, region: at, fleet: f.id, players: [f.owner] });
-  beat(s, { kind: 'broken', text: headline(s, 'broken', { f: f.name, a: pname(s, f.owner) }), region: at, players: [f.owner], drama: 7 + f.commander.rank, public: true });
+  // public news, but where it broke is not (the rout itself is only seen by those who watched): no region
+  emit({ k: 'soul', pulse, kind: 'broken', owner: null, text: `${f.name} is broken by its third scar and disbanded with honours.`, fleet: f.id, players: [f.owner] });
+  beat(s, { kind: 'broken', text: headline(s, 'broken', { f: f.name, a: pname(s, f.owner) }), players: [f.owner], drama: 7 + f.commander.rank, public: true });
   archiveFleet(s, f, 'broken', at);
   s.chronicle.push({ turn: s.turn, players: [f.owner], region: at, major: true, text: `${f.name} is broken by its third scar. ${s.players[f.owner].name} disbands it with honours.` });
   f.ships = [];
@@ -387,6 +405,14 @@ export function catchLimping(s: GameState, f: Fleet, by: PlayerId | -1, killer: 
   for (const sh of f.ships) { r.wreckage++; if (sh.title) r.memorials.push(`${sh.name} ${sh.title}, lost limping home at ${r.name} (turn ${s.turn})`); }
   if (killer?.tally) killer.tally.interceptions++;
   f.ships = [];
+  // the commander falls with it or escapes to command again (as for any lost fleet; deterministic, no rng draw)
+  const c = f.commander;
+  if (f.owner >= 0 && c.alive && !c.name.endsWith('flag captain')) {
+    if ((hashString(`${s.seed}:${s.turn}:${f.id}:caught`) % 1000) / 1000 < (s.rules.commanderFate?.dieChance ?? 0.5)) {
+      c.alive = false;
+      r.memorials.push(`${c.name} fell with ${f.name}, caught limping home at ${r.name}, turn ${s.turn}.`);
+    } else (s.players[f.owner].reserveCommanders ??= []).push(c);
+  }
   onFleetLost(s, f, r.id, 'caught', by, killer?.commander.name ?? null, pulse, emit);
 }
 
@@ -427,7 +453,7 @@ export function onBeaten(s: GameState, loser: PlayerId, winner: PlayerId, cmd: s
     beat(s, { kind: 'vengeance', text: headline(s, 'vengeance', { a: pname(s, winner), b: pname(s, loser), c: d.victim, r: s.regions[at]?.name ?? '?' }), region: at, players: [winner, loser], drama: 7, public: true });
   }
   for (const f of s.fleets) {
-    if (f.owner !== winner || f.vow?.kind !== 'avenge' || f.vow.target !== cmd) continue;
+    if (f.owner !== winner || f.vow?.kind !== 'avenge' || !avengeHits(f.vow, cmd, loser)) continue;
     if (f.region === at) fulfilVow(s, f, pulse, emit);
   }
 }
@@ -461,8 +487,11 @@ export function swearVow(s: GameState, f: Fleet, kind: VowKind, region?: RegionI
   f.vow = v;
   const text = vowText(s, v);
   sagaBeat(f, s.turn, 'vow', `Swore: ${text}.`, f.region);
-  beat(s, { kind: 'vow_sworn', text: headline(s, 'vow_sworn', { f: f.name, x: text }), region: f.region, players: [f.owner], drama: 2, public: true });
+  // vows are public; the fleet's whereabouts are not (Ghosts, fog): public fleet news carries no region
+  beat(s, { kind: 'vow_sworn', text: headline(s, 'vow_sworn', { f: f.name, x: text }), players: [f.owner], drama: 2, public: true });
 }
+/** Is this commander (of house `owner`) the one an avenge vow names? Names can repeat across houses: match the house too. */
+export const avengeHits = (v: Vow, cmd: string, owner: PlayerId | -1) => v.target === cmd && (v.targetOwner === undefined || v.targetOwner === owner);
 export function vowText(s: GameState, v: Vow): string {
   const d = VOWS[v.kind];
   if (v.kind === 'guard') return `${d.name} ${s.regions[v.region ?? 0]?.name ?? '?'}`;
@@ -476,8 +505,8 @@ export function fulfilVow(s: GameState, f: Fleet, pulse: number, emit: Emit) {
   if (!(f.epithets ??= []).includes(ep)) f.epithets.push(ep);
   f.vow = null;
   sagaBeat(f, s.turn, 'vow_kept', `Kept its vow (${vowText(s, v)}) and is now called ${ep}.`, f.region);
-  emit({ k: 'soul', pulse, kind: 'vow_kept', owner: null, text: `${f.name} keeps its vow and is now called ${ep}.`, region: f.region, fleet: f.id, players: [f.owner] });
-  beat(s, { kind: 'vow_kept', text: headline(s, 'vow_kept', { f: f.name, x: ep }), region: f.region, players: [f.owner], drama: 6, public: true });
+  emit({ k: 'soul', pulse, kind: 'vow_kept', owner: null, text: `${f.name} keeps its vow and is now called ${ep}.`, fleet: f.id, players: [f.owner] });
+  beat(s, { kind: 'vow_kept', text: headline(s, 'vow_kept', { f: f.name, x: ep }), players: [f.owner], drama: 6, public: true });
 }
 export function breakVow(s: GameState, f: Fleet, pulse: number, emit: Emit, why: string) {
   const v = f.vow;
@@ -485,8 +514,8 @@ export function breakVow(s: GameState, f: Fleet, pulse: number, emit: Emit, why:
   f.vow = null;
   f.oathbreaker = { turn: s.turn, vow: vowText(s, v) };
   sagaBeat(f, s.turn, 'vow_broken', `Broke its vow (${vowText(s, v)}): it ${why}. Oathbreaker.`, f.region);
-  emit({ k: 'soul', pulse, kind: 'vow_broken', owner: null, text: `${f.name} breaks its vow (${vowText(s, v)}): Oathbreaker.`, region: f.region, fleet: f.id, players: [f.owner] });
-  beat(s, { kind: 'vow_broken', text: headline(s, 'vow_broken', { f: f.name, x: vowText(s, v) }), region: f.region, players: [f.owner], drama: 6, public: true });
+  emit({ k: 'soul', pulse, kind: 'vow_broken', owner: null, text: `${f.name} breaks its vow (${vowText(s, v)}): Oathbreaker.`, fleet: f.id, players: [f.owner] });
+  beat(s, { kind: 'vow_broken', text: headline(s, 'vow_broken', { f: f.name, x: vowText(s, v) }), players: [f.owner], drama: 6, public: true });
 }
 /** A vow that can no longer be kept or broken (its world fell, its target is gone): it lapses quietly. */
 export function lapseVow(s: GameState, f: Fleet, why: string) {
@@ -523,7 +552,7 @@ export function onRankUp(s: GameState, f: Fleet, hl: (t: string) => void) {
       const shed = f.banner.banes.shift();
       hl(`${f.name} passes into legend as ${ep}${shed ? ` and sheds ${BANES[shed]?.name ?? shed}` : ''}.`);
       sagaBeat(f, s.turn, 'legend', `Became a Legend: ${ep}${shed ? `; shed ${BANES[shed]?.name ?? shed}` : ''}.`, f.region);
-      beat(s, { kind: 'legend', text: headline(s, 'legend', { f: f.name, x: ep }), region: f.region, players: [f.owner], drama: 7, public: true });
+      beat(s, { kind: 'legend', text: headline(s, 'legend', { f: f.name, x: ep }), players: [f.owner], drama: 7, public: true });
     }
   }
   if ((f.honours?.length ?? 0) >= S.maxHonours || f.pendingHonour) return;
@@ -541,7 +570,7 @@ export function pickHonour(s: GameState, f: Fleet, pick: unknown): string | null
   (f.honours ??= []).push({ id, turn: s.turn });
   f.pendingHonour = null;
   sagaBeat(f, s.turn, 'honour', `Honoured: ${BOONS[id].name}.`, f.region);
-  beat(s, { kind: 'honour', text: headline(s, 'honour', { f: f.name, c: f.commander.name, x: BOONS[id].name }), region: f.region, players: [f.owner], drama: 2, public: true });
+  beat(s, { kind: 'honour', text: headline(s, 'honour', { f: f.name, c: f.commander.name, x: BOONS[id].name }), players: [f.owner], drama: 2, public: true });
   return null;
 }
 
@@ -601,7 +630,7 @@ export function pickCalling(s: GameState, r: Region, pick: unknown): string | nu
 
 function markLevels(s: GameState, r: Region): { mark: string; level: number }[] {
   const st = r.story!;
-  const taken = st.owners.filter(o => o.how !== 'start').length;
+  const taken = st.owners.filter(o => o.how !== 'start' && o.how !== 'razed').length;
   const lv = (x: number, t: number[]) => t.filter(y => x >= y).length - 1;
   return [
     { mark: 'siege', level: lv(st.siege, [1, 2, 4]) },
@@ -632,7 +661,8 @@ export function addDeed(s: GameState, r: Region, d: Deed) {
   const text = d.name;
   if (st.deeds.length < S.maxDeeds) st.deeds.push(d);
   else {
-    const i = st.deeds.findIndex(x => !x.engraved);
+    // engraved deeds and Havens (permanent, docs/SOUL.md) are never replaced
+    const i = st.deeds.findIndex(x => !x.engraved && x.id !== 'haven');
     if (i < 0) return;   // both engraved: history is full
     st.deeds.splice(i, 1);
     st.deeds.push(d);
@@ -709,6 +739,7 @@ export function raze(s: GameState, p: PlayerId, r: Region, pulse: number, emit: 
   r.dev = Math.max(1, r.dev - 1);
   r.project = null;
   st.calling = null; st.pendingCalling = null; st.captured = null;
+  if (st.lost) st.lost.calling = null;   // a razed calling does not wake on liberation
   st.tenureFrom = s.turn;
   st.owners.push({ p, turn: s.turn, how: 'razed' });
   if (from !== null && from !== p) {
@@ -790,7 +821,7 @@ export function headline(s: GameState, kind: string, vars: Record<string, string
   const t = HERALD_TEMPLATES[kind] ?? ['{x}'];
   const key = `${s.seed}:${s.turn}:${kind}:${Object.values(vars).join('|')}`;
   let out = t[hashString(key) % t.length];
-  for (const [k, v] of Object.entries(vars)) out = out.split(`{${k}}`).join(String(v));
+  for (const [k, v] of Object.entries(vars)) out = out.split(`{${k}}`).join(typeof v === 'string' ? cleanText(v, 200) : String(v));
   return out;
 }
 export function archiveFleet(s: GameState, f: Fleet, fate: FleetRecord['fate'], at: RegionId) {
@@ -832,15 +863,17 @@ export function soulEndTurn(s: GameState, pulse: number, emit: Emit, fought: Set
       else if ((v.progress = (v.progress ?? 0) + 1) >= S.vowGuardTurns) fulfilVow(s, f, pulse, emit);
     } else if (v?.kind === 'relic' && v.carrying && f.banner && f.region === f.banner.home) fulfilVow(s, f, pulse, emit);
     else if (v?.kind === 'avenge') {
-      const alive = s.fleets.some(x => x.commander.name === v.target && x.ships.length && x.commander.alive)
-        || s.players.some(p => (p.reserveCommanders ?? []).some(c => c.name === v.target));
+      const alive = s.fleets.some(x => avengeHits(v, x.commander.name, x.owner) && x.ships.length && x.commander.alive)
+        || s.players.some(p => (p.reserveCommanders ?? []).some(c => avengeHits(v, c.name, p.id)));
       if (!alive) lapseVow(s, f, `${v.target} is gone`);
     }
     // ---- limping home
     if (f.limping) {
-      const yard = r.owner === f.owner && ((r.buildings.shipyard ?? 0) > 0 || (r.buildings.depot ?? 0) > 0);
+      const yard = isYard(s, r.id, f.owner);
       const healed = r.owner === f.owner && f.ships.every(sh => sh.hp >= sh.maxHp * S.limpClearHp);
-      if (yard || healed) {
+      // Slow Refits never repair away from a yard: home with no yard to reach, the limp ends here (or it never would)
+      const stranded = !yard && !healed && r.owner === f.owner && hasBane(s, f, 'slowrefit') && !isYard(s, limpRoute(s, f)?.to ?? r.id, f.owner);
+      if (yard || healed || stranded) {
         f.limping = null;
         if (f.route && !f.route.path.length) f.route = null;
         sagaBeat(f, s.turn, 'home', `Limped home to ${r.name}.`, r.id);
@@ -855,11 +888,16 @@ export function soulEndTurn(s: GameState, pulse: number, emit: Emit, fought: Set
     if (r.owner !== null && r.owner !== f.owner && hostileP(s, r.owner, f.owner) && hasBoon(s, f, 'raiders')) {
       const q = s.players[r.owner];
       const amt = Math.min(Math.max(0, q.res.credits), S.raiderPlunder + r.dev);
-      if (amt > 0) { q.res.credits -= amt; s.players[f.owner].res.credits += amt; emit({ k: 'soul', pulse, kind: 'plunder', owner: f.owner, text: `${f.name} plunders ${amt}¢ from ${q.name} at ${r.name}.`, region: r.id, fleet: f.id }); }
+      if (amt > 0) {
+        q.res.credits -= amt; s.players[f.owner].res.credits += amt;
+        emit({ k: 'soul', pulse, kind: 'plunder', owner: f.owner, text: `${f.name} plunders ${amt}¢ from ${q.name} at ${r.name}.`, region: r.id, fleet: f.id });
+        // the victim learns of it too (it is their system): a loss should be readable
+        emit({ k: 'soul', pulse, kind: 'plunder', owner: r.owner, text: `${f.name} plunders ${amt}¢ from you at ${r.name}.`, region: r.id, fleet: f.id });
+      }
     }
     if (f.banner && f.region === f.banner.home && r.owner === f.owner && hasBoon(s, f, 'beloved')) s.players[f.owner].res.influence += S.beloveInfluence;
     const vs = f.banner?.grudgeVs;
-    if (vs !== null && vs !== undefined && hasBane(s, f, 'grudgebound') && s.players[vs] && !s.players[vs].eliminated && hostileP(s, f.owner, vs) && !fought.has(f.id)) {
+    if (vs !== null && vs !== undefined && !f.limping && hasBane(s, f, 'grudgebound') && s.players[vs] && !s.players[vs].eliminated && hostileP(s, f.owner, vs) && !fought.has(f.id)) {
       const near = [f.region, ...(r.links ?? r.neighbors)].some(x => s.regions[x].owner === vs || s.fleets.some(y => y.owner === vs && y.region === x && y.ships.length));
       if (near) { f.sulkUntil = s.turn + 1; sagaBeat(f, s.turn, 'sulk', `Did not attack ${s.players[vs].name} when it could: its boons fail next turn.`, f.region); }
     }
@@ -881,7 +919,12 @@ export function soulEndTurn(s: GameState, pulse: number, emit: Emit, fought: Set
       else if (s.turn - st.pendingCalling.since >= S.honourAutoTurns) pickCalling(s, r, 0);
     }
     if (st.calling?.dormantUntil !== undefined && st.calling.dormantUntil <= s.turn + 1) delete st.calling.dormantUntil;
-    if (st.siege >= S.unbrokenSieges) addDeed(s, r, { id: 'unbroken', turn: s.turn, name: 'Unbroken', by: r.owner });
+    // Unbroken is earned once: if newer history later replaces it, it does not come back by itself
+    const earned = ((st as RegionStory & { earned?: string[] }).earned ??= []);
+    if (st.siege >= S.unbrokenSieges && !earned.includes('unbroken')) {
+      earned.push('unbroken');
+      addDeed(s, r, { id: 'unbroken', turn: s.turn, name: 'Unbroken', by: r.owner });
+    }
     st.epithet = worldEpithet(s, r);
   }
 }

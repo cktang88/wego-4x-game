@@ -252,6 +252,21 @@ export function mergeRules<T>(base: T, over: unknown): T {
   return out;
 }
 
+/** Layers whose absence from a game's rules means "off": the sim plays a game saved before they existed without them. */
+export const OPT_IN_LAYERS = ['soul', 'signature'] as const;
+/**
+ * Rules of a saved game, upgraded for this build: every knob a newer version added is filled from the defaults,
+ * except that a whole layer the save predates (no `soul` / `signature` group) stays off instead of switching on
+ * mid-game (old fleets have no banners, old houses no Fate...). Use this, not mergeRules(defaultRules(), saved),
+ * when loading a save.
+ */
+export function upgradeRules(saved: unknown): Rules {
+  const out = mergeRules(defaultRules(), saved);
+  const had = isObj(saved) ? saved : {};
+  for (const k of OPT_IN_LAYERS) if (!isObj(had[k])) (out[k] as { enabled: boolean }).enabled = false;
+  return out;
+}
+
 // Extra knobs added after the research pass (kept separate so they're easy to find).
 export const EXTRA_DEFAULTS = {
   throne: {

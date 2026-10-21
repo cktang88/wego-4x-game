@@ -94,7 +94,7 @@ export function soulFree(c: Ctx): FreeAction[] {
     if (foe) { swear(f, { type: 'vow', fleet: f.id, vow: 'avenge', target: foe.id }); sworn = true; continue; }
     const here = s.regions[f.region];
     // a turtle posts a second fleet (never its main army) on oath at a threatened capital
-    if (lvl === 'expert' && style === 'turtle' && f !== c.mainArmy && here.id === s.players[pid].capital && f.ships.length >= 2 && (c.threatened.get(here.id) ?? 0) > 0.3) {
+    if (lvl === 'expert' && style === 'turtle' && f !== c.mainArmy && here.id === s.players[pid].capital && here.owner === pid && f.ships.length >= 2 && (c.threatened.get(here.id) ?? 0) > 0.3) {
       swear(f, { type: 'vow', fleet: f.id, vow: 'guard', region: here.id }); sworn = true; continue;
     }
     if (lvl === 'expert' && style === 'warlord' && f === c.mainArmy && f.ships.length >= 5 && f.commander.rank >= 2) {

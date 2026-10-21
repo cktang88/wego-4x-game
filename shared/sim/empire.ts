@@ -50,7 +50,7 @@ export function researchedThisTurn(s: GameState, p: PlayerId): number {
   const n = s.players[p]?.researched ?? 0;
   if (s.last == null) return n;                          // resolving (or nothing resolved yet): the counter is live
   if (!s.live) return 0;                                  // WEGO planning: a fresh turn always starts at 0
-  const per = Math.max(1, s.rules.live?.ticksPerCycle ?? 1);
+  const per = Math.max(1, Math.floor(s.rules.live?.ticksPerCycle ?? 1) || 1);   // as live.ts ticksPerCycle
   return s.live.tick % per === 0 ? 0 : n;                 // LIVE: the next tick opens a new cycle and resets it
 }
 

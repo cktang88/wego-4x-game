@@ -253,8 +253,20 @@ export function queueFree(s: GameState, pid: PlayerId, fa: FreeAction): string |
       : fa.type === 'calling' || fa.type === 'raze' || fa.type === 'wposture' || fa.type === 'tribute' ? (x as { region: number }).region === fa.region
       : fa.type === 'fate' ? (x as { fleet?: number; region?: number }).fleet === fa.fleet && (x as { region?: number }).region === fa.region
       : fa.type === 'dispatch');   // a newer dispatch replaces the queued one
+  // the replaced action comes out first (it must not count against its own replacement), but goes back in
+  // if the replacement is refused: a rejected re-issue never silently cancels what was already queued
   const i = list.findIndex(same);
-  if (i >= 0) list.splice(i, 1);
+  const replaced = i >= 0 ? list.splice(i, 1)[0] : undefined;
+  const err = queueFreeBlock(s, pid, fa, list);
+  if (err) { if (replaced) list.splice(i, 0, replaced); return err; }
+  if (list.length >= 32) return 'too many changes waiting for this tick';
+  list.push(fa);
+  return null;
+}
+
+/** Why a free action can't be queued now (checked against what else is queued), or null. */
+function queueFreeBlock(s: GameState, pid: PlayerId, fa: FreeAction, list: FreeAction[]): string | null {
+  const L = s.live!;
   switch (fa.type) {
     case 'research': {
       if (list.some(x => x.type === 'research' && x.tech === fa.tech)) return 'already queued';
@@ -304,8 +316,6 @@ export function queueFree(s: GameState, pid: PlayerId, fa: FreeAction): string |
       break;
     }
   }
-  if (list.length >= 32) return 'too many changes waiting for this tick';
-  list.push(fa);
   return null;
 }
 

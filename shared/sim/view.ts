@@ -17,11 +17,15 @@ const HIDDEN_DOCTRINE: Doctrine = { stance: 'defensive', retreatAt: 0.35, target
 /** Battle lines in the chronicle (see recordBattle in resolve.ts). */
 export const BATTLE_LINE = /^The .+: \d+ ships destroyed\./;
 
-function maskRivalFleet(f: Fleet) {
+function maskRivalFleet(f: Fleet, live: boolean) {
+  // a route is a standing order: where it is going and what it means to seize there are secret. LIVE keeps only
+  // the step it is taking now (the map glides it along that lane; movement signals name the heading anyway)
+  if (f.route) f.route = live && f.route.path.length ? { path: [f.route.path[0]], seize: null, mp: f.route.mp } : null;
   // doctrine (stance, retreat threshold, guard) is a secret standing order
   f.doctrine = { ...HIDDEN_DOCTRINE };
   // so are its supply situation (how long it has been cut off) and how many orders it used this turn
   delete f.oos;
+  delete f.od;   // overdrove this turn/cycle: an order (its effect shows next turn as fatigue)
   f.ordersThisTurn = 0;
   f.guardUsed = false;
   // Soul layer: banners, vows, scars, honours, epithets and brands are public; a pending choice is not
@@ -42,7 +46,7 @@ export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
   for (const f of v.fleets) if (f.owner !== p) {
     const seen = s.fleets.find(x => x.id === f.id);
     const posture = seen && seen.posture && postureSeenBy(s, p, seen) ? seen.posture : null;
-    maskRivalFleet(f);
+    maskRivalFleet(f, !!s.live);
     if (posture) f.posture = posture;
   }
   for (const pl of v.players) {
@@ -69,12 +73,21 @@ export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
     // fogged: hide projects and exact garrison of rival regions
     r.project = null;
     if (r.owner !== null) r.garrison = -1;
+    // who holds space / how long it has been contested would reveal fleets you can't see there
+    delete r.spaceWon; delete r.contested;
     r.loyalty = r.loyalty.map((x, i) => (i === p ? x : 0));
   }
   // rivals' scans reveal where they are looking (and that they paid for it)
   v.scans = v.scans.filter(sc => sc.owner === p);
   // a battle in progress is only visible where you can see fleets (nebulae hide it), or where you fight
   v.engagements = (v.engagements ?? []).filter(e => seesFleetsIn(s, p, e.region, cov) || s.fleets.some(f => f.owner === p && f.region === e.region));
+  // ...and it never names a rival fleet that has since slipped out of sight (one that fell back into fog)
+  const shown = new Set(v.fleets.map(f => f.id));
+  const hiddenIds = new Set(s.fleets.filter(f => f.owner !== p && !shown.has(f.id)).map(f => f.id));
+  if (hiddenIds.size) for (const e of v.engagements) {
+    e.fleets = e.fleets.filter(id => !hiddenIds.has(id));
+    for (const id of hiddenIds) { delete e.startHp[id]; if (e.joined) delete e.joined[id]; }
+  }
   // last turn's per-player stats would reveal rivals' unseen battles (captures are public anyway)
   if (v.turnStats) {
     const own = <T>(arr: T[] | undefined, zero: T) => (arr ?? []).map((x, i) => (i === p ? x : zero));
@@ -209,7 +222,7 @@ function filterResult(s: GameState, r: TurnResult, p: PlayerId, endCov: Set<Regi
   // Ghosts stay hidden in replays too (Conspicuous and limping fleets are seen anyway)
   const ghostOk = (f: Fleet) => !f.banner?.boons.includes('ghosts') || seesFleet(startState, p, f);
   const startFleets = structuredClone((r.startFleets ?? []).filter(f => f.owner === p || (seesAtStart(f.region) && ghostOk(f))));
-  for (const f of startFleets) if (f.owner !== p) maskRivalFleet(f);
+  for (const f of startFleets) if (f.owner !== p) maskRivalFleet(f, !!s.live);
   const seen = new Set<RegionId>();
   for (const rid of cov) if (sees(rid)) seen.add(rid);
   for (const e of events) if (e.k === 'battle') seen.add(e.region);

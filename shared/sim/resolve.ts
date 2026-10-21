@@ -228,7 +228,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       if (by === -1) {
         if (r.owner !== null && R.wardenHunt.razes) {
           const victim = r.owner;
-          r.owner = null; r.garrison = 0; r.project = null; r.dev = Math.max(1, r.dev - 1);
+          r.owner = null; r.garrison = 0; r.project = null; r.dev = Math.max(Math.min(1, r.dev), r.dev - 1);   // never raises a 0-citizen system
           if (r.story) { r.story.owners.push({ p: null, turn: s.turn, how: 'warden' }); r.story.pendingCalling = null; if (r.story.calling) r.story.calling.dormantUntil = s.turn + SR(s).dormantTurns; }
           s.chronicle.push({ turn: s.turn, region: r.id, players: [victim], major: true, text: `The Warden razes ${r.name}. ${s.players[victim].name} loses it.` });
           emit({ k: 'note', pulse, owner: null, text: `The Warden razes ${r.name}.`, region: r.id });
@@ -509,6 +509,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
             const g = s.fleets.find(x => x.id === id && x.owner === p && x.ships.length && !x.limping);
             if (!g || g === f || (g.region !== o.target && !(s.regions[g.region].links ?? s.regions[g.region].neighbors).includes(o.target))) continue;
             if (sig && (isDugIn(s, g) || postureOf(s, g) === 'guarded' || postureOf(s, g) === 'ambush')) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} holds its posture and can't join the assault` }); continue; }
+            if (g.bornTurn === s.turn && s.turn > 1) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} was only just formed and can't join the assault` }); continue; }
             if (g.ordersThisTurn >= R.orders.maxPerFleet) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is exhausted (max ${R.orders.maxPerFleet} orders per turn)` }); continue; }
             if (g.ordersThisTurn > 0) s.players[p].res.credits -= R.orders.repeatFleetCredits;
             g.ordersThisTurn++;
@@ -612,9 +613,12 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     // movement signals (destination + arrival + strength band)
     for (const m of movers) {
       if (!m.path.length) continue;
-      const dest = m.dest ?? m.path[m.path.length - 1];
+      // WEGO: where it gets to this turn (a standing route's far end is its owner's secret, not something sensors see)
+      const end = m.path[m.path.length - 1];
+      const dest = live ? (m.dest ?? end) : end;
+      const onward = !live && m.dest !== undefined && m.dest !== end;
       const txt = live ? `Fleet movement (${strengthBand(m.f.ships.length)}) ${s.regions[m.f.region].name} → ${s.regions[dest].name}, heading onward`
-        : `Fleet movement (${strengthBand(m.f.ships.length)}) ${s.regions[m.f.region].name} → ${s.regions[dest].name}, ${R.orders.pulses > 1 ? `arriving pulse ${pulse}` : 'arriving this turn'}`;
+        : `Fleet movement (${strengthBand(m.f.ships.length)}) ${s.regions[m.f.region].name} → ${s.regions[dest].name}, ${onward ? 'still under way' : R.orders.pulses > 1 ? `arriving pulse ${pulse}` : 'arriving this turn'}`;
       const loose = soul && hasBane(s, m.f, 'looselips');
       for (const o of s.players) {
         if (o.id === m.p) continue;
@@ -693,6 +697,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
           // star systems: a black hole's gravity well stops every fleet entering it (even a Hyperjump). Its route
           // (and a Seize beyond) carries on next turn: the path it took this turn ends here.
           m.path = m.path.slice(0, m.idx);
+          // legacy pulsed turns have no standing route to carry a Seize on: say it was lost, never drop it silently
+          if (m.seize !== null && !wegoRoutes && !live) fail(pulse, m.p, m.o, `held by the gravity well at ${r.name} short of ${s.regions[m.seize].name}`);
           m.seize = null;
           emit({ k: 'blocked', pulse, fleet: m.f.id, owner: m.f.owner, at: r.id, reason: 'gravity well' });
         }
@@ -766,7 +772,12 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         continue;
       }
       // star systems: seizing a system that pays you tribute breaks the terms (like a pact: Oathbreaker)
-      if (r.owner !== null && hostile(s, p, r.owner) && tributeCovers(s, p, r.owner, target)) breakTribute(s, p, target, pulse, emit);
+      // (also when a pact was signed since the terms began: the tribute ends either way, never left behind)
+      if (r.owner !== null && tributeCovers(s, p, r.owner, target)) {
+        // terms accepted this very turn: the Seize, sent before the answer, stands down instead of making an Oathbreaker
+        if (r.tribute!.since === s.turn && r.tribute!.to === p) { fail(pulse, p, m.o, `${s.players[r.owner].name} accepted your terms for ${r.name}`); continue; }
+        breakTribute(s, p, target, pulse, emit);
+      }
       if (r.owner !== null && !hostile(s, p, r.owner)) {
         const victim = r.owner;
         const broken = s.pacts.find(x => (x.a === p && x.b === victim) || (x.a === victim && x.b === p));
@@ -828,6 +839,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         for (const to of (best ?? []).slice(0, R.wardenHunt.stepsPerTurn)) {
           emit({ k: 'move', pulse: endPulse, step: 9, fleet: warden.id, owner: -1, from: warden.region, to, ships: warden.ships.length });
           warden.region = to;
+          if (gravityWell(s, to)) break;   // a black hole's gravity well stops every fleet entering it, the Warden too
         }
         if (best?.length) signal(endPulse, null, warden.region, `THE WARDEN advances on ${s.players[lead].name}: now at ${s.regions[warden.region].name}`, { force: true });
       }
@@ -914,7 +926,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       }
     }
     // star systems: an uncontested Core grows a citizen every few turns (docs/SYSTEMS.md)
-    if (r.owner !== null) growSystem(s, r, !!underAttack || s.fleets.some(f => f.region === r.id && f.ships.length && hostile(s, f.owner, r.owner!, r.id) && f.ships.some(sh => sh.cls !== 'scout')), endPulse, emit);
+    if (r.owner !== null) growSystem(s, r, !!underAttack || s.fleets.some(f => f.region === r.id && f.ships.length && hostile(s, f.owner, r.owner!, r.id) && !f.limping && f.ships.some(sh => sh.sys.weapons && sh.cls !== 'scout')), endPulse, emit);   // as contest.ts counts a warship
     for (let i = 0; i < 3; i++) if (r.loyalty[i] > 0) r.loyalty[i] = Math.max(0, r.loyalty[i] - R.influence.decayPerTurn);
   }
   // star systems: contested turns (refugees), occupations and tributes running out
@@ -1332,6 +1344,8 @@ function applyFree(s: GameState, rng: Rng, p: PlayerId, fa: Submission['free'][n
       f.ships = [];
       if ((f.oos ?? 0) > (into.oos ?? 0)) into.oos = f.oos;
       into.fatigued = into.fatigued || f.fatigued;
+      // LIVE (mid-cycle): ships that already acted this cycle don't get fresh orders by changing fleets
+      into.ordersThisTurn = Math.max(into.ordersThisTurn ?? 0, f.ordersThisTurn ?? 0);
       const E = engagementAt(s, f.region);
       if (E && E.fleets.includes(f.id) && E.fleets.includes(into.id)) E.startHp[into.id] = (E.startHp[into.id] ?? 0) + (E.startHp[f.id] ?? 0);
       if (f.commander.alive) (s.players[p].reserveCommanders ??= []).push(f.commander);
@@ -1540,6 +1554,12 @@ export function checkVictory(s: GameState, endOfTurn = true) {
   const V = s.rules.victory;
   const live = s.players.filter(p => !p.eliminated);
   if (live.length === 1) { s.winner = live[0].id; s.winReason = 'Last empire standing.'; return; }
+  if (!live.length) {
+    // everyone fell on the same turn (the Warden razing the last worlds...): the most VP takes what is left
+    const top = s.players.slice().sort((a, b) => b.vp - a.vp || a.id - b.id)[0];
+    if (top) { s.winner = top.id; s.winReason = 'No empire left standing: the most VP.'; }
+    return;
+  }
   if (V.holdAllCrownsWins) {
     const crowns = s.regions.filter(r => r.kind === 'crown');
     const o = crowns[0]?.owner;
