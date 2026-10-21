@@ -4,3 +4,4 @@ data
 *.log
 .DS_Store
 /*.png
+scripts/.tmp/

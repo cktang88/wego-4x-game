@@ -80,12 +80,6 @@ export function nebulaPrint(minX: number, minY: number, maxX: number, maxY: numb
     D[i] = col[0]; D[i + 1] = col[1]; D[i + 2] = col[2]; D[i + 3] = a * 255;
   }
   g.putImageData(img, 0, 0);
-  // printed stars and a few star clusters (the cloth's printed galaxy)
-  for (let i = 0; i < (W * H) / 90; i++) {
-    const x = r() * W, y = r() * H, m = r();
-    g.fillStyle = css(mix([200, 210, 255], [255, 230, 200], r()), 0.25 + m * 0.5);
-    g.fillRect(x, y, m > 0.95 ? 1.4 : 0.8, m > 0.95 ? 1.4 : 0.8);
-  }
   return { c, x: minX, y: minY, w: W * S, h: H * S };
 }
 

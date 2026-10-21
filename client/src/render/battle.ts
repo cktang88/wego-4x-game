@@ -996,8 +996,9 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       if (e < 0.9) {
         const k = e / 0.9;
         g.save(); g.globalCompositeOperation = 'lighter';
-        g.strokeStyle = rgba(color, 0.7 * (1 - k)); g.lineWidth = 2 * (1 - k) + 0.5;
-        g.beginPath(); g.ellipse(ps.x, ps.y, size * (1 + 5 * (1 - (1 - k) ** 2)), size * (1 + 5 * (1 - (1 - k) ** 2)) * 0.55, 0, 0, Math.PI * 2); g.stroke();
+        const rr = size * (1 + 2.6 * (1 - (1 - k) ** 2));
+        g.strokeStyle = rgba(color, 0.55 * (1 - k) ** 2); g.lineWidth = 2 * (1 - k) + 0.5;
+        g.beginPath(); g.ellipse(ps.x, ps.y, rr, rr * 0.55, 0, 0, Math.PI * 2); g.stroke();
         g.restore();
       }
       // embers

@@ -67,7 +67,21 @@ for (const tag of devs) {
     await shot('battle-strat', { cam: { Rs: isPh ? 45 : 60, region: info.eng } });
     await shot('siege-detail', { cam: { Rs: isPh ? 210 : 280, region: info.eng }, opts: { selRegion: info.eng } });
   }
-  if (info.mover !== null) await shot('lanes-moving', { cam: { Rs: isPh ? 120 : 150, region: info.mover } });
+  // a fleet flying a hyperlane: patch the harness input so one of your fleets glides capital -> neighbour and back
+  {
+    const lane = await page.evaluate(() => {
+      const H = window.H, s = H.full, f = s.fleets.find(x => x.owner === 0);
+      const a = s.regions[f.region], nb = (a.links ?? a.neighbors).map(i => s.regions[i]).find(r => r.kind !== 'void') ?? s.regions[a.neighbors[0]];
+      const b = nb.kind === 'lane' ? s.regions[nb.lane.a === a.id ? nb.lane.b : nb.lane.a] : nb;
+      const orig = H.input.bind(H);
+      H.input = now => { const I = orig(now); const d = I.fleets.find(x => x.id === f.id); if (d && H.flyOn) { const t = (now % 2600) / 2600, k = t < 0.5 ? t * 2 : 2 - t * 2, e = k * k * (3 - 2 * k); const wob = Math.sin(e * Math.PI) * 60; d.pos = { x: a.site.x + (b.site.x - a.site.x) * e - (b.site.y - a.site.y) / 900 * wob, y: a.site.y + (b.site.y - a.site.y) * e + (b.site.x - a.site.x) / 900 * wob }; d.region = undefined; } return I; };
+      return { mid: { x: (a.site.x + b.site.x) / 2, y: (a.site.y + b.site.y) / 2 } };
+    });
+    await page.evaluate(() => { window.H.flyOn = true; });
+    await shot('lanes-moving', { cam: { Rs: isPh ? 120 : 150, center: lane.mid }, wait: 1500 });
+    await shot('lanes-moving2', { cam: { Rs: isPh ? 200 : 240, center: lane.mid }, wait: 900 });
+    await page.evaluate(() => { window.H.flyOn = false; });
+  }
   await shot('expanded', { cam: { Rs: isPh ? 120 : 130, region: info.stack }, opts: { expanded: info.stack } });
   await shot('lens-military', { cam: { Rs: isPh ? 100 : 110, region: info.cap }, opts: { lens: 'military' } });
   // effects at the capital

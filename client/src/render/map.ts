@@ -874,7 +874,8 @@ export class MapRenderer {
         }
         ctx.restore();
       }
-      if (r.kind === 'relic' && r.relic) {
+      if (r.kind === 'relic' && r.relic && bt !== 'detail') drawGlow(ctx, p.x + pr * 0.9, p.y + pr * 0.3, 7 * S, [200, 230, 255], 0.55);
+      if (r.kind === 'relic' && r.relic && bt === 'detail') {
         // an unexcavated relic: a glinting monolith drifting by the dark star
         const mx = p.x + pr * 1.1, my = p.y + pr * 0.5;
         ctx.save(); ctx.translate(mx, my); ctx.rotate(0.35);
@@ -1341,7 +1342,7 @@ export class MapRenderer {
       }
       tr.x = f.pos.x; tr.y = f.pos.y; tr.draw = f; tr.color = color;
       if (!reduced && tr.moving) tr.trail.push({ x: f.pos.x, y: f.pos.y, t: now });
-      while (tr.trail.length && now - tr.trail[0].t > 420) tr.trail.shift();
+      while (tr.trail.length && now - tr.trail[0].t > 700) tr.trail.shift();
       if (reduced) tr.trail.length = 0;
     }
     for (const id of this.tracks.keys()) if (!seen.has(id)) this.tracks.delete(id);
@@ -1476,10 +1477,10 @@ export class MapRenderer {
       const lift = -this.miniGeom().stand * S;
       for (let i = 1; i < pts.length; i++) {
         const kk = i / pts.length;
-        const age = clamp01(1 - (now - pts[i].t) / 420);
-        ctx.globalAlpha = 0.5 * kk * age;
+        const age = clamp01(1 - (now - pts[i].t) / 700);
+        ctx.globalAlpha = 0.75 * kk * age;
         ctx.strokeStyle = eng;
-        ctx.lineWidth = S * (1 + 4 * kk);
+        ctx.lineWidth = S * (1.5 + 5 * kk);
         ctx.beginPath(); ctx.moveTo(pts[i - 1].x, pts[i - 1].y + lift); ctx.lineTo(pts[i].x, pts[i].y + lift); ctx.stroke();
       }
     }
@@ -1585,7 +1586,7 @@ export class MapRenderer {
     if (tier === 'operational') return { rb: 16, len: 34, stand: 13, max: 3 };
     const K = Math.pow(this.artK(), 0.75);
     void n;
-    return { rb: 19 * K, len: 36 * K, stand: 15 * K, max: 6 };
+    return { rb: 19 * K, len: 36 * K, stand: 15 * K, max: 8 };
   }
 
   /** The hull classes of a token's fleets, biggest first. */
@@ -1735,8 +1736,32 @@ export class MapRenderer {
     const owner = I.owners[r.id];
     const garrison = r.garrison > 0 ? { owner: owner ?? -2, color: this.regionColor(st, owner) } : null;
     const m = sides.length;
-    const R = pr + (64 + (m > 2 ? 10 : 0)) * K * S;
-    const angs = m === 1 ? [-2.3] : m === 2 ? [-2.62, -0.52] : Array.from({ length: m }, (_, i) => -2.85 + (i * 2.55) / Math.max(1, m - 1));
+    const R = pr + (58 + (m > 2 ? 8 : 0)) * K * S;
+    // pick each side's station around the world: preferred angles first, avoiding banners, plates and each other
+    const G0 = this.miniGeom();
+    const boxAt = (a: number) => {
+      const x = r.site.x + Math.cos(a) * R, y = r.site.y + Math.sin(a) * R * 0.8;
+      const w = (G0.rb * 2.2 + 40) * K * S, h = (G0.stand + G0.len) * K * S;
+      return { x: x - w / 2, y: y - h, w, h: h + G0.rb * 0.6 * K * S };
+    };
+    const over = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+    const prefs = m === 1 ? [-2.3, -0.84, -1.57, -2.85, -0.3, 2.6, 0.55] : m === 2 ? [-2.62, -0.52, -1.57, -2.95, -0.2, 2.6, 0.55] : [-2.85, -1.57, -0.3, -2.2, -0.95, 2.6, 0.55];
+    const angs: number[] = [];
+    const taken: { x: number; y: number; w: number; h: number }[] = [];
+    for (let i = 0; i < m; i++) {
+      let best = prefs[i % prefs.length], bs = Infinity;
+      prefs.forEach((a, j) => {
+        if (angs.includes(a)) return;
+        const b = boxAt(a);
+        let sc = j * 0.02 * b.w * b.h;
+        for (const o of this.labelBoxes) sc += over(b, o);
+        for (const o of taken) sc += over(b, o) * 3;
+        // keep opposing sides on opposite flanks when possible
+        if (i === 1 && angs.length && Math.sign(Math.cos(a)) === Math.sign(Math.cos(angs[0]))) sc += b.w * b.h * 0.3;
+        if (sc < bs) { bs = sc; best = a; }
+      });
+      angs.push(best); taken.push(boxAt(best));
+    }
     const pos = sides.map((t, i) => ({ t, x: r.site.x + Math.cos(angs[i]) * R, y: r.site.y + Math.sin(angs[i]) * R * 0.8 }));
     // facing: toward the world (sieges) or toward the middle of the enemy line
     const tgtOf = (i: number) => {

@@ -28,8 +28,14 @@ function bakeBase(team: string, rx: number, sel: boolean, oos: boolean, big: boo
   g.strokeStyle = 'rgba(0,0,6,0.6)'; g.lineWidth = 1; g.beginPath(); g.ellipse(cx, cy + t, rx, ry, 0, 0, Math.PI); g.stroke();
   // top face: smoked acrylic with a faint printed hex
   const top = g.createRadialGradient(cx - rx * 0.3, cy - ry * 0.4, 0, cx, cy, rx);
-  top.addColorStop(0, 'rgba(46,52,74,0.96)'); top.addColorStop(1, 'rgba(10,12,22,0.96)');
+  top.addColorStop(0, 'rgba(70,78,104,0.55)'); top.addColorStop(0.6, 'rgba(14,16,28,0.6)'); top.addColorStop(1, 'rgba(6,8,16,0.75)');
   g.fillStyle = top; g.beginPath(); g.ellipse(cx, cy, rx, ry, 0, 0, TAU); g.fill();
+  // a faint printed inner ring and a lamp reflection across the acrylic
+  g.strokeStyle = css(T, 0.35); g.lineWidth = Math.max(0.6, rx * 0.025);
+  g.beginPath(); g.ellipse(cx, cy, rx * 0.62, ry * 0.62, 0, 0, TAU); g.stroke();
+  const refl = g.createLinearGradient(cx - rx, cy - ry, cx + rx * 0.2, cy + ry);
+  refl.addColorStop(0, 'rgba(255,250,235,0)'); refl.addColorStop(0.42, 'rgba(255,250,235,0.1)'); refl.addColorStop(0.5, 'rgba(255,250,235,0)');
+  g.fillStyle = refl; g.beginPath(); g.ellipse(cx, cy, rx * 0.95, ry * 0.95, 0, 0, TAU); g.fill();
   // enamel rim in the owner colour, lit from the lamp side
   const rw = Math.max(1.6, rx * (big ? 0.11 : 0.2));
   const rim = g.createLinearGradient(cx - rx * 0.6, cy - ry, cx + rx * 0.6, cy + ry);

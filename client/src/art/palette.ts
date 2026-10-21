@@ -48,7 +48,7 @@ export function scheme(owner: number | null | undefined, teamHex: string): Schem
   switch (f) {
     case 'azure': s = {
       faction: f, team,
-      hull: saturate(mix(team, [26, 48, 80], 0.7), 0.95), hull2: mix(team, [30, 38, 52], 0.84),
+      hull: saturate(mix(team, [44, 84, 132], 0.58), 1.0), hull2: mix(team, [70, 82, 100], 0.72),
       trim: SILVER, dark: [10, 18, 30], accent: shade(team, -0.05), engine: mix(team, [210, 250, 255], 0.45), window: [190, 245, 255], weapon: mix(team, [230, 255, 255], 0.35),
     }; break;
     case 'crimson': s = {
