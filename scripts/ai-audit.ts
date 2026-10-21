@@ -18,6 +18,7 @@ const reasons: Record<string, number> = {};
 let mutations = 0;
 const bump = (m: Record<string, Record<string, number>>, l: string, k: string) => { (m[l] ??= {})[k] = (m[l][k] ?? 0) + 1; };
 const typeOf = (text: string) => {
+  if (text.startsWith('Posture (')) return 'posture';   // signature: a posture that contradicted its fleet's orders
   const m = /^(\w[\w ]*?) failed:/.exec(text);
   if (m) return m[1];
   if (text.includes('exhausted')) return 'Seize(also)';
@@ -42,7 +43,7 @@ if (!liveTicks) {
       for (const p of s.players) {
         subs[p.id] = plan(s, p.id);
         for (const o of subs[p.id].orders) if (o) bump(issued, p.aiLevel, o.type);
-        for (const f of subs[p.id].free) if (f.type === 'research') bump(issued, p.aiLevel, 'research');
+        for (const f of subs[p.id].free) if (['research', 'posture', 'wposture', 'fate'].includes(f.type)) bump(issued, p.aiLevel, f.type);
       }
       s = resolveTurn(s, subs);
       for (const e of s.last!.events) if (e.k === 'fail' && e.owner >= 0) {

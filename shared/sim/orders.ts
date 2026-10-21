@@ -7,6 +7,7 @@ import { classBlock, moveNeighbors, hasLaw, hasTech, lawBlock, lawCost, lookup, 
 import { LAW } from '../config/empire.ts';
 import { DEEDS } from '../config/content.ts';
 import { soulOn, SR, bannersFree, bannerLimit, resolveFound, razeBlock, soulShipDiscount, hasBane } from './soul.ts';
+import { isDugIn } from './signature.ts';
 
 export const ORDER_INFO: Record<Order['type'], { name: string; icon: string; help: string }> = {
   move:      { name: 'Move',      icon: '➤', help: 'Move a fleet up to its speed in regions. Overdrive: +1 range, but the fleet is fatigued next turn (weaker attacks).' },
@@ -131,6 +132,8 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
   }
   if (usesFleet && fleet!.bornTurn === s.turn && s.turn > 1) return 'this fleet was only just formed and can act next turn';
   if (usesFleet && fleet!.ordersThisTurn > s.rules.orders.maxPerFleet) return `a fleet can take at most ${s.rules.orders.maxPerFleet} orders per turn`;
+  // Signature: a Guarded fleet nobody came for is dug in: it can't move this turn
+  if (usesFleet && (o.type === 'move' || o.type === 'seize') && isDugIn(s, fleet!)) return 'dug in: it cannot move this turn';
   // ids may come from untrusted clients: only plain integer indices name a region
   const reg = (rid: unknown) => (Number.isInteger(rid) ? s.regions[rid as number] : undefined);
   const own = (rid: number) => reg(rid)?.owner === p;

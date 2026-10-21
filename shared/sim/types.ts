@@ -39,6 +39,23 @@ export interface Region {
   vein?: string | null;     // strategic resource deposit (config/empire.ts VEINS)
   /** Soul layer: the world's ledger, epithet, calling, tenure and deeds (public). Absent = no history yet. */
   story?: RegionStory;
+  // ---- Signature mechanics (docs/SIGNATURE.md). All optional.
+  /** This turn's world posture (secret to its owner; cleared at the end of the turn / LIVE cycle). */
+  wposture?: RegionPostureState | null;
+  /** Call the Levies, wrong: the system yields nothing through this turn (inclusive). Secret to its owner. */
+  idleUntil?: number | null;
+  /** Fate (Surge): the turn this system produces double (public). */
+  surge?: number | null;
+}
+
+/** A world posture in force this turn: what it bet on and how the bet is going. */
+export interface RegionPostureState {
+  kind: WorldPosture;
+  turn: number;
+  by: PlayerId;
+  outcome?: PostureOutcome;
+  boosted?: boolean;          // levies: the garrison was raised
+  rounds?: number;            // garrison rounds fought this turn (gates: it holds fire in the first)
 }
 
 export interface Subsystems { engines: boolean; weapons: boolean; shields: boolean } // true = working
@@ -60,6 +77,26 @@ export interface Ship {
 }
 
 export type Stance = 'aggressive' | 'defensive' | 'evasive';
+/** Signature: a fleet's secret posture for this turn (docs/SIGNATURE.md). */
+export type Posture = 'steady' | 'guarded' | 'running' | 'charge' | 'ambush';
+/** Signature: a system's secret posture for this turn. */
+export type WorldPosture = 'levies' | 'scorch' | 'gates';
+export type PostureOutcome = 'called' | 'caught' | 'none';
+export type FateUse = 'laststand' | 'surge' | 'hyperjump' | 'twist' | 'rally';
+/** Signature: per-turn bookkeeping for a fleet's posture and Fate (secret; reset each turn / LIVE cycle). */
+export interface PostureFx {
+  turn: number;
+  set?: boolean;              // a posture was chosen this turn
+  moved?: boolean;            // it moved this turn
+  contact?: boolean;          // a hostile fleet came into its system this turn (Guarded / Ambush)
+  fought?: boolean;           // it fought a battle this turn
+  rounds?: number;            // combat rounds it has fought this turn
+  outcome?: PostureOutcome;   // how its posture's bet went (once decided)
+  broken?: boolean;           // Charge: the defender was braced
+  twisted?: boolean;          // Twist of Fate already spent its reroll
+  jumped?: boolean;           // LIVE Hyperjump already taken
+  checked?: boolean;          // the posture was checked against the fleet's orders
+}
 export type TargetPriority = 'weakest' | 'strongest' | 'cheapest' | 'garrison';
 
 export interface Doctrine {
@@ -113,6 +150,17 @@ export interface Fleet {
   tally?: FleetTally;                  // how it fought (shapes its honours)
   saga?: SagaBeat[];                   // its story so far (public, capped)
   sulkUntil?: number;                  // Grudge-bound: boons fail until this turn
+  // ---- Signature mechanics (docs/SIGNATURE.md). All optional.
+  /** This turn's posture (secret: rivals see it only with a fleet in the same system or a scan over it). Absent = Steady. */
+  posture?: Posture | null;
+  /** Posture/Fate bookkeeping for this turn (secret). */
+  postureFx?: PostureFx | null;
+  /** Guarded and nobody came: dug in, it cannot move during this turn (secret). */
+  dugIn?: number | null;
+  /** Ambush and nobody came: exposed (seen by every house) and fatigued during this turn (public). */
+  exposed?: number | null;
+  /** A Fate token spent on this fleet this turn (public). */
+  fate?: { use: FateUse; turn: number } | null;
 }
 
 export interface Banner {
@@ -195,6 +243,8 @@ export interface Engagement {
   firstBlood: boolean;
   garrisonStart: number;
   joined?: Record<number, number>;      // fleet id -> engagement round count when it joined (its first round is the next)
+  /** Signature: owners who spent a battle Fate (Last Stand / Twist of Fate) in this engagement (one per side). */
+  fate?: number[];
 }
 
 /** LIVE mode: a fleet in transit. It gains `speed` movement points per tick and steps one region per `stepCost`. */
@@ -239,6 +289,15 @@ export interface Player {
   vendettas?: { vs: PlayerId; until: number; region: RegionId }[];     // razed by `vs`: bonus against them (public)
   pactWords?: Record<number, string>;  // words attached to this turn's pact offers (to that partner only)
   dispatchTurn?: number;               // last edition this house planted a dispatch in
+  // ---- Signature mechanics
+  /** Fate tokens left (public). Absent = rules.signature.fateStart (old saves). */
+  fate?: number;
+  /** Got the once-per-game comeback token (public). */
+  fateBonus?: boolean;
+  /** Fate spent this turn (for rules.signature.fatePerTurn). */
+  fateSpent?: { turn: number; n: number } | null;
+  /** Postures of this house that rivals have seen revealed (public history: how often it braces, charges, lies in wait...). */
+  postureLog?: Record<string, number>;
 }
 
 export interface Edict {
@@ -285,7 +344,10 @@ export type FreeAction =
   | { type: 'honour'; fleet: FleetId; pick: string | number }    // Soul: resolve a pending honour (boon id or option index)
   | { type: 'calling'; region: RegionId; pick: string | number } // Soul: resolve a pending calling
   | { type: 'raze'; region: RegionId }                           // Soul: raze a world you captured in the turn just resolved
-  | { type: 'dispatch'; text: string; as?: 'house' | 'source' };  // Soul: plant one dispatch in the next Herald
+  | { type: 'dispatch'; text: string; as?: 'house' | 'source' }  // Soul: plant one dispatch in the next Herald
+  | { type: 'posture'; fleet: FleetId; posture: Posture }        // Signature: this turn's fleet posture (secret)
+  | { type: 'wposture'; region: RegionId; posture: WorldPosture } // Signature: this turn's posture for a system you own (secret)
+  | { type: 'fate'; use: FateUse; fleet?: FleetId; region?: RegionId };  // Signature: spend a Fate token (public)
 
 export interface Submission {
   orders: OrderSlots;
@@ -317,9 +379,17 @@ export type GameEvent =
   | { k: 'note'; pulse: number; owner: PlayerId | null; text: string; region?: RegionId }
   | { k: 'rout'; pulse: number; fleet: FleetId; owner: PlayerId; from: RegionId; to: RegionId; by: PlayerId | -1; scar: string | null }
   /** Soul-layer story beats (vows, honours, deeds, callings, debts, razing...). owner null = public. */
-  | { k: 'soul'; pulse: number; kind: string; owner: PlayerId | null; text: string; region?: RegionId; fleet?: FleetId; players?: PlayerId[] };
+  | { k: 'soul'; pulse: number; kind: string; owner: PlayerId | null; text: string; region?: RegionId; fleet?: FleetId; players?: PlayerId[] }
+  /**
+   * Signature: a posture's bet was decided (CALLED IT / CAUGHT OUT in the replay). `fleet` is absent for a
+   * world posture. Visibility: the owner always; `public` = everyone; `private` = the owner only; otherwise
+   * the houses in `with` (who fought it) and anyone whose sensors covered `region`.
+   */
+  | { k: 'posture'; pulse: number; fleet?: FleetId; owner: PlayerId; posture: Posture | WorldPosture; outcome: PostureOutcome; region: RegionId; text: string; with?: PlayerId[]; public?: boolean; private?: boolean }
+  /** Signature: a Fate token was spent (public). use 'bonus' = a house far behind GAINED its comeback token. */
+  | { k: 'fate'; pulse: number; owner: PlayerId; use: FateUse | 'bonus'; fleet?: FleetId; region?: RegionId; text: string; left: number };
 
-export interface ShotRec { from: number; to: number; dmg: number; crit?: keyof Subsystems; kill?: boolean; miss?: boolean }
+export interface ShotRec { from: number; to: number; dmg: number; crit?: keyof Subsystems; kill?: boolean; miss?: boolean; first?: boolean; twist?: boolean }  // first: a first-strike shot; twist: negated by Twist of Fate
 export interface BattleSide {
   owner: PlayerId | -1;        // -1 = neutral garrison
   fleets: { id: FleetId; name: string; commander: string }[];

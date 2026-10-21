@@ -30,11 +30,12 @@ import { fleetSpeed, strengthBand, findPath } from './graph.ts';
 import { canAfford, orderCost, pay, validateOrder, ORDER_INFO, MAX_JOINERS } from './orders.ts';
 import { Rng } from './rng.ts';
 import { maxGarrison, newFleet, newShip } from './setup.ts';
-import type { TickOpts, BattleReport, Engagement, Doctrine, Fleet, FoundSpec, FreeAction, GameEvent, GameState, Order, PlayerId, RegionId, Signal, Submission, TurnResult, VowKind } from './types.ts';
+import type { TickOpts, BattleReport, Engagement, Doctrine, Fleet, FoundSpec, FreeAction, GameEvent, GameState, Order, PlayerId, RegionId, Signal, Submission, TurnResult, VowKind, Posture, WorldPosture, FateUse } from './types.ts';
 import { coverage, seesFleetsIn } from './visibility.ts';
 import { soulOn, SR, ensureSoul, bannersFree, resolveFound, raiseBanner, applyRout, onFleetLost, catchLimping, onCapture, raze, razeBlock, vowBlock, swearVow, pickHonour, pickCalling, soulEndTurn, soulReigns, soulRegen, soulYield, soulUpkeep, hasBoon, hasBane, breakVow, sagaBeat, beat, headline, addDeed, archiveFleet, cleanText, isPicket } from './soul.ts';
 import { makeEdition, queueDispatch } from './herald.ts';
 import { traitFx, traitHpMult } from './shiptraits.ts';
+import { sigOn, ensureSig, fx, postureOf, effStance, postureSpeed, isDugIn, hasHyperjump, ambushAt, noteArrivals, checkPostures, postureBlock, setPosture, wpostureBlock, setWorldPosture, fateBlock, spendFate, scorchedOnCapture, scorchAftermath, gatesOpenFor, gatesHost, sigEndTurn, regionIdle, regionSurge, SG, POSTURE_IDS, WORLD_POSTURE_IDS, FATE_IDS } from './signature.ts';
 import { BOONS, DEEDS } from '../config/content.ts';
 
 export function emptySubmission(s: GameState): Submission {
@@ -58,6 +59,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   const signals: Signal[] = [];
   const subs: Record<number, Submission> = {};
   const soul = !!ensureSoul(s);
+  const sig = sigOn(s);
+  if (sig) ensureSig(s);
   for (const p of s.players) subs[p.id] = sanitize(s, submissions[p.id], live);
   s.log.push(live ? { turn: s.turn, submissions: structuredClone(subs), tick: { ...tick! } } : { turn: s.turn, submissions: structuredClone(subs) });
 
@@ -95,6 +98,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       if (TECH[fa.tech]?.tier === 4) s.chronicle.push({ turn: s.turn, players: [p.id], major: true, text: `${p.name} completes ${TECH[fa.tech].name}. No other empire can ever have it.` });
     } else if (fa.type === 'revoke') freeFails.push({ k: 'law', pulse: 0, owner: p.id, law: fa.law, revoked: true });
   }
+  // Signature: postures that contradict their fleet's orders fall back to Steady (a Charge needs a Seize...)
+  if (sig) checkPostures(s, subs, e => freeFails.push(e));
 
   // iterate regions from a turn-dependent offset so no part of the map always resolves first
   const rOff = (s.turn * 7) % s.regions.length;
@@ -181,6 +186,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   const roundsNow = live ? R.combat.roundsPerPulse : Math.max(1, Math.round((R.combat.roundsPerTurn ?? R.combat.roundsPerPulse * R.orders.pulses) / Math.max(1, R.orders.pulses)));
   /** Combat step of a pulse: every engagement fights its rounds, then finished sieges capture. */
   const combatPhase = (pulse: number, cameFrom: Map<number, RegionId>) => {
+    if (sig) noteArrivals(s, cameFrom);
     for (const r of rotatedRegions) {
       // Soul: a limping fleet caught by any hostile fleet (or a hostile garrison) dies
       if (soul) for (const f of s.fleets.filter(x => x.limping && x.region === r.id && x.ships.length)) {
@@ -471,6 +477,13 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     const routed = new Set<Fleet>();
     for (const { p, o } of orders) {
       if (o.type !== 'move' && o.type !== 'seize') continue;
+      // Signature: a Guarded fleet holds its ground (no attacking); a dug-in fleet can't move; an ambush that moves is over
+      if (sig) {
+        const pf = s.fleets.find(x => x.id === o.fleet && x.owner === p);
+        if (pf && isDugIn(s, pf)) { fail(pulse, p, o, `${pf.name} is dug in and cannot move this turn`); continue; }
+        if (pf && o.type === 'seize' && postureOf(s, pf) === 'guarded') { fail(pulse, p, o, `${pf.name} is Guarded: it holds its ground and cannot attack this turn`); continue; }
+        if (pf && postureOf(s, pf) === 'ambush') pf.posture = null;
+      }
       if (live) {
         // LIVE: a Move/Seize sets the fleet travelling; it advances as it earns movement points each tick
         const err = validateOrder(s, p, o.type === 'seize' ? { ...o, also: undefined } : o);
@@ -485,6 +498,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
           for (const id of [...new Set(o.also ?? [])].filter(id => id !== o.fleet).slice(0, MAX_JOINERS)) {
             const g = s.fleets.find(x => x.id === id && x.owner === p && x.ships.length && !x.limping);
             if (!g || g === f || (g.region !== o.target && !(s.regions[g.region].links ?? s.regions[g.region].neighbors).includes(o.target))) continue;
+            if (sig && (isDugIn(s, g) || postureOf(s, g) === 'guarded' || postureOf(s, g) === 'ambush')) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} holds its posture and can't join the assault` }); continue; }
             if (g.ordersThisTurn >= R.orders.maxPerFleet) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is exhausted (max ${R.orders.maxPerFleet} orders per turn)` }); continue; }
             if (g.ordersThisTurn > 0) s.players[p].res.credits -= R.orders.repeatFleetCredits;
             g.ordersThisTurn++;
@@ -507,6 +521,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
           for (const id of [...new Set(o.also ?? [])].filter(id => id !== o.fleet).slice(0, MAX_JOINERS)) {
             const g = s.fleets.find(x => x.id === id && x.owner === p && x.ships.length && !x.limping);
             if (!g || g === f || routed.has(g)) continue;
+            if (sig && (isDugIn(s, g) || postureOf(s, g) === 'guarded' || postureOf(s, g) === 'ambush')) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} holds its posture and can't join the assault` }); continue; }
             if (g.bornTurn === s.turn && s.turn > 1) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} was only just formed and can't join the assault` }); continue; }
             if (g.region !== o.target && !(s.regions[g.region].links ?? s.regions[g.region].neighbors).includes(o.target)) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is not next to ${s.regions[o.target].name} and can't join the assault` }); continue; }
             if (g.ordersThisTurn >= R.orders.maxPerFleet) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is exhausted (max ${R.orders.maxPerFleet} orders per turn)` }); continue; }
@@ -528,6 +543,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         for (const id of [...new Set(o.also ?? [])].filter(id => id !== o.fleet).slice(0, MAX_JOINERS)) {
           const g = s.fleets.find(x => x.id === id && x.owner === p && x.ships.length && !x.limping);
           if (!g || g === f || movers.some(m => m.f === g)) continue;
+          if (sig && (isDugIn(s, g) || postureOf(s, g) === 'guarded' || postureOf(s, g) === 'ambush')) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} holds its posture and can't join the assault` }); continue; }
           if (g.bornTurn === s.turn && s.turn > 1) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} was only just formed and can't join the assault` }); continue; }
           if (g.region !== o.target && !(s.regions[g.region].links ?? s.regions[g.region].neighbors).includes(o.target)) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is not adjacent to ${s.regions[o.target].name} and can't join the assault` }); continue; }
           if (g.ordersThisTurn >= R.orders.maxPerFleet) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is exhausted (max ${R.orders.maxPerFleet} orders per turn)` }); continue; }
@@ -547,7 +563,10 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         const synth: Order = rt.seize !== null ? { type: 'seize', fleet: f.id, target: rt.seize } : { type: 'move', fleet: f.id, path: rt.path.slice() };
         if (!rt.path.length) { movers.push({ f, path: [], idx: 0, seize: rt.seize, p: f.owner, o: synth }); f.route = null; continue; }
         if (!moveNeighbors(s, f.owner, f.region).includes(rt.path[0])) { f.route = null; continue; }
-        const steps = Math.max(1, fleetSpeed(s, f)) + (rt.overdrive ? R.overdrive.speedBonus : 0);
+        if (sig && isDugIn(s, f)) continue;   // dug in: the route waits
+        // Signature: Guarded −1 / Running +2 steps; a Hyperjump adds its steps
+        const steps = Math.max(1, fleetSpeed(s, f)) + (rt.overdrive ? R.overdrive.speedBonus : 0) + (sig ? postureSpeed(s, f) + (hasHyperjump(s, f) ? SG(s).hyperjumpSteps : 0) : 0);
+        if (steps <= 0) continue;
         const path = rt.path.slice(0, steps);
         movers.push({ f, path, idx: 0, seize: path.length === rt.path.length ? rt.seize : null, p: f.owner, o: synth, dest: rt.path[rt.path.length - 1] });
         f.fortified = false;
@@ -561,7 +580,17 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         if (!rt.path.length) { movers.push({ f, path: [], idx: 0, seize: rt.seize, p: f.owner, o: synth }); f.route = null; continue; }
         // a route always continues from where the fleet is; if something moved it off its course, it stops
         if (!moveNeighbors(s, f.owner, f.region).includes(rt.path[0])) { f.route = null; continue; }
-        rt.mp += Math.max(1, fleetSpeed(s, f)) + (rt.overdrive ? R.overdrive.speedBonus : 0);
+        if (sig && isDugIn(s, f)) continue;
+        // Signature: a Hyperjump takes its extra steps at once, on the first tick it can
+        if (sig && hasHyperjump(s, f) && !fx(s, f).jumped) {
+          fx(s, f).jumped = true;
+          const path = rt.path.slice(0, 1 + SG(s).hyperjumpSteps);
+          rt.mp = 0;
+          movers.push({ f, path, idx: 0, seize: path.length === rt.path.length ? rt.seize : null, p: f.owner, o: synth, dest: rt.path[rt.path.length - 1] });
+          f.fortified = false;
+          continue;
+        }
+        rt.mp += Math.max(0, Math.max(1, fleetSpeed(s, f)) + (rt.overdrive ? R.overdrive.speedBonus : 0) + (sig ? postureSpeed(s, f) : 0));
         if (rt.mp < R.live.stepCost) continue;
         rt.mp -= R.live.stepCost;
         movers.push({ f, path: [rt.path[0]], idx: 0, seize: rt.path.length === 1 ? rt.seize : null, p: f.owner, o: synth, dest: rt.path[rt.path.length - 1] });
@@ -569,6 +598,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       }
     }
     const seizers = movers.filter(m => m.seize !== null);
+    if (sig) for (const m of movers) if (m.path.length) fx(s, m.f).moved = true;
     // movement signals (destination + arrival + strength band)
     for (const m of movers) {
       if (!m.path.length) continue;
@@ -596,7 +626,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         if (!hostile(s, a.f.owner, b.f.owner)) continue;
         if (a.f.limping || b.f.limping) continue;   // a limping fleet slips past (and is caught if it ends among enemies)
         if (a.path[a.idx] !== b.f.region || b.path[b.idx] !== a.f.region) continue;
-        if (a.f.doctrine.stance === 'evasive' && b.f.doctrine.stance === 'evasive') continue;
+        if (effStance(s, a.f) === 'evasive' && effStance(s, b.f) === 'evasive') continue;
         clashed.add(a); clashed.add(b);
         const ra = a.f.region, rb = b.f.region;
         emit({ k: 'clash', pulse, a: ra, b: rb, fleets: [a.f.id, b.f.id] });
@@ -643,7 +673,9 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         const r = s.regions[m.f.region];
         const enemyFleet = s.fleets.some(x => x !== m.f && x.region === r.id && x.ships.length && hostile(s, x.owner, m.f.owner));
         const enemyGarrison = r.owner !== null && hostile(s, r.owner, m.f.owner) && r.garrison > 0;
-        if (enemyFleet || enemyGarrison) {
+        // Signature: a Hyperjump slips through blockades, but never through an Ambush
+        const slips = sig && hasHyperjump(s, m.f) && !ambushAt(s, r.id, m.f.owner);
+        if ((enemyFleet || enemyGarrison) && !slips) {
           m.idx = m.path.length;
           m.stopped = true;
           emit({ k: 'blocked', pulse, fleet: m.f.id, owner: m.f.owner, at: r.id, reason: enemyFleet ? 'enemy fleet' : 'enemy garrison' });
@@ -653,10 +685,11 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       for (const r of rotatedRegions) {
         if (r.owner === null) continue;
         const invaders = s.fleets.filter(x => x.region === r.id && x.ships.length && hostile(s, x.owner, r.owner!) && x.owner !== -1
-          && x.doctrine.stance !== 'evasive' && !x.ships.every(sh => sh.cls === 'scout') && !x.limping);
+          && effStance(s, x) !== 'evasive' && !x.ships.every(sh => sh.cls === 'scout') && !x.limping);
         if (!invaders.length) continue;
         for (const g of s.fleets) {
           if (g.owner !== r.owner || !g.doctrine.guard || g.guardUsed || !g.ships.length || g.limping) continue;
+          if (sig && (isDugIn(s, g) || postureOf(s, g) === 'ambush' || postureOf(s, g) === 'guarded')) continue;   // a posture holds it in place
           if (g.region === r.id || !(r.links ?? r.neighbors).includes(g.region)) continue;
           if (movers.some(m => m.f === g && (m.idx < m.path.length || m.o.type === 'seize'))) continue;
           if (s.fleets.some(x => x.region === g.region && x.ships.length && hostile(s, x.owner, g.owner))) continue; // pinned
@@ -692,7 +725,10 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       if (!s.fleets.includes(f) || !f.route) continue;
       if (f.limping && f.limping.since === s.turn && f.route.path[0] !== m.path[0]) continue;   // routed mid-move: its route home stands
       // arriving at the end of the route also completes a seize (the mover above carried it)
-      if (f.region === m.path[0]) { f.route.path.shift(); if (!f.route.path.length) f.route = null; }
+      if (m.path.length > 1) {   // a Hyperjump: several steps in one tick
+        if (m.stopped || m.idx < m.path.length || f.region !== m.path[m.path.length - 1]) f.route = null;
+        else { f.route.path = f.route.path.slice(m.path.length); if (!f.route.path.length) f.route = null; }
+      } else if (f.region === m.path[0]) { f.route.path.shift(); if (!f.route.path.length) f.route = null; }
       else f.route = null;
     }
 
@@ -806,6 +842,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     // out of supply means no repairs at all, even in a region you own (e.g. one cut off behind enemy lines)
     let owned = r.owner === f.owner && inSupply && !midBattle;
     let yard = owned && ((r.buildings.shipyard ?? 0) > 0 || (r.buildings.depot ?? 0) > 0);
+    // Signature: Open the Gates: a pact ally's fleet repairs here as at its own shipyard
+    if (sig && !midBattle && gatesOpenFor(s, r, f)) { owned = true; yard = true; gatesHost(s, r, f, endPulse, emit); }
     const regen = hasTech(s, f.owner, 'regen') && inSupply && !midBattle;
     // Soul: Field Medics repair anywhere in supply, at shipyard speed on their own worlds; Slow Refits only at yards, at half speed
     const medics = soul && hasBoon(s, f, 'medics') && inSupply && !midBattle;
@@ -943,6 +981,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     soulReigns(s, endPulse, emit);
     soulEndTurn(s, endPulse, emit, fought);
   }
+  // Signature: undecided bets resolve (dug in, exposed, idle levies...), postures clear, comeback Fate
+  if (sig) sigEndTurn(s, endPulse, emit);
   }
   if (endCycle) {
 
@@ -1067,6 +1107,15 @@ function cleanFound(x: unknown): FoundSpec | null {
 
 export function cleanFree(fa: unknown): FreeAction | null {
   if (!isRec(fa)) return null;
+  // Signature: postures and Fate (values checked against the known ids; applyFree validates the rest)
+  if (fa.type === 'posture') return isId(fa.fleet) && typeof fa.posture === 'string' && (POSTURE_IDS as string[]).includes(fa.posture) ? { type: 'posture', fleet: fa.fleet, posture: fa.posture as Posture } : null;
+  if (fa.type === 'wposture') return isId(fa.region) && typeof fa.posture === 'string' && (WORLD_POSTURE_IDS as string[]).includes(fa.posture) ? { type: 'wposture', region: fa.region, posture: fa.posture as WorldPosture } : null;
+  if (fa.type === 'fate') {
+    if (typeof fa.use !== 'string' || !(FATE_IDS as string[]).includes(fa.use)) return null;
+    if (fa.fleet !== undefined && !isId(fa.fleet)) return null;
+    if (fa.region !== undefined && !isId(fa.region)) return null;
+    return { type: 'fate', use: fa.use as FateUse, ...(isId(fa.fleet) ? { fleet: fa.fleet } : {}), ...(isId(fa.region) ? { region: fa.region } : {}) };
+  }
   if (fa.type === 'dispatch') { const text = cleanText(fa.text, 140); return text ? { type: 'dispatch', text, ...(fa.as === 'source' ? { as: 'source' as const } : {}) } : null; }
   if (fa.type === 'calling') return isId(fa.region) && (typeof fa.pick === 'string' && fa.pick.length < 32 || isId(fa.pick)) ? { type: 'calling', region: fa.region, pick: fa.pick as string | number } : null;
   if (fa.type === 'raze') return isId(fa.region) ? { type: 'raze', region: fa.region } : null;
@@ -1110,6 +1159,26 @@ function sanitize(s: GameState, sub: Submission | undefined, tick = false): Subm
 
 function applyFree(s: GameState, rng: Rng, p: PlayerId, fa: Submission['free'][number], emit: (e: GameEvent) => void = () => {}): string | null {
   const pl = s.players[p];
+  // ---- Signature mechanics (secret postures, public Fate)
+  if (fa.type === 'posture') {
+    const f = s.fleets.find(x => x.id === fa.fleet && x.owner === p);
+    const b = postureBlock(s, p, f, fa.posture);
+    if (b) return b;
+    setPosture(s, f!, fa.posture);
+    return null;
+  }
+  if (fa.type === 'wposture') {
+    const b = wpostureBlock(s, p, fa.region, fa.posture);
+    if (b) return b;
+    setWorldPosture(s, p, s.regions[fa.region], fa.posture);
+    return null;
+  }
+  if (fa.type === 'fate') {
+    const b = fateBlock(s, p, fa.use, fa.fleet, fa.region);
+    if (b) return b;
+    spendFate(s, p, fa.use, { fleet: fa.fleet, region: fa.region }, 0, emit);
+    return null;
+  }
   // ---- Soul layer
   if (fa.type === 'dispatch') return queueDispatch(s, p, fa.text, fa.as);
   if (fa.type === 'calling') {
@@ -1252,8 +1321,11 @@ export function incomeDetail(s: GameState, p: PlayerId) {
   const conn = on ? connected(s, p) : null;
   let cut = 0;
   const pl = s.players[p];
+  const sigWorld = sigOn(s);
   for (const r of s.regions) {
     if (r.owner !== p) continue;
+    // Signature: a system that called the levies in vain yields nothing for a while
+    if (sigWorld && regionIdle(s, r)) { why.push(`${r.name}: levies called, no output`); continue; }
     const y = R.economy.yields[r.kind] ?? R.economy.yields.colony;
     const mult = Math.max(1, r.dev);
     let ind = y.industry * mult + (r.buildings.mine ?? 0) * R.economy.mineBonus;
@@ -1269,6 +1341,8 @@ export function incomeDetail(s: GameState, p: PlayerId) {
       if (!conn!.has(r.id)) { ind *= E.cutOffYield; cr *= E.cutOffYield; inf *= E.cutOffYield; cut++; }
     }
     if (r.story) { const y2 = soulYield(s, r); ind += y2.industry; cr += y2.credits; inf += y2.influence; }
+    // Signature: Surge (Fate): double output this turn
+    if (sigWorld) { const m = regionSurge(s, r); if (m !== 1) { ind *= m; cr *= m; inf *= m; why.push(`${r.name}: Surge (×${m})`); } }
     out.industry += ind; out.credits += cr; out.influence += inf;
   }
   if (cut) why.push(`${cut} region${cut === 1 ? '' : 's'} cut off from your capital (half yield)`);
@@ -1305,6 +1379,8 @@ export function currentLeader(s: GameState): PlayerId | null {
 function capture(s: GameState, rid: RegionId, by: PlayerId, how: 'force' | 'influence', pulse: number, emit: (e: GameEvent) => void, leader: PlayerId | null, capped: (p: PlayerId, n: number) => number) {
   const r = s.regions[rid];
   const from = r.owner;
+  // Signature: Scorched Earth: the conqueror gets nothing (no loot, no archives, nothing to raze)
+  const scorched = sigOn(s) && scorchedOnCapture(s, r, by, pulse, emit);
   r.owner = by;
   r.heldSince = s.turn;
   r.project = null;
@@ -1314,8 +1390,10 @@ function capture(s: GameState, rid: RegionId, by: PlayerId, how: 'force' | 'infl
   r.garrison = Math.min(r.garrison, Math.max(maxGarrison(s, rid), s.rules.garrison.afterCapture));
   s.turnStats.captures[by]++;
   emit({ k: 'capture', pulse, region: rid, by, from, how });
-  onCapture(s, r, by, from, how, pulse, emit);
-  if (from !== null && (r.buildings.academy ?? 0) > 0 && s.rules.empire?.enabled !== false) {
+  onCapture(s, r, by, from, how, pulse, emit, scorched);
+  if (scorched) scorchAftermath(r);
+  else if (sigOn(s)) r.wposture = null;   // a world posture belongs to the owner who set it
+  if (!scorched && from !== null && (r.buildings.academy ?? 0) > 0 && s.rules.empire?.enabled !== false) {
     // seized archives: steal one technology the victim has and you could have (never a ★)
     const mine = s.players[by].techs ?? [];
     const pool = (s.players[from].techs ?? []).filter(t => !mine.includes(t) && Object.hasOwn(TECH, t) && TECH[t].tier < 4 && (() => { const b = researchBlock(s, by, t); return !b || b.startsWith('one technology'); })());

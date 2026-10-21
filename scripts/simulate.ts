@@ -13,6 +13,7 @@ const seed0 = Number(arg('seed', '1000'));
 // Soul layer: what AI fleets are founded with (style combos, random legal combos, or none) — for boon balance checks
 const combos = arg('combos', 'style');
 (globalThis as { __tcSoulCombos?: string }).__tcSoulCombos = combos;
+(globalThis as { __tcNoCharge?: boolean }).__tcNoCharge = args.includes('--no-charge');   // balance probe: AI never charges
 const suite = args.includes('--suite')
   ? ['expert,standard,novice', 'expert,novice,novice', 'standard,novice,novice', 'expert,expert,standard']
   : [arg('levels', 'expert,standard,novice')];
@@ -53,6 +54,10 @@ for (const lvStr of suite) {
   const bump = (k: string, n = 1) => { soulN[k] = (soulN[k] ?? 0) + n; };
   const traitDist: Record<string, Record<string, number>> = {};
   const boonSeats: Record<string, number> = {}, boonWins: Record<string, number> = {};
+  // ---- signature metrics (postures, world postures, Fate) by AI level
+  const postureN: Record<string, Record<string, number>> = {}, fleetTurns: Record<string, number> = {};
+  const outcomeN: Record<string, Record<string, number>> = {}, fateN: Record<string, Record<string, number>> = {};
+  const bumpL = (m: Record<string, Record<string, number>>, l: string, k: string, n = 1) => { (m[l] ??= {})[k] = (m[l][k] ?? 0) + n; };
   const t0 = Date.now();
   for (let g = 0; g < games; g++) {
     // rotate seats so map position doesn't bias the level comparison
@@ -63,12 +68,19 @@ for (const lvStr of suite) {
       const subs: any = {};
       for (const p of s.players) {
         subs[p.id] = planTurn(s, p.id);
+        if (!p.eliminated) fleetTurns[p.aiLevel] = (fleetTurns[p.aiLevel] ?? 0) + s.fleets.filter(f => f.owner === p.id && f.ships.some(sh => sh.cls !== 'scout')).length;
+        for (const fa of subs[p.id].free) {
+          if (fa.type === 'posture') bumpL(postureN, p.aiLevel, fa.posture);
+          if (fa.type === 'wposture') bumpL(postureN, p.aiLevel, `w:${fa.posture}`);
+        }
         for (const o of subs[p.id].orders) { const k = o ? o.type : 'none'; (orderMix[p.aiLevel] ??= {})[k] = (orderMix[p.aiLevel][k] ?? 0) + 1; }
       }
       const startBanner = new Map(s.fleets.map(f => [f.id, !!f.banner]));
       s = resolveTurn(s, subs);
       battles += s.last!.battles.length;
       for (const e of s.last!.events) {
+        if (e.k === 'posture') { const l = s.players[e.owner].aiLevel; bumpL(outcomeN, l, `${e.posture}:${e.outcome}`); bumpL(outcomeN, l, `all:${e.outcome}`); }
+        if (e.k === 'fate') bumpL(fateN, s.players[e.owner].aiLevel, e.use);
         if (e.k === 'rout') bump('routs');
         if (e.k === 'destroyed' && e.owner >= 0) bump(startBanner.get(e.fleet) || s.soul?.fallen.some(r => r.id === e.fleet) ? 'banners destroyed' : 'pickets/other destroyed');
         if (e.k === 'soul') bump(e.kind);
@@ -147,6 +159,21 @@ for (const lvStr of suite) {
   console.log(`techs/player ${(techsOwned / games / 3).toFixed(1)} ${JSON.stringify(Object.fromEntries(Object.entries(techLv).map(([k, v]) => [k, avg(v)])))} | stolen ${stolen} | out-of-supply events/game ${(oosNotes / games).toFixed(1)} | empire projects/game`, Object.fromEntries(Object.entries(empireBuilds).map(([k, v]) => [k, +(v / games).toFixed(1)])));
   console.log('tech: times bought (avg turn):', Object.entries(techTurn).sort((a, b) => b[1].length - a[1].length).map(([k, v]) => `${k}:${v.length}(${avg(v)})`).join(' '));
   console.log('laws enacted :', lawCount);
+  {
+    const lv = [...new Set(levels)] as string[];
+    for (const l of lv) {
+      const pn = postureN[l] ?? {};
+      const ft = fleetTurns[l] ?? 1;
+      const fleetP = ['guarded', 'running', 'charge', 'ambush'];
+      const used = fleetP.reduce((a, k) => a + (pn[k] ?? 0), 0);
+      const oc = outcomeN[l] ?? {};
+      const rate = (k: string) => { const c = oc[`${k}:called`] ?? 0, x = oc[`${k}:caught`] ?? 0; return c + x ? `${c}/${c + x}=${Math.round(100 * c / (c + x))}%` : '-'; };
+      console.log(`postures ${l.padEnd(8)}: fleet-turns ${ft}, steady ${(100 * (1 - used / ft)).toFixed(1)}% | ` + fleetP.map(k => `${k} ${(100 * (pn[k] ?? 0) / ft).toFixed(1)}%`).join(' ') +
+        ` | world ${['levies', 'scorch', 'gates'].map(k => `${k}:${pn[`w:${k}`] ?? 0}`).join(' ')}`);
+      console.log(`  called/(called+caught) ${l.padEnd(8)}: all ${rate('all')} | ` + [...fleetP, 'levies', 'scorch', 'gates'].map(k => `${k} ${rate(k)}`).join(' | '));
+      console.log(`  fate ${l.padEnd(8)} per seat-game: ${(Object.values(fateN[l] ?? {}).filter((_, i) => Object.keys(fateN[l] ?? {})[i] !== 'bonus').reduce((a, b) => a + b, 0) / seats(l)).toFixed(2)}`, fateN[l] ?? {});
+    }
+  }
   console.log(`soul (combos=${combos}) per game:`, Object.fromEntries(Object.entries(soulN).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, +(v / games).toFixed(2)])));
   console.log('boon seats & win% (fair share 33%):', Object.entries(boonSeats).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}:${Math.round(100 * (boonWins[k] ?? 0) / n)}%`).join(' | '));
   if (verbose || args.includes('--traits')) console.log('ship traits by yard world:', JSON.stringify(Object.fromEntries(Object.entries(traitDist).map(([k, m]) => [k, Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([t, n]) => `${t}:${n}`).join(' ')]))));

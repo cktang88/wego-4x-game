@@ -212,6 +212,39 @@ export const HERALD_TEMPLATES: Record<string, string[]> = {
   eliminated:  ['{a} IS NO MORE', 'The last of {a} falls silent'],
   founded:     ['{a} raises a new banner: {f}', 'New banner over {r}: {f}'],
   quiet:       ['Quiet in the Reach', 'An uneasy calm', 'The three houses gather their strength'],
+  // ---- signature mechanics: postures ({x} = the posture) and Fate
+  p_called:    ['CALLED IT: {f} read {b} at {r}', '{a} saw it coming: {f} ({x}) at {r}', 'Right on the mark: {f} {x} at {r}'],
+  p_caught:    ['CAUGHT OUT: {f} ({x}) at {r}', '{f} guessed wrong at {r}', 'A costly read: {f} {x} at {r}'],
+  p_ambush:    ['AMBUSH at {r}: {f} springs the trap', 'Out of the dark at {r}: {f} strikes first'],
+  p_broken:    ['BROKEN CHARGE at {r}: {f} runs onto braced guns', '{f} charges {r} — and the defenders were waiting'],
+  p_exposed:   ['{f} waited in the dark at {r} for nobody', 'An ambush exposed: {f} at {r}'],
+  p_scorched:  ['SCORCHED EARTH: {a} burns {r} before it falls', '{r} falls in ashes: {b} takes nothing'],
+  p_levies:    ['{r} calls the levies: the walls fill in time', 'Levies man the walls of {r}'],
+  fate:        ['FATE: {a} spends a token — {x}', 'The dice are thrown: {a} — {x}'],
+  fate_bonus:  ['Fortune favours the fallen: {a} gains a Fate', '{a}, far behind, is touched by Fate'],
+};
+
+/** Signature: fleet postures (docs/SIGNATURE.md). The numbers live in rules.signature. */
+export const POSTURES: Record<string, { name: string; icon: string; bet: string; right: string; wrong: string }> = {
+  steady:  { name: 'Steady',  icon: '◇', bet: 'none (the default)', right: 'nothing', wrong: 'nothing' },
+  guarded: { name: 'Guarded', icon: '⛉', bet: 'they attack me here', right: 'fortified, first strike and extra defence for the whole battle', wrong: '−1 speed and no attacking this turn; if nobody comes it is dug in and cannot move next turn' },
+  running: { name: 'Running', icon: '»', bet: 'my path is clear', right: '+2 speed this turn', wrong: 'if anyone engages it this turn it cannot fire its first round and takes +50% damage' },
+  charge:  { name: 'Charge',  icon: '⚡', bet: 'the defender is not braced', right: 'first strike and extra damage in the opening rounds (only with a Seize)', wrong: 'against a Guarded fleet or Called Levies the charge breaks: the defenders fire first and it loses its first round' },
+  ambush:  { name: 'Ambush',  icon: '◉', bet: 'they come through here', right: 'hidden (unless scanned); any hostile fleet entering is stopped and it strikes first', wrong: 'if nobody comes it is exposed to every house and fatigued (−attack) next turn' },
+};
+/** Signature: world postures on systems you own. */
+export const WORLD_POSTURES: Record<string, { name: string; icon: string; bet: string; right: string; wrong: string }> = {
+  levies: { name: 'Call the Levies', icon: '⚑', bet: 'a siege lands here this turn', right: 'garrison ×1.5 at once (and a Charge on it breaks)', wrong: 'the system yields nothing this turn and next' },
+  scorch: { name: 'Scorched Earth',  icon: '🔥', bet: 'you lose it this turn', right: 'the conqueror gets nothing: no loot, no plunder, no stolen archives, nothing to raze; you raze the Calling', wrong: 'if you hold it, development −1 for nothing' },
+  gates:  { name: 'Open the Gates',  icon: '⛩', bet: 'an ally needs refuge', right: 'pact allies repair here as at their own shipyard', wrong: 'if a non-ally arrives the garrison holds fire in the first round' },
+};
+/** Signature: Fate token uses. */
+export const FATE_USES: Record<string, { name: string; icon: string; target: 'fleet' | 'region'; desc: string }> = {
+  laststand: { name: 'Last Stand',     icon: '⚔', target: 'fleet',  desc: 'This turn it will not retreat, rout or be forced out, and it hits harder. If it is wiped out, it dies.' },
+  surge:     { name: 'Surge',          icon: '⚡', target: 'region', desc: 'One of your systems produces double this turn, and its project jumps a turn ahead.' },
+  hyperjump: { name: 'Hyperjump',      icon: '⇶', target: 'fleet',  desc: 'The fleet moves 3 extra steps this turn and slips through blockades (but not an Ambush).' },
+  twist:     { name: 'Twist of Fate',  icon: '↻', target: 'fleet',  desc: 'The worst enemy volley against it in its first exchange of fire this turn misses.' },
+  rally:     { name: 'Rally',          icon: '✚', target: 'fleet',  desc: 'A Limping fleet repairs to 60% hull where it stands and stops limping.' },
 };
 
 /** AI dispatches (boasts, threats and lies). {me} = own house, {them} = a rival, {r} = a world. */

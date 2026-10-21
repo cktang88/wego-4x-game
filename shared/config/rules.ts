@@ -232,8 +232,8 @@ export const DEFAULT_RULES = {
   },
 };
 
-export type Rules = typeof DEFAULT_RULES & typeof EXTRA_DEFAULTS & typeof PLAYTEST_DEFAULTS & typeof SOUL_DEFAULTS;
-export function defaultRules(): Rules { return structuredClone({ ...DEFAULT_RULES, ...EXTRA_DEFAULTS, ...PLAYTEST_DEFAULTS, ...SOUL_DEFAULTS }); }
+export type Rules = typeof DEFAULT_RULES & typeof EXTRA_DEFAULTS & typeof PLAYTEST_DEFAULTS & typeof SOUL_DEFAULTS & typeof SIGNATURE_DEFAULTS;
+export function defaultRules(): Rules { return structuredClone({ ...DEFAULT_RULES, ...EXTRA_DEFAULTS, ...PLAYTEST_DEFAULTS, ...SOUL_DEFAULTS, ...SIGNATURE_DEFAULTS }); }
 
 export function isObj(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -505,5 +505,45 @@ export const SOUL_DEFAULTS = {
     // ---- ship traits (rolled at build time from the yard world and the empire)
     shipTraits: true,
     shipQuirkChance: 0.15,
+  },
+};
+
+// ---------------------------------------------------------------- signature mechanics (docs/SIGNATURE.md)
+// Postures ("call it" by committing forces), world postures, and Fate tokens. Old saves whose rules have no
+// `signature` group play without them (see shared/sim/signature.ts sigOn).
+export const SIGNATURE_DEFAULTS = {
+  signature: {
+    enabled: true,
+    postures: true,              // fleet postures (FreeAction 'posture')
+    worldPostures: true,         // system postures (FreeAction 'wposture')
+    fate: true,                  // Fate tokens (FreeAction 'fate')
+    // ---- Guarded: "they attack me here"
+    guardedHit: 0.04,            // extra hit chance while it holds (on top of counting as fortified)
+    guardedEvasion: 0.06,        // extra defence while it holds (on top of counting as fortified)
+    guardedSpeed: -1,            // movement this turn
+    dugInTurns: 1,               // nobody came: it cannot move for this many turns
+    // ---- Running: "my path is clear"
+    runningSpeed: 2,             // extra movement this turn (LIVE: per tick, this cycle)
+    runningDamageTaken: 1.5,     // caught strung out: damage taken this turn x this (and it can't fire its first round)
+    // ---- Charge: "the defender is not guarded" (only with a Seize)
+    chargeDamage: 1,             // extra damage per hit...
+    chargeRounds: 2,             // ...for its first rounds this turn (plus first strike in round 1)
+    neutralBraceChance: 0.4,     // a neutral garrison (or the Warden) braces against a charge this often (secret roll)
+    // ---- Ambush: "they come through here"
+    ambushFatigueMult: 0.75,     // nobody came: exposed (seen by all) and its attack x this next turn
+    // ---- world postures
+    leviesMult: 1.5,             // Call the Levies: garrison x this the moment an assault lands
+    leviesIdleTurns: 2,          // no assault: the system's output is lost this turn and the next (turns counted)
+    scorchDevLoss: 1,            // Scorched Earth held: development lost for nothing
+    // ---- Fate
+    fateStart: 3,                // tokens per house per game
+    fateComebackGap: 10,         // a house this many VP behind the leader gets...
+    fateComebackBonus: 1,        // ...this many extra tokens, once per game
+    fatePerTurn: 1,              // tokens a house can spend per turn (LIVE: per cycle)
+    surgeMult: 2,                // Surge: the system's output this turn x this...
+    surgeProgress: 1,            // ...and its project jumps forward this many turns
+    hyperjumpSteps: 3,           // Hyperjump: extra movement steps this turn, through blockades
+    lastStandHit: 0.15,          // Last Stand: extra hit chance (and it never retreats, routs or is forced out this turn)
+    rallyHull: 0.6,              // Rally: a Limping fleet's hulls repair to this share and it stops limping
   },
 };

@@ -14,6 +14,7 @@ import type { BattleReport, Engagement, Fleet, GameEvent, GameState, PlayerId, R
 import { soulOn, SR, soulHit, soulDmg, soulSiege, soulArmor, soulForceRounds, soulWantsRetreat, hasBoon, hasBane, scarOf, routBlock, routExit, onRankUp, fulfilVow } from './soul.ts';
 import { traitFx } from './shiptraits.ts';
 import { distance } from './graph.ts';
+import { sigOn, effStance, sigRound, sigCanFire, sigFirst, sigHit, sigDmg, sigTaken, sigAtk, sigAfterRound, fateStand, fateOf, fx } from './signature.ts';
 
 type Owner = PlayerId | -1;
 
@@ -75,7 +76,7 @@ export function wouldFight(s: GameState, rid: RegionId): boolean {
   if (!here.length) return false;
   for (const a of here) for (const b of here) {
     if (a.owner >= b.owner || !hostile(s, a.owner, b.owner)) continue;
-    if (a.doctrine.stance !== 'evasive' || b.doctrine.stance !== 'evasive' || engagementAt(s, rid)) return true;
+    if (effStance(s, a) !== 'evasive' || effStance(s, b) !== 'evasive' || engagementAt(s, rid)) return true;
   }
   return garrisonSide(s, rid, here) !== null;
 }
@@ -103,6 +104,7 @@ export function fightRounds(
   let active = opts.clash ? opts.clash.slice() : s.fleets.filter(f => f.region === rid && f.ships.length && !f.limping);
   const out: FightOutcome = { retreats: [], destroyedFleets: [], ended: false, winner: null, rounds: 0, routs: [], killers: new Map(), events: [] };
   const soul = soulOn(s);
+  const sig = sigOn(s);
   const emitSoul = (e: GameEvent) => out.events.push(e);
   /** Soul: fleets routing out of this fight -> their exit. */
   const routing = new Map<Fleet, RegionId>();
@@ -185,7 +187,7 @@ export function fightRounds(
     const neutralGar = (u: Unit) => !u.ship && region.owner === null;
     if (neutralGar(b) && a.fleet && a.fleet.siege !== rid && a.owner !== -1) return false;
     if (neutralGar(a) && b.fleet && b.fleet.siege !== rid) return false;
-    if (b.fleet && a.fleet && a.fleet.doctrine.stance === 'evasive' && b.fleet.doctrine.stance === 'evasive' && !E.rounds) return false;
+    if (b.fleet && a.fleet && effStance(s, a.fleet) === 'evasive' && effStance(s, b.fleet) === 'evasive' && !E.rounds) return false;
     return true;
   };
   const fighting = () => { const u = units(); return u.some(a => u.some(b => canTarget(a, b))); };
@@ -214,6 +216,8 @@ export function fightRounds(
       h += 0.05; // garrisons are dug in
     }
     if (region.feature === 'nebula') h -= R.combat.nebulaHitPenalty;
+    // Signature: a Guarded fleet that called it counts as fortified (and more); Last Stand hits harder
+    if (sig) h += sigHit(s, sh.fleet, tg.fleet, R.combat.fortifyHitBonus, R.combat.fortifyEvasion);
     if (soul) {
       if (sh.ship?.traits) h += traitFx(sh.ship).hit;
       const tf0 = tg.fleet;
@@ -268,9 +272,10 @@ export function fightRounds(
     return out;
   };
 
-  const fire = (shooters: Unit[], targets: Unit[], shots: ShotRec[], volleyMult = 1) => {
+  const fire = (shooters: Unit[], targets: Unit[], shots: ShotRec[], volleyMult = 1, firstStrike = false) => {
     for (const sh of shooters) {
       let n: number, atk: number, siege = 0;
+      if (sh.ship ? sh.ship.hp <= 0 : region.garrison <= 0) continue;   // killed earlier this round (first strike)
       if (sh.ship) {
         const d = shipStats(s, sh.ship, sh.owner);
         if (!sh.ship.sys.weapons) continue;
@@ -284,6 +289,7 @@ export function fightRounds(
         siege = d.siege + traitVal(sh.fleet, 'garrisonDmg') + (soul ? soulSiege(s, sh.fleet, region) : 0);
         if (sh.fleet?.fatigued) atk = Math.max(1, Math.round(atk * R.overdrive.fatigueAttackMult));
         if (fl && soul && hasBane(s, fl, 'homesick') && fl.banner && homeDist(fl) >= SR(s).homesickJumps) atk = Math.max(1, atk - 1);
+        if (sig && fl) atk = Math.max(1, Math.round(atk * sigAtk(s, fl)));
       } else {
         const fort = region.buildings.fortress ?? 0;
         const bat = region.buildings.battery ?? 0;
@@ -301,13 +307,16 @@ export function fightRounds(
         if (!tg.ship) {
           const ps = region.buildings.pshield ? R.empire.pshieldReduction : 0;
           dmg = Math.max(ps ? 0 : 1, atk - (R.garrison.armor + (region.buildings.fortress ?? 0) * R.garrison.armorPerFortress + (soul ? soulArmor(s, region) : 0)) - ps) + Math.max(0, siege);
+          if (dmg > 0 && sig) dmg += sigDmg(s, sh.fleet);
           if (dmg <= 0) { shots.push({ from: sh.uid, to: tg.uid, dmg: 0, miss: true }); continue; }
         } else {
           const shd = tg.ship.sys.shields ? shipStats(s, tg.ship, tg.owner).shields : 0;
           dmg = Math.max(1, Math.ceil(atk * (1 - R.shieldsCap.maxReduction)), atk - shd) + (soul ? soulDmg(s, sh.fleet, tg.fleet) : 0);
+          if (sig) dmg = Math.ceil((dmg + sigDmg(s, sh.fleet)) * sigTaken(s, tg.fleet));
         }
         tg.pending += dmg;
         const rec: ShotRec = { from: sh.uid, to: tg.uid, dmg };
+        if (firstStrike) rec.first = true;
         if (tg.ship && tg.ship.hp - tg.pending > 0 && rng.chance(R.combat.critChance)) {
           const working = (['engines', 'weapons', 'shields'] as (keyof Subsystems)[]).filter(k => tg.ship!.sys[k] && (k !== 'shields' || shipStats(s, tg.ship!, tg.owner).shields > 0));
           if (working.length) rec.crit = rng.pick(working);
@@ -397,14 +406,70 @@ export function fightRounds(
     active = active.filter(f => f.ships.length);
   };
 
+  /** Signature, Twist of Fate: the worst enemy volley (one ship's shots) against the fleet in its first exchange this turn misses. */
+  const twist = (shots: ShotRec[], all: Unit[]) => {
+    for (const f of active) {
+      if (fateOf(s, f) !== 'twist' || fx(s, f).twisted) continue;
+      const mine = new Set(f.ships.map(x => x.id));
+      const hits = shots.filter(x => mine.has(x.to) && x.dmg > 0);
+      if (!hits.length) continue;
+      const by = new Map<number, number>();
+      for (const x of hits) by.set(x.from, (by.get(x.from) ?? 0) + x.dmg);
+      let worst = 0, wd = -1;
+      for (const [k, d] of by) if (d > wd) { worst = k; wd = d; }
+      fx(s, f).twisted = true;
+      for (const x of hits) {
+        if (x.from !== worst) continue;
+        const u = all.find(y => y.uid === x.to);
+        if (u) u.pending = Math.max(0, u.pending - x.dmg);
+        x.dmg = 0; x.miss = true; x.twist = true;
+        delete x.crit; delete x.kill;
+      }
+      // a ship the negated volley would have killed lives on
+      for (const sh of f.ships) {
+        const u = all.find(y => y.uid === sh.id);
+        if (u && sh.hp - u.pending > 0) { killedBy.delete(sh.id); for (const x of shots) if (x.to === sh.id) delete x.kill; }
+      }
+      hl(`TWIST OF FATE: the worst volley against ${f.name} goes wide (${wd} damage).`);
+    }
+  };
+
   // ---------------------------------------------------------------- rounds
   while (out.rounds < maxRounds && fighting()) {
+    // Signature: postures meet reality (called / caught), the Levies rise, battle Fates are marked
+    if (sig) {
+      const g0 = region.garrison;
+      sigRound(s, rng, region, opts.clash ? undefined : E, active, f => cameFrom.has(f.id), pulse, emitSoul, hl);
+      if (region.garrison !== g0) for (const side of report.sides) if (side.garrison) { side.garrison.hp = region.garrison; side.garrison.maxHp = Math.max(side.garrison.maxHp, region.garrison); }
+    }
     out.rounds++;
     E.rounds++;
     const all = units();
     const shots: ShotRec[] = [];
-    fire(frontline(all), all, shots);
-    apply(all, shots);
+    const front = frontline(all);
+    if (sig) {
+      // first strike: those who called it (Guarded, Ambush, an unbraced Charge; the defenders of a broken one)
+      // fire and land their hits before everyone else; a Running fleet caught out or a broken charge can't fire
+      // its first round, nor can a garrison that opened its gates to the wrong guests
+      const roundFleets = active.slice();
+      const ok = front.filter(u => sigCanFire(s, u.fleet, region));
+      const first = ok.filter(u => sigFirst(s, u.fleet, u.owner, roundFleets));
+      const rest = ok.filter(u => !first.includes(u));
+      if (first.length) {
+        fire(first, all, shots, 1, true);
+        twist(shots, all);
+        apply(all, shots);
+      }
+      const later: ShotRec[] = [];
+      fire(rest, all, later);
+      twist(later, all);
+      apply(all, later);
+      shots.push(...later);
+      sigAfterRound(s, roundFleets, region, all.some(u => !u.ship));
+    } else {
+      fire(front, all, shots);
+      apply(all, shots);
+    }
     const rr: BattleReport['rounds'][number] = { shots, retreats: [], pulse };
     report.rounds.push(rr);
     for (const f of [...routing.keys()]) flushRout(f, rr);
@@ -418,7 +483,9 @@ export function fightRounds(
     for (const f of active.slice()) {
       if (f.owner === -1) continue;
       const frac = f.ships.reduce((a, x) => a + x.hp, 0) / (E.startHp[f.id] ?? 1);
-      const base = !lastStand.has(f.id) && ((f.doctrine.stance === 'evasive' && !hasBane(s, f, 'reckless')) || (f.doctrine.retreatAt > 0 && frac < f.doctrine.retreatAt));
+      // Signature: a Last Stand (Fate) never leaves this turn: not by choice, not forced
+      if (sig && fateStand(s, f)) continue;
+      const base = !lastStand.has(f.id) && ((effStance(s, f) === 'evasive' && !hasBane(s, f, 'reckless')) || (f.doctrine.retreatAt > 0 && frac < f.doctrine.retreatAt));
       const wants = forced === f.owner || (!lastStand.has(f.id) && soulWantsRetreat(s, f, frac, base));
       if (!wants) continue;
       // Soul: a bannered fleet forced out of a battle it lost ROUTS (or, if it must, dies)
@@ -515,6 +582,7 @@ export function fightRounds(
   /** Soul: where a beaten bannered fleet routs to, or null if it must die (routBlock). */
   function routFate(f: Fleet): RegionId | null {
     if (!soul || !f.banner || f.owner < 0) return null;
+    if (sig && fateStand(s, f)) return null;   // a Last Stand does not rout: it dies where it stands
     const exit = opts.clash ? f.region : routExit(s, f, rid, cameFrom.get(f.id));
     // strength committed to this engagement, by side (fleets that already left or died still count)
     const ownerOf = (id: number) => s.fleets.find(x => x.id === id)?.owner;

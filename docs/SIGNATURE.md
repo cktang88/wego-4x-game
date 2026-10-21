@@ -68,3 +68,48 @@ each one costs something when the read is wrong.
 2. **Fate**: sim, AI, UI.
 
 Later ideas are kept in [TODO.md](TODO.md).
+
+## 4. As built (sim contract)
+Code: `shared/sim/signature.ts` (rules, combat and end-of-turn hooks), `shared/sim/ai-signature.ts` (AI).
+Numbers: `rules.signature` (`enabled`, `postures`, `worldPostures`, `fate` flags). Rules without that group
+(older games) play without any of this.
+
+**Free actions** (no Order cost; sanitized by `cleanFree`; LIVE: `queueFree`, applied at the next tick):
+- `{type:'posture', fleet, posture:'steady'|'guarded'|'running'|'charge'|'ambush'}`: one per fleet per turn (LIVE: per cycle).
+- `{type:'wposture', region, posture:'levies'|'scorch'|'gates'}`: a system you own, one per system per turn.
+- `{type:'fate', use:'laststand'|'surge'|'hyperjump'|'twist'|'rally', fleet?, region?}` (`region` for Surge only).
+- Validation helpers for the UI: `postureBlock`, `wpostureBlock`, `fateBlock` (an error string, or null).
+
+**State:** `Fleet.posture` (secret), `Fleet.postureFx` (secret bookkeeping), `Fleet.dugIn` (secret: can't move
+while `>= turn`), `Fleet.exposed` (public: seen by all and fatigued while `>= turn`), `Fleet.fate` (public: this
+turn's Fate). `Region.wposture` and `Region.idleUntil` (owner only), `Region.surge` (public). `Player.fate`
+(tokens left), `Player.fateBonus`, `Player.fateSpent`, `Player.postureLog` (postures rivals have seen revealed).
+Rivals see a fleet's posture only with a fleet in the same system or a scan over it (`postureSeenBy`).
+A fleet in Ambush is hidden even from neighbours unless they scan it or share its system.
+
+**Events:** `{k:'posture', fleet?, owner, posture, outcome:'called'|'caught'|'none', region, text, with?, public?, private?}`
+(no `fleet` for a world posture) for CALLED IT / CAUGHT OUT stamps; `{k:'fate', owner, use, fleet?, region?, text, left}`
+(`use:'bonus'` = the comeback token). Shots fired with first strike carry `first: true`; a volley undone by Twist
+of Fate carries `twist: true`. Herald kinds: `p_called`, `p_caught`, `p_ambush`, `p_broken`, `p_exposed`,
+`p_scorched`, `p_levies`, `fate`, `fate_bonus`.
+
+**Rulings:**
+- A posture lasts the turn (LIVE: the cycle). Charge with no Seize, or Ambush with a move, falls back to Steady
+  (a `fail` event). A Guarded fleet's Seize fails, and Guarded or Ambushing fleets don't join assaults or answer guard calls.
+- Called/caught is decided when the bet meets reality: Guarded when a hostile fleet arrives where it stood (not
+  in an old fight with no newcomers: `none`); Running the moment it fights; Charge when it reaches its Seize
+  target (Guarded defenders that stood still, Called Levies, or, by a secret roll of `neutralBraceChance`, a
+  neutral garrison or the Warden brace); Ambush when a hostile fleet enters. Undecided bets settle at the end of
+  the turn: Guarded with no arrival is dug in, Ambush with no arrival is exposed (public), Running that moved
+  freely is called (private).
+- "Round 1" for a fleet means its first combat round this turn. First strike: those shooters fire and their
+  hits land before anyone else fires that round.
+- Posture vs doctrine: the doctrine keeps its retreat threshold, target and guard flag; a Guarded, Charging or
+  Ambushing fleet never acts Evasive (`effStance`). Fortify and Guarded stack. Ambushers / Shock Troops still
+  double their first volley; Clean Break still breaks off cleanly. Limping fleets: Steady or Running only.
+- Hyperjump slips through blockades (enemy fleets and garrisons on the way) but an Ambush still stops it.
+- Last Stand: the fleet never retreats, routs or is forced out this turn, and hits harder; if it is wiped out, it dies.
+- Twist of Fate: the single enemy ship whose volley hurt the fleet most in its first exchange of fire this turn misses.
+- Fate limits: `fatePerTurn` per house, one per fleet per turn, one battle Fate (Last Stand / Twist) per side per engagement.
+- Scorched Earth on capture: the conqueror gets no Raiders' loot, no stolen archives and nothing to raze; the
+  Calling is gone. VP for the capture (capital, bounty) still counts.

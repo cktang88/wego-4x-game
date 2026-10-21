@@ -19,6 +19,7 @@ import { planTurn } from './ai.ts';
 import { validateOrder, ORDER_INFO, orderCost, canAfford, pay } from './orders.ts';
 import { researchBlock, techCost, opposite, blueprintFor, baseHp, hasTech, moveNeighbors } from './empire.ts';
 import { MODULE } from '../config/empire.ts';
+import { postureBlock, wpostureBlock, fateBlock, SG } from './signature.ts';
 import type { FreeAction, GameState, LiveState, Order, PlayerId, Ship, TurnResult } from './types.ts';
 
 export const LIVE_SPEEDS: Record<string, { label: string; mult: number; desc: string }> = {
@@ -246,9 +247,10 @@ export function queueFree(s: GameState, pid: PlayerId, fa: FreeAction): string |
   const list = (L.free[pid] ??= []);
   const same = (x: FreeAction) =>
     x.type === fa.type && (
-      fa.type === 'doctrine' || fa.type === 'rename' || fa.type === 'honour' || fa.type === 'vow' ? (x as { fleet: number }).fleet === fa.fleet
+      fa.type === 'doctrine' || fa.type === 'rename' || fa.type === 'honour' || fa.type === 'vow' || fa.type === 'posture' ? (x as { fleet: number }).fleet === fa.fleet
       : fa.type === 'blueprint' ? (x as { cls: string }).cls === fa.cls
-      : fa.type === 'calling' || fa.type === 'raze' ? (x as { region: number }).region === fa.region
+      : fa.type === 'calling' || fa.type === 'raze' || fa.type === 'wposture' ? (x as { region: number }).region === fa.region
+      : fa.type === 'fate' ? (x as { fleet?: number; region?: number }).fleet === fa.fleet && (x as { region?: number }).region === fa.region
       : fa.type === 'dispatch');   // a newer dispatch replaces the queued one
   const i = list.findIndex(same);
   if (i >= 0) list.splice(i, 1);
@@ -270,6 +272,24 @@ export function queueFree(s: GameState, pid: PlayerId, fa: FreeAction): string |
     case 'dispatch':
       if (s.players[pid].dispatchTurn === s.turn || (s.soul?.dispatches ?? []).some(d => d.p === pid)) return 'one dispatch per edition';
       break;
+    // Signature: a posture lasts the whole cycle (one per fleet / system per cycle); Fate is checked now and again at the tick
+    case 'posture': {
+      const b = postureBlock(s, pid, s.fleets.find(x => x.id === fa.fleet), fa.posture);
+      if (b) return b;
+      break;
+    }
+    case 'wposture': {
+      const b = wpostureBlock(s, pid, fa.region, fa.posture);
+      if (b) return b;
+      break;
+    }
+    case 'fate': {
+      const b = fateBlock(s, pid, fa.use, fa.fleet, fa.region);
+      if (b) return b;
+      const sp = s.players[pid].fateSpent;
+      if (list.filter(x => x.type === 'fate').length + (sp && sp.turn === s.turn ? sp.n : 0) >= SG(s).fatePerTurn) return `at most ${SG(s).fatePerTurn} Fate per cycle`;
+      break;
+    }
     case 'merge': {
       const f = s.fleets.find(x => x.id === fa.fleet && x.owner === pid);
       if (!f) return 'no such fleet of yours';
@@ -336,7 +356,7 @@ export function runTick(s0: GameState, isAI: (pid: PlayerId) => boolean): GameSt
       const pref = L.tick % 3 === 2 ? Math.min(opts.length - 1, 1 + ((L.tick / 3) | 0) % Math.max(1, opts.length - 1)) : 0;
       for (const o of [opts[pref], ...opts.filter((_, i) => i !== pref)]) if (queueOrder(s1, p.id, o, tickTime) === null) break;
     }
-    for (const fa of plan.free) if (['doctrine', 'research', 'blueprint', 'vow', 'honour', 'calling', 'raze', 'dispatch'].includes(fa.type)) queueFree(s1, p.id, fa);
+    for (const fa of plan.free) if (['doctrine', 'research', 'blueprint', 'vow', 'honour', 'calling', 'raze', 'dispatch', 'posture', 'wposture', 'fate'].includes(fa.type)) queueFree(s1, p.id, fa);
   }
   const ticks = ticksPerCycle(s1);
   const t = L.tick;

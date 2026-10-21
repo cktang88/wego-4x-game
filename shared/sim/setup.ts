@@ -8,6 +8,7 @@ import { baseHp, blueprintFor, maxDevAt } from './empire.ts';
 import { rollShipTraits, traitHpMult } from './shiptraits.ts';
 import { ensureSoul, soulOn, soulGarrison } from './soul.ts';
 import { SIGILS } from '../config/content.ts';
+import { ensureSig } from './signature.ts';
 
 export interface PlayerSetup { name?: string; kind: 'human' | 'ai'; aiLevel?: Player['aiLevel'] }
 export interface GameSetup {
@@ -81,6 +82,7 @@ export function createGame(setup: GameSetup): GameState {
     });
   }
   ensureSoul(s);
+  ensureSig(s);   // Signature: Fate tokens
   s.rngState = rng.state;
   s.chronicle.push({ turn: 1, text: 'Three heirs of a dead empire light their beacons. The Hollow Throne waits between them.', players: [0, 1, 2], major: true });
   return s;

@@ -1,6 +1,6 @@
 // Per-player views: what the server sends to each client (fog of war applied).
 import { withinArea } from './graph.ts';
-import { coverage, seesFleetsIn, seesFleet } from './visibility.ts';
+import { coverage, seesFleetsIn, seesFleet, postureSeenBy } from './visibility.ts';
 import { headlineVisible } from './herald.ts';
 import type { Doctrine, Fleet, GameState, PlayerId, RegionId, TurnResult } from './types.ts';
 
@@ -27,6 +27,11 @@ function maskRivalFleet(f: Fleet) {
   // Soul layer: banners, vows, scars, honours, epithets and brands are public; a pending choice is not
   delete f.pendingHonour;
   delete f.sulkUntil;
+  // Signature: a posture is secret (viewFor reveals it to a fleet beside it or a scan); so is being dug in.
+  // Exposure and a Fate spent on it are public.
+  delete f.posture;
+  delete f.postureFx;
+  delete f.dugIn;
 }
 
 export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
@@ -34,7 +39,12 @@ export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
   const cov = coverage(s, p);
   const v: GameState = structuredClone({ ...s, last: null, log: [] });
   v.fleets = v.fleets.filter(f => f.owner === p || seesFleet(s, p, f, cov));
-  for (const f of v.fleets) if (f.owner !== p) maskRivalFleet(f);
+  for (const f of v.fleets) if (f.owner !== p) {
+    const seen = s.fleets.find(x => x.id === f.id);
+    const posture = seen && seen.posture && postureSeenBy(s, p, seen) ? seen.posture : null;
+    maskRivalFleet(f);
+    if (posture) f.posture = posture;
+  }
   for (const pl of v.players) {
     if (pl.id === p) continue;
     // rivals' stockpiles are secret; VP is public
@@ -50,6 +60,8 @@ export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
   for (const r of v.regions) {
     // Soul layer: a world's ledger, epithet, calling and deeds are public; a pending calling is its owner's
     if (r.story && r.owner !== p) r.story.pendingCalling = null;
+    // Signature: a world posture (and its idle aftermath) is its owner's secret
+    if (r.owner !== p) { delete r.wposture; delete r.idleUntil; }
     if (cov.has(r.id) || r.owner === p) continue;
     // fogged: hide projects and exact garrison of rival regions
     r.project = null;
@@ -184,6 +196,9 @@ function filterResult(s: GameState, r: TurnResult, p: PlayerId, endCov: Set<Regi
       case 'note': return e.owner === null || e.owner === p;
       case 'rout': return e.owner === p || e.by === p || sees(e.from) || sees(e.to);
       case 'soul': return e.owner === null || e.owner === p;
+      // Signature: a decided posture is revealed to whoever it mattered to; Fate is public
+      case 'posture': return e.owner === p || !!e.public || (!e.private && (!!e.with?.includes(p) || sees(e.region)));
+      case 'fate': return true;
       default: return false;
     }
   });

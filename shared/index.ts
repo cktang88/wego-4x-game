@@ -12,3 +12,5 @@ export * from './config/content.ts';
 export * from './sim/soul.ts';
 export * from './sim/herald.ts';
 export * from './sim/shiptraits.ts';
+// Signature mechanics (docs/SIGNATURE.md): postures, world postures, Fate.
+export * from './sim/signature.ts';

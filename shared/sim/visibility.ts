@@ -4,6 +4,7 @@ import { withinArea } from './graph.ts';
 import type { Fleet, GameState, PlayerId, RegionId } from './types.ts';
 import { soulSensor, soulOn, SR, hasBane, hasBoon } from './soul.ts';
 import { traitFx } from './shiptraits.ts';
+import { sigOn, isExposed } from './signature.ts';
 
 export function coverage(s: GameState, p: PlayerId): Set<RegionId> {
   const R = s.rules.sensors;
@@ -29,6 +30,9 @@ export function coverage(s: GameState, p: PlayerId): Set<RegionId> {
  */
 export function seesFleet(s: GameState, p: PlayerId, f: Fleet, cov?: Set<RegionId>): boolean {
   if (f.owner === p) return true;
+  // Signature: an exposed ambusher is seen by everyone; one lying in Ambush only by a scan or a fleet beside it
+  if (sigOn(s) && isExposed(s, f)) return true;
+  if (sigOn(s) && f.posture === 'ambush' && !postureSeenBy(s, p, f)) return false;
   const on = soulOn(s);
   if (on && f.banner && hasBane(s, f, 'conspicuous')) return true;
   if (on && f.limping && SR(s).limpingVisible) return true;
@@ -41,6 +45,13 @@ export function seesFleet(s: GameState, p: PlayerId, f: Fleet, cov?: Set<RegionI
     return present || scanned;
   }
   return true;
+}
+
+/** Signature: can player p see this rival fleet's (secret) posture? Only with a fleet in the same system or a scan over it. */
+export function postureSeenBy(s: GameState, p: PlayerId, f: Fleet): boolean {
+  if (f.owner === p) return true;
+  if (s.fleets.some(x => x.owner === p && x.ships.length && x.region === f.region)) return true;
+  return s.scans.some(sc => sc.owner === p && sc.until >= s.turn && withinArea(s, sc.region, s.rules.sensors.scanRange).has(f.region));
 }
 
 /** Can player p see fleets in region rid? */

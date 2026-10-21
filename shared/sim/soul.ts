@@ -620,7 +620,7 @@ export function addDeed(s: GameState, r: Region, d: Deed) {
 export const hasDeed = (r: Region, id: string) => !!r.story?.deeds.some(d => d.id === id);
 
 /** Story bookkeeping when a world changes hands. Returns true if this was a Liberation. */
-export function onCapture(s: GameState, r: Region, by: PlayerId, from: PlayerId | null, how: string, pulse: number, emit: Emit): boolean {
+export function onCapture(s: GameState, r: Region, by: PlayerId, from: PlayerId | null, how: string, pulse: number, emit: Emit, scorched = false): boolean {
   if (!soulOn(s)) return false;
   const st = (r.story ??= newStory({ ...r, owner: from }));
   const S = SR(s);
@@ -653,7 +653,7 @@ export function onCapture(s: GameState, r: Region, by: PlayerId, from: PlayerId 
   for (const f of s.fleets) {
     if (f.owner !== by || f.region !== r.id || !f.ships.length || !f.banner) continue;
     if (how === 'force' && f.tally) f.tally.sieges++;
-    if (how === 'force' && hasBoon(s, f, 'raiders')) {
+    if (how === 'force' && hasBoon(s, f, 'raiders') && !scorched) {   // Scorched Earth: nothing to loot
       const lump = S.raiderLoot + S.raiderLootPerDev * r.dev;
       s.players[by].res.credits += lump;
       sagaBeat(f, s.turn, 'loot', `Looted ${r.name} (+${lump}¢).`, r.id);
