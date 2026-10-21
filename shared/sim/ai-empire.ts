@@ -3,7 +3,7 @@
 // measure in simulations whether every style is viable).
 import { TECH, TECHS, LAWS, type Branch } from '../config/empire.ts';
 import { blueprintFor, classBlock, hasTech, hasVein, lawBlock, lawSlots, researchBlock, techCost, connected } from './empire.ts';
-import { canAfford, orderCost } from './orders.ts';
+import { canAfford, orderCost, pay } from './orders.ts';
 import { creditRate } from './resolve.ts';
 import { within } from './graph.ts';
 import type { Rng } from './rng.ts';
@@ -43,7 +43,7 @@ export function empireFree(c: Ctx): FreeAction[] {
     const ok = canAfford(me.res, cost, creditRate(s, pid)) && me.res.industry - (cost.industry ?? 0) >= reserveInd - (c.threatened.size ? -20 : 0) && me.res.credits - (cost.credits ?? 0) >= 6;
     if (ok && (lvl !== 'novice' || rng.chance(0.5))) {
       out.push({ type: 'research', tech: pick });
-      me.res.industry -= cost.industry ?? 0; me.res.credits -= cost.credits ?? 0;
+      pay(me.res, cost, creditRate(s, pid));   // like the resolver: credits cover an industry shortfall
       (me.techs ??= []).push(pick);
       me.researched = (me.researched ?? 0) + 1;
     }

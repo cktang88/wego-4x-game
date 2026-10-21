@@ -17,9 +17,11 @@ import { Rng } from './rng.ts';
 import { emptySubmission, currentLeader, flipThreshold, creditRate } from './resolve.ts';
 import { maxGarrison } from './setup.ts';
 import type { Fleet, FreeAction, GameState, Order, PlayerId, Region, RegionId, Submission } from './types.ts';
-import { coverage, seesFleetsIn } from './visibility.ts';
+import { coverage } from './visibility.ts';
+import { viewFor } from './view.ts';
 import { empireFree, empireCands, empireRegionValue, canField } from './ai-empire.ts';
-import { shipStats } from './empire.ts';
+import { shipStats, hasTech, hasLaw, baseHp, blueprintFor } from './empire.ts';
+import { LAW, LAWS } from '../config/empire.ts';
 
 interface Cand { o: Order; v: number; tag: string }
 type Level = 'novice' | 'standard' | 'expert';
@@ -33,6 +35,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
   const s = perceive(s0, pid);
   const R = s.rules;
   const expert = lvl === 'expert', novice = lvl === 'novice';
+  const live = !!s.live;
   const aggr = R.ai.aggression;
   const leader = currentLeader(s);
   const edictsNow = s.edicts.filter(e => e.scoresTurn === s.turn).map(e => e.id); // judged at the end of THIS turn
@@ -52,6 +55,17 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       if (p > 0.25) threatened.set(r.id, p);
     }
   }
+
+  // regions our fleets besiege as the turn starts: the siege carries on by itself and usually decides
+  // them in pulse 1 (so a fresh Seize or Influence there would find it "already yours")
+  const siegeOk = new Map<number, boolean>();
+  for (const f of s.fleets) {
+    if (f.owner !== pid || !f.ships.length || f.siege !== f.region || siegeOk.has(f.region)) continue;
+    const by = s.fleets.filter(x => x.owner === pid && x.ships.length && x.siege === f.region && x.region === f.region);
+    siegeOk.set(f.region, seizeOdds(by.flatMap(x => unitsOf(s, x)), s.regions[f.region], 'siege:' + by.map(x => unitsKey(x)).join('+')).p >= 0.6);
+  }
+  const besieged = { has: (rid: number) => siegeOk.has(rid) };
+  const siegeHolds = (rid: number) => !!siegeOk.get(rid);
 
   // -------------------------------------------------- free actions: merges & doctrine
   if (expert) {
@@ -95,9 +109,12 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
 
   // -------------------------------------------------- order slots (greedy over projected state)
   const usedTargets = new Set<string>();
+  // LIVE mid-cycle: orders a fleet already took this cycle still count against its limit
   const fleetUses = new Map<number, number>();
+  for (const f of s.fleets) if (f.owner === pid && f.ordersThisTurn > 0) fleetUses.set(f.id, f.ordersThisTurn);
   for (let slot = 0; slot < R.orders.perTurn; slot++) {
-    const valid = candidates().filter(c => c.v > 0.3 && !usedTargets.has(c.tag) && !validateOrder(s, pid, c.o) && canAfford(me0().res, orderCost(s, c.o, pid), creditRate(s, pid)));
+    const valid = candidates().filter(c => c.v > 0.3 && !usedTargets.has(c.tag) && !(isFleetOrder(c.o) && (fleetUses.get(c.o.fleet) ?? 0) >= R.orders.maxPerFleet) &&
+      !economyBlocked(c.o) && !validateOrder(s, pid, c.o) && affordable(c.o));
     if (!valid.length) continue;
     // tiny seeded jitter so exact ties never break by region id (which would favour one map wedge)
     for (const c of valid) c.v += rng.next() * 0.02;
@@ -113,6 +130,13 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     usedTargets.add(pick.tag);
     project(pick.o);
   }
+  // a guard reaction would pull a fleet off its plan mid-turn (its later orders then start from the
+  // wrong region): fleets with work this turn stand down, unless their only order is a pulse-1 move/seize
+  for (const fa of sub.free) {
+    if (fa.type !== 'doctrine' || !fa.doctrine.guard) continue;
+    const mine = sub.orders.map((o, k) => ({ o, k })).filter(x => x.o && (isFleetOrder(x.o) && x.o.fleet === fa.fleet || (x.o.type === 'seize' && x.o.also?.includes(fa.fleet)) || (x.o.type === 'build' && x.o.fleet === fa.fleet)));
+    if (mine.length && !(mine.length === 1 && mine[0].k === 0 && (mine[0].o!.type === 'move' || mine[0].o!.type === 'seize'))) fa.doctrine.guard = false;
+  }
   return sub;
 
   // ====================================================================== helpers
@@ -125,28 +149,87 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
   /** Am I (or would I soon be) the one the Warden hunts? */
   function topVp() { return s.players.every(p => p.id === pid || p.eliminated || p.vp < me0().vp + 3); }
 
+  /** Builds, projects and digs fail while hostile ships sit in the region ("enemies present"). */
+  function economyBlocked(o: Order): boolean {
+    const rid = o.type === 'build' || o.type === 'develop' ? o.region : o.type === 'excavate' ? s.fleets.find(x => x.id === o.fleet)?.region : undefined;
+    return rid !== undefined && hostileFleetsAt(rid).length > 0;
+  }
+  function isFleetOrder(o: Order): o is Extract<Order, { fleet: number }> { return 'fleet' in o && o.type !== 'build'; }
+  /** What the resolver will charge for this order in its pulse: its cost, plus the repeat-fleet fee. */
+  function slotCost(o: Order) {
+    const c = { ...orderCost(s, o, pid) };
+    const fees = (isFleetOrder(o) && (fleetUses.get(o.fleet) ?? 0) > 0 ? 1 : 0) +
+      (o.type === 'seize' ? (o.also ?? []).filter(id => (fleetUses.get(id) ?? 0) > 0).length : 0);
+    if (fees) c.credits = (c.credits ?? 0) + fees * R.orders.repeatFleetCredits;
+    return c;
+  }
+  /** Mirrors the resolver: moves and seizes have no price check; everything else needs canAfford
+   *  after the repeat-fleet fee (which is taken at the start of the pulse) has been paid. */
+  function affordable(o: Order): boolean {
+    if (o.type === 'move' || o.type === 'seize') return true;
+    const fee = isFleetOrder(o) && (fleetUses.get(o.fleet) ?? 0) > 0 ? R.orders.repeatFleetCredits : 0;
+    const res = { ...me0().res, credits: me0().res.credits - fee };
+    return canAfford(res, orderCost(s, o, pid), creditRate(s, pid));
+  }
   function project(o: Order) {
-    pay(me0().res, orderCost(s, o, pid), creditRate(s, pid));
-    if (o.type === 'law') { const l = me0().laws ??= []; l.push(o.law); }
-    if ('fleet' in o && o.fleet !== null && o.type !== 'build') fleetUses.set(o.fleet, (fleetUses.get(o.fleet) ?? 0) + 1);
-    if (o.type === 'move') { const f = s.fleets.find(x => x.id === o.fleet)!; f.region = o.path[o.path.length - 1]; f.fortified = false; }
+    pay(me0().res, slotCost(o), creditRate(s, pid));
+    if (o.type === 'law') {
+      // enacting one side of a pair repeals the other
+      const opp = LAWS.find(l => l.pair === LAW[o.law]?.pair && l.id !== o.law)?.id;
+      me0().laws = [...(me0().laws ?? []).filter(x => x !== opp), o.law];
+    }
+    const use = (id: number, n = 1) => fleetUses.set(id, Math.min(R.orders.maxPerFleet, (fleetUses.get(id) ?? 0) + n));
+    if (isFleetOrder(o)) use(o.fleet);
+    if (o.type === 'move') {
+      const f = s.fleets.find(x => x.id === o.fleet)!;
+      const dest = o.path[o.path.length - 1];
+      // LIVE: a move sets the fleet travelling; it is not at dest for several ticks
+      if (!live) {
+        // ending next to/among enemies means a battle (or a garrison stop): no clean second order
+        if (hostileFleetsAt(dest).length || (s.regions[dest].owner !== null && s.regions[dest].owner !== pid && s.regions[dest].garrison > 0 && hostile(s, pid, s.regions[dest].owner!))) use(f.id, 9);
+        f.region = dest; f.fortified = false; f.siege = null;
+      } else use(f.id, 9);
+    }
     if (o.type === 'seize') {
       const f = s.fleets.find(x => x.id === o.fleet)!;
-      f.region = o.target; f.fortified = false;
+      const t = s.regions[o.target];
+      // a defended target means a siege that carries on: the besiegers stay put (and leaving would abandon it)
+      const fight = t.garrison > 0 || hostileFleetsAt(o.target).length > 0;
       usedTargets.add(`seize:${o.target}`); // optimistic: assume it falls (so we don't seize or influence it again)
       usedTargets.add(`inf:${o.target}`);
-      for (const id of o.also ?? []) {
-        const g = s.fleets.find(x => x.id === id);
-        if (g) { g.region = o.target; g.fortified = false; fleetUses.set(id, (fleetUses.get(id) ?? 0) + 1); }
+      for (const g of [f, ...(o.also ?? []).map(id => s.fleets.find(x => x.id === id)).filter((x): x is Fleet => !!x)]) {
+        if (g !== f) use(g.id);
+        if (fight || live) use(g.id, 9);
+        if (!live) { g.region = o.target; g.fortified = false; g.siege = o.target; }
       }
     }
     if (o.type === 'fortify') { const f = s.fleets.find(x => x.id === o.fleet)!; f.fortified = true; }
+    if (o.type === 'influence') {
+      const r = s.regions[o.target];
+      if (r.owner === pid) r.loyalty = r.loyalty.map((x, i) => (i === pid ? x : Math.max(0, x - (R.influenceLimits?.purgeAmount ?? 0))));
+      else {
+        const adj = r.neighbors.some(n => s.regions[n].owner === pid);
+        r.loyalty[pid] = (r.loyalty[pid] ?? 0) + Math.round((R.influence.pushAmount + (adj ? R.influence.adjacentBonus : 0)) * (hasTech(s, pid, 'subversion') ? R.empire.subversionPushMult : 1));
+        if (r.loyalty[pid] >= flipThreshold(s, r.id)) usedTargets.add(`seize:${r.id}`); // it defects this pulse: don't also seize it
+      }
+    }
     if (o.type === 'develop') s.regions[o.region].project = { key: o.project, progress: 0, owner: pid };
+    if (o.type === 'refit') {
+      const f = s.fleets.find(x => x.id === o.fleet)!;
+      for (const sh of f.ships) { sh.mod = blueprintFor(s, pid, sh.cls); sh.maxHp = baseHp(s, sh.cls, sh.mod); sh.hp = Math.max(sh.hp, sh.maxHp); sh.sys = { engines: true, weapons: true, shields: true }; }
+    }
     if (o.type === 'build') {
-      // the projected fleet gets the new hull so later slots plan with it
-      const sh = { id: -1000 - slot(), name: 'new', cls: o.cls, hp: R.ships[o.cls].hp, maxHp: R.ships[o.cls].hp, sys: { engines: true, weapons: true, shields: true }, kills: 0, battles: 0, title: null, bornTurn: s.turn };
+      // the projected fleet gets the new hull (fitted like the real one will be) so later slots plan with it
+      const mod = blueprintFor(s, pid, o.cls);
+      const hp = baseHp(s, o.cls, mod);
+      const sh = { id: -1000 - slot(), name: 'new', cls: o.cls, hp, maxHp: hp, sys: { engines: true, weapons: true, shields: true }, kills: 0, battles: 0, title: null, bornTurn: s.turn, mod };
       const f = o.fleet !== null ? s.fleets.find(x => x.id === o.fleet) : undefined;
       if (f) f.ships.push(sh);
+      else {
+        // a new fleet: it can't act this turn (negative id keeps it out of myFleets) but it counts toward maxFleets
+        const base = myFleets()[0] ?? s.fleets.find(x => x.owner === pid);
+        if (base) s.fleets.push({ ...structuredClone(base), id: -1 - slot(), region: o.region, ships: [sh], bornTurn: s.turn, siege: null, route: null, fortified: false, ordersThisTurn: 0 });
+      }
     }
   }
   function slot() { return sub.orders.filter(Boolean).length; }
@@ -203,8 +286,10 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     const ck = `${t.id}:${key}`;
     const hit = simCache.get(ck);
     if (hit) return hit;
+    // rivals' guard orders are secret: assume a real fleet sitting on its owner's world next door will answer
+    const mayGuard = (f: Fleet) => R.ai.cheatVision ? f.doctrine.guard : s.regions[f.region].owner === f.owner && f.ships.length >= 2;
     const defFleets = s.fleets.filter(f => f.ships.length && hostile(s, f.owner, pid) && (f.region === t.id ||
-      (t.owner !== null && f.owner === t.owner && f.doctrine.guard && t.neighbors.includes(f.region))));
+      (t.owner !== null && f.owner === t.owner && t.neighbors.includes(f.region) && mayGuard(f))));
     const D = defFleets.flatMap(f => unitsOf(s, f));
     const fort = t.buildings.fortress ?? 0;
     const gar = Math.round(t.garrison * (novice && t.owner === null ? 0.8 : 1)); // novices underrate neutral garrisons
@@ -257,6 +342,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     for (const f of fleets) {
       const uses = fleetUses.get(f.id) ?? 0;
       if (uses >= R.orders.maxPerFleet) continue;
+      if (live && f.route) continue;   // LIVE: already travelling (Halt is free if plans change)
       const fatiguePenalty = uses > 0 ? (me0().res.credits > 20 ? 1 : 4) : 0;
       const pow = fleetPower(s, f);
       const here = s.regions[f.region];
@@ -287,6 +373,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         const t = s.regions[tid];
         if (t.owner === pid) continue;
         if (f.siege === tid) continue;   // already besieging: the siege carries on without new orders
+        if (besieged.has(tid) && siegeHolds(tid)) continue;   // our other fleets are taking it already ("already yours")
         const pact = t.owner !== null && t.owner >= 0 && !hostile(s, pid, t.owner);
         if (pact && !(expert && leader === t.owner)) continue;
         if (isScout && t.garrison > 2) continue;
@@ -296,12 +383,15 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
           // combined assault: bring every idle fleet next to the target if one fleet alone isn't enough
           let sim = seizeOdds(units, t, ukey);
           if (sim.p < 0.9) {
-            const helpers = fleets.filter(g => g !== f && !isScoutFleet(g) && (fleetUses.get(g.id) ?? 0) < R.orders.maxPerFleet &&
-              (g.region === tid || s.regions[g.region].neighbors.includes(tid)) && !threatened.has(g.region));
+            const helpers = fleets.filter(g => g !== f && !isScoutFleet(g) && (fleetUses.get(g.id) ?? 0) < R.orders.maxPerFleet && !(live && g.route) &&
+              !(g.bornTurn === s.turn && s.turn > 1) &&
+              (g.region === tid || s.regions[g.region].neighbors.includes(tid)) && !threatened.has(g.region))
+              // the resolver lets at most 3 fleets join an assault: plan with the 3 strongest
+              .sort((a, b) => fleetPower(s, b) - fleetPower(s, a) || a.id - b.id).slice(0, 3);
             if (helpers.length) {
               const all = [...units, ...helpers.flatMap(g => unitsOf(s, g))];
               const sim2 = seizeOdds(all, t, ukey + helpers.map(g => unitsKey(g)).join('+'));
-              if (sim2.p > sim.p + 0.1) { sim = sim2; also = helpers.slice(0, 3).map(g => g.id); }
+              if (sim2.p > sim.p + 0.1) { sim = sim2; also = helpers.map(g => g.id); }
             }
           }
           // never throw a fleet at a wall: battles are noisy, so demand a real margin unless the prize is huge
@@ -380,7 +470,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       const yard = r.buildings.shipyard ?? 0;
       const enemiesHere = s.fleets.some(f => f.region === r.id && f.ships.length && hostile(s, f.owner, pid));
       if (yard > 0 && !enemiesHere) {
-        const joinable = myFleets().find(f => f.region === r.id && f.ships.length < R.maxShipsPerFleet && !isScoutFleet(f));
+        // join a fleet that will still be here when the yard delivers: guards may charge off to a neighbour mid-turn
+        const joinable = myFleets().find(f => f.region === r.id && f.ships.length < R.maxShipsPerFleet && !isScoutFleet(f) && !f.doctrine.guard && !(live && f.route));
         if (expert) {
           const b = expertBuild(r, need, joinable, mainArmy);
           if (b) out.push({ o: { type: 'build', region: r.id, cls: b.cls, fleet: joinable ? joinable.id : null }, v: b.v, tag: `build:${r.id}:${sub.orders.filter(o => o?.type === 'build').length}` });
@@ -415,6 +506,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     // ------------- influence regions next door
     for (const r of s.regions) {
       if (r.kind === 'void') continue;
+      if (besieged.has(r.id)) continue;   // the siege decides it (and a capture wipes the loyalty we'd push)
       if (r.owner === pid) {
         // expert counter-intelligence: purge rival agents before they turn one of our worlds
         const worst = Math.max(...r.loyalty.filter((_, i) => i !== pid));
@@ -625,7 +717,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
 //  Battle predictor: a deterministic expected-value version of combat.ts.
 //  Good enough to tell "easy", "coin flip" and "suicide" apart.
 // ============================================================================
-export interface SimUnit { hp: number; atk: number; shots: number; sh: number; siege: number; eva: number; cost: number }
+export interface SimUnit { hp: number; atk: number; shots: number; sh: number; siege: number; eva: number; cost: number; own?: number; hit?: number }
 interface SimResult { win: boolean; p: number; left: SimUnit[]; garLeft: number; lost: number }
 
 function isScoutFleet(f: Fleet): boolean { return f.ships.every(x => x.cls === 'scout'); }
@@ -638,7 +730,10 @@ export function unitsOf(s: GameState, f: Fleet, defending = false): SimUnit[] {
     let atk = sh.sys.weapons ? d.attack : 0;
     if (f.fatigued) atk = Math.max(1, Math.round(atk * R.overdrive.fatigueAttackMult));
     const eva = d.evasion * (sh.sys.engines ? 1 : 0.3) + (f.fortified && defending ? R.combat.fortifyEvasion : 0);
-    return { hp: sh.hp, atk, shots: sh.sys.weapons ? d.shots : 0, sh: sh.sys.shields ? d.shields : 0, siege: d.siege, eva, cost: (d.cost.industry ?? 0) + (d.cost.credits ?? 0) };
+    // combat.ts hitChance: commander rank, dug-in fleets, the Lens relic (Vanguard depends on the region: see simBattle)
+    const hit = (f.commander ? (f.commander.rank - 1) * (R.commanders?.hitBonusPerRank ?? 0) : 0) + (f.fortified && defending ? R.combat.fortifyHitBonus ?? 0 : 0) +
+      (f.owner >= 0 && s.players[f.owner]?.relics?.includes('lens') ? 0.04 : 0);
+    return { hp: sh.hp, atk, shots: sh.sys.weapons ? d.shots : 0, sh: sh.sys.shields ? d.shields : 0, siege: d.siege, eva, cost: (d.cost.industry ?? 0) + (d.cost.credits ?? 0), own: f.owner, hit };
   });
 }
 function unitsCost(u: SimUnit[]): number { return u.reduce((a, x) => a + x.cost, 0); }
@@ -657,6 +752,18 @@ function simBattle(s: GameState, rid: number, A: SimUnit[], D: SimUnit[], gar: n
   const shieldCap = R.shieldsCap?.maxReduction ?? 1; // shields absorb at most this share of a hit
   const hp = (xs: U[]) => xs.reduce((t, x) => t + Math.max(0, x.cur), 0);
   const a0 = hp(a) || 1, d0 = hp(d) + gar || 1;
+  // combat.ts: Vanguard ships hit harder away from home; Alpha Strike doubles every ship's first-round volley.
+  // A sim round fires every ship's every shot; a real round fires only the frontline (frontageBase +
+  // frontagePerShip x armed ships) at `lethality`. So the one doubled real round is worth
+  // lethality x frontline/armed extra sim volleys, not a whole doubled sim round.
+  const bonusOf = (u: SimUnit) => (u.hit ?? 0) + (u.own !== undefined && u.own >= 0 && reg.owner !== u.own && hasLaw(s, u.own, 'vanguard') ? R.empire.vanguardHit : 0);
+  const alphaMult = (side: SimUnit[]) => {
+    const armed = side.filter(u => u.atk > 0 && u.shots > 0).length || 1;
+    const width = Math.min(C.frontage ?? armed, (C.frontageBase ?? armed) + Math.floor(armed * (C.frontagePerShip ?? 0)));
+    return 1 + Math.max(0, Math.min(1, C.lethality ?? 1)) * Math.min(1, width / armed);
+  };
+  const alphaA = alphaMult(A), alphaD = alphaMult(D);
+  const volley = (u: SimUnit, round: number, m: number) => (u.atk > 0 ? u.shots : 0) * (round === 1 && u.own !== undefined && u.own >= 0 && hasTech(s, u.own, 'alpha') ? m : 1);
   const fire = (shooters: { atk: number; shots: number; siege: number; bonus: number }[], targets: U[]) => {
     const live = targets.filter(t => t.cur > 0).sort((x, y) => x.cur - y.cur);
     let i = 0;
@@ -666,7 +773,7 @@ function simBattle(s: GameState, rid: number, A: SimUnit[], D: SimUnit[], gar: n
       const t = live[i];
       const ph = Math.max(0.1, Math.min(0.95, C.baseHit + sh.bonus - t.eva - neb));
       const dmg = t.gar ? Math.max(reg.buildings.pshield ? 0 : 1, sh.atk - armor) + sh.siege : Math.max(1, Math.ceil(sh.atk * (1 - shieldCap)), sh.atk - t.sh);
-      t.pend += ph * dmg;
+      t.pend += ph * dmg * Math.min(1, sh.shots - k);   // a fractional last shot (Alpha Strike) counts in part
     }
   };
   let retreated: 'a' | 'd' | null = null;
@@ -674,8 +781,8 @@ function simBattle(s: GameState, rid: number, A: SimUnit[], D: SimUnit[], gar: n
     const la = a.filter(u => u.cur > 0), ld = d.filter(u => u.cur > 0);
     if (!la.length || (!ld.length && garU.cur <= 0)) break;
     const dTargets = garU.cur > 0 ? [...ld, garU] : ld;
-    fire(la.map(u => ({ atk: u.atk, shots: u.atk > 0 ? u.shots : 0, siege: u.siege, bonus: 0 })), dTargets);
-    const dShooters = ld.map(u => ({ atk: u.atk, shots: u.atk > 0 ? u.shots : 0, siege: 0, bonus: 0 }));
+    fire(la.map(u => ({ atk: u.atk, shots: volley(u, round, alphaA), siege: u.siege, bonus: bonusOf(u) })), dTargets);
+    const dShooters = ld.map(u => ({ atk: u.atk, shots: volley(u, round, alphaD), siege: u.siege, bonus: bonusOf(u) }));
     if (garU.cur > 0) dShooters.push({ atk: G.attackBase + fort * G.attackPerFortress + bat * R.empire.batteryAttack, shots: G.shotsBase + fort * G.shotsPerFortress + bat * R.empire.batteryShots + Math.floor(garU.cur / G.hpPerShot), siege: 0, bonus: 0.05 });
     fire(dShooters, la);
     for (const u of [...a, ...d, garU]) { u.cur -= u.pend; u.pend = 0; }
@@ -689,7 +796,7 @@ function simBattle(s: GameState, rid: number, A: SimUnit[], D: SimUnit[], gar: n
   const win = hp(a) > 0 && retreated !== 'a' && (retreated === 'd' || (hp(d) <= 0 && garU.cur <= 0));
   // EV sims are overconfident near the edge: turn the margin into a probability
   const p = win ? 0.55 + 0.45 * Math.min(1, fa * 2) : Math.max(0.02, 0.45 - fd);
-  const left = a.filter(u => u.cur > 0.5).map(u => ({ hp: u.cur, atk: u.atk, shots: u.shots, sh: u.sh, siege: u.siege, eva: u.eva, cost: u.cost }));
+  const left = a.filter(u => u.cur > 0.5).map(u => ({ hp: u.cur, atk: u.atk, shots: u.shots, sh: u.sh, siege: u.siege, eva: u.eva, cost: u.cost, own: u.own, hit: u.hit }));
   const lost = a.reduce((t, u) => t + (u.cur <= 0.5 ? u.cost : u.cost * (1 - u.cur / u.hp) * 0.3), 0);
   return { win, p, left, garLeft: Math.max(0, garU.cur), lost };
 }
@@ -715,7 +822,7 @@ export function predictAssault(s: GameState, pid: PlayerId, fleetIds: number[], 
     else { const b2 = simBattle(s, target, b1.left, [], b1.garLeft || (garHelps ? 0 : gar), fort, 0.35); res = { ...b2, p: Math.min(b1.p, b2.p), lost: b1.lost + b2.lost }; }
   } else res = gar > 0 ? simBattle(s, target, A, [], gar, fort, 0.35) : { win: true, p: 0.98, left: A, garLeft: 0, lost: 0 };
   // hint: what decides this fight
-  const armor = R.garrison.armor + fort * R.garrison.armorPerFortress;
+  const armor = R.garrison.armor + fort * R.garrison.armorPerFortress + (t.buildings.pshield ? R.empire.pshieldReduction : 0);
   const blocked = A.filter(u => u.atk - armor <= 0 && u.siege === 0).length;
   let note: string;
   if (foes.length) note = `rival fleet of ${foes.reduce((n, f) => n + f.ships.length, 0)} ship${foes.reduce((n, f) => n + f.ships.length, 0) > 1 ? 's' : ''} defends${gar > 0 ? `, backed by a garrison of ${gar}` : ''}`;
@@ -726,14 +833,27 @@ export function predictAssault(s: GameState, pid: PlayerId, fleetIds: number[], 
   return { p: Math.round(res.p * 100) / 100, win: res.win, note };
 }
 
-/** The AI's view of the world: fleets it can't see are removed (unless cheatVision). */
+/**
+ * The AI's view of the world: exactly what a human in this seat would be sent (viewFor: no
+ * unseen fleets, no rival stockpiles or doctrines, fogged rival garrisons and projects), unless
+ * rules.ai.cheatVision. Always a private copy: planning never writes through to s0.
+ */
 function perceive(s0: GameState, pid: PlayerId): GameState {
-  const s = structuredClone({ ...s0, last: null, log: [] }) as GameState;
-  // a fogged (viewFor) state hides rival garrisons as -1: plan against the likely strength instead
+  const s = s0.rules.ai?.cheatVision ? structuredClone({ ...s0, last: null, log: [] }) as GameState
+    : viewFor({ ...s0, last: null, log: [] }, pid).state;
+  // a fogged state hides rival garrisons as -1: plan against the likely strength instead
   for (const r of s.regions) if (!(r.garrison >= 0)) r.garrison = r.owner === null ? Math.max(0, r.baseGarrison ?? 0) : maxGarrison(s, r.id);
-  if (s.rules.ai.cheatVision) return s;
-  const cov = coverage(s, pid);
-  s.fleets = s.fleets.filter(f => f.owner === pid || seesFleetsIn(s, pid, f.region, cov));
+  // per-turn counters still hold last turn's values until the resolver resets them: a WEGO turn
+  // (or the first tick of a LIVE cycle) starts fresh, so plan as if they were already reset
+  const L = s.live, per = Math.max(1, Math.floor(s.rules.live?.ticksPerCycle ?? 8) || 1);   // as live.ts ticksPerCycle()
+  if (!L || L.tick % per === 0) {
+    for (const f of s.fleets) f.ordersThisTurn = 0;
+    for (const p of s.players) p.researched = 0;
+  }
+  // old saves may lack Empire-layer fields
+  for (const p of s.players) { p.techs ??= []; p.laws ??= []; p.blueprint ??= {}; p.pactOffers ??= []; }
+  s.engagements ??= [];
+  s.scans ??= [];
   return s;
 }
 
