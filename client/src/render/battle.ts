@@ -100,9 +100,11 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: 
 }
 
 // ------------------------------------------------------------------ styles
+// no backdrop-filter on the overlay: re-blurring the page behind a canvas that repaints every frame
+// cost ~45 ms/frame at 1440x900 (60 fps -> 15 fps); a more opaque scrim reads the same
 const CSS = `
 .bv-overlay,.bv-closing{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;
-  background:radial-gradient(ellipse at center,rgba(40,14,80,.55),rgba(3,1,10,.88));backdrop-filter:blur(3px);
+  background:radial-gradient(ellipse at center,rgba(30,10,62,.72),rgba(3,1,10,.92));
   font-family:${FONT};color:#e8e0ff;animation:bv-fade .25s ease-out}
 @keyframes bv-fade{from{opacity:0}to{opacity:1}}
 .bv-closing{pointer-events:none;animation:bv-out .18s ease-in forwards}
@@ -248,8 +250,14 @@ function hullDetail(g: CanvasRenderingContext2D, glyph: string, s: number) {
 const ENGINE_X: Record<string, number> = { dart: -0.45, arrow: -0.4, wedge: -0.92, block: -0.88, long: -1.05, dread: -1.02 };
 
 // ------------------------------------------------------------------ viewer
+/** The open viewer's close(): opening another replaces it instead of stacking two overlays and two rAF loops. */
+let closeOpen: (() => void) | null = null;
+/** Is a battle viewer covering the screen? (the map pauses its redraws underneath) */
+export const battleViewerOpen = () => closeOpen !== null;
+
 export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): void {
   injectStyle();
+  closeOpen?.();
   const reduced = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const R = ctx.rules;
 
@@ -510,9 +518,11 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
 
   // ---------------------------------------------------------------- layout
   function layout() {
-    const r = stage.getBoundingClientRect();
-    W = Math.max(200, r.width); H = Math.max(160, r.height);
-    dpr = Math.min(3, window.devicePixelRatio || 1);
+    // clientWidth/Height ignore CSS transforms: getBoundingClientRect() would return the size mid open-animation
+    // (scale .94), leaving a blurry backing store and hover hit-tests offset from what is drawn
+    W = Math.max(200, stage.clientWidth); H = Math.max(160, stage.clientHeight);
+    // capped at 2 like the map: at 3x a full-screen phone canvas is 2.25x the pixels for no visible gain (47 ms -> ~25 ms frames)
+    dpr = Math.min(2, window.devicePixelRatio || 1);
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
     farDist = Math.max(W, H) * 0.9;
     const n = sides.length;
@@ -532,7 +542,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     const gapHalf = n === 2 ? (portrait ? H : W) * 0.09 : minD * 0.13;
     // front point of each side: on an ellipse so 3-way battles use the whole stage
     const gx = n >= 3 ? Math.max(gapHalf, (W - 2 * mSide) * 0.17) : gapHalf;
-    const gy = n >= 3 ? Math.max(gapHalf * 0.8, (H - mTop - mBot) * 0.13) : gapHalf;
+    // tall phone stages: spread the three fronts vertically instead of bunching them in the middle third
+    const gy = n >= 3 ? Math.max(gapHalf * 0.8, (H - mTop - mBot) * (portrait ? 0.2 : 0.13)) : gapHalf;
     const frontPt = (u: P): P => [cx + u[0] * gx, cy + u[1] * gy];
     const frontDist = (u: P) => Math.hypot(u[0] * gx, u[1] * gy);
     const reach = (u: P) => {
@@ -608,7 +619,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         setLs(g, '0px');
         if (maxX + 16 + tw < W) sd.label = { x: maxX + 16, y: (minY + maxY) / 2, align: 'left' };
         else if (minX - 16 - tw > 0) sd.label = { x: minX - 16, y: (minY + maxY) / 2, align: 'right' };
-        else sd.label = { x: clamp((minX + maxX) / 2, tw / 2 + 4, W - tw / 2 - 4), y: minY - 14, align: 'center' };
+        // no room beside it: below the formation (above it, the label collides with damage / crit callouts)
+        else sd.label = { x: clamp((minX + maxX) / 2, tw / 2 + 4, W - tw / 2 - 4), y: Math.min(H - mBot + 12, Math.max(maxY + 26, gu ? gu.hy + gu.s * 1.55 + 36 : 0)), align: 'center' };
       } else {
         sd.label = { x: clamp((minX + maxX) / 2, 90, W - 90), y: clamp(minY - 18, mTop + 4, H), align: 'center' };
       }
@@ -731,7 +743,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       g.fillStyle = pg;
       g.beginPath(); g.moveTo(ex, -s * 0.16); g.lineTo(ex - s * 1.1 * fl, 0); g.lineTo(ex, s * 0.16); g.closePath(); g.fill();
     }
-    g.shadowColor = color; g.shadowBlur = Math.max(6, s * 0.9);
+    // shadowBlur is the costliest thing per ship: big fleets glow via the hull fill alone
+    if (shipUnits.length <= 24) { g.shadowColor = color; g.shadowBlur = Math.max(6, s * 0.9); }
     hullPath(g, u.glyph, s);
     g.fillStyle = recentHit ? 'rgba(255,255,255,.55)' : rgba(color, 0.2);
     g.fill();
@@ -1055,7 +1068,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         g.save();
         g.globalAlpha = a;
         g.textAlign = 'center'; g.textBaseline = 'middle';
-        const y = Math.min(H * 0.18, 70);
+        // narrow stages: keep the banner below the strength readout in the top-left corner
+        const y = W < 700 ? Math.max(Math.min(H * 0.18, 70), 14 + sides.length * 22 + 16) : Math.min(H * 0.18, 70);
         g.font = `600 ${clamp(W * 0.03, 15, 24)}px ${FONT}`;
         setLs(g, '0.5em');
         g.fillStyle = '#efe6ff'; g.shadowColor = '#a070ff'; g.shadowBlur = 16;
@@ -1282,7 +1296,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   bar.addEventListener('pointercancel', () => { dragging = false; });
   const setMouse = (e: PointerEvent) => {
     const r = canvas.getBoundingClientRect();
-    mouse = { x: e.clientX - r.left, y: e.clientY - r.top };
+    // map to layout px (the panel may still be scaled by its open/close animation)
+    mouse = { x: (e.clientX - r.left) * (W / (r.width || W)), y: (e.clientY - r.top) * (H / (r.height || H)) };
   };
   canvas.addEventListener('pointermove', setMouse);
   canvas.addEventListener('pointerdown', setMouse);
@@ -1292,6 +1307,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   function close() {
     if (closed) return;
     closed = true;
+    if (closeOpen === close) closeOpen = null;
     cancelAnimationFrame(raf);
     ro.disconnect();
     window.removeEventListener('keydown', onKey, true);
@@ -1301,6 +1317,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     setTimeout(() => overlay.remove(), 190);
   }
 
+  closeOpen = close;
   layout();
   last = performance.now();
   raf = requestAnimationFrame(frame);

@@ -5,6 +5,7 @@ import { NEUTRAL_COLOR } from '../../../shared/config/content.ts';
 import { Rng, hashString } from '../../../shared/sim/rng.ts';
 import { pointInPoly } from '../../../shared/sim/mapgen.ts';
 import { TRAITS as WORLD_TRAITS, VEINS } from '../../../shared/config/empire.ts';
+import { battleViewerOpen } from './battle.ts';
 
 export interface FleetDraw { id: number; owner: number; ships: number; pos: Pt; alpha: number; name: string; fortified?: boolean; selected?: boolean; ghost?: boolean; cls?: string[]; idle?: boolean }
 export interface Fx {
@@ -86,6 +87,8 @@ export class MapRenderer {
   private selRegion: number | null = null; private selRegionT0 = 0;
   private sparkAcc = 0;
   private now = 0;
+  /** where each fleet token was drawn last frame (for fleetAt) */
+  private drawnPos = new Map<number, Pt>();
 
   constructor(public canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -114,7 +117,9 @@ export class MapRenderer {
   // ---------------------------------------------------------------- camera flights
   /** Glide the camera to p (and optionally zoom z). User input (drag/pinch/wheel) cancels the flight. */
   flyTo(p: Pt, z?: number, dur = 650) {
-    const to = { x: p.x, y: p.y, z: z ?? this.cam.z };
+    const zz = z !== undefined && Number.isFinite(z) && z > 0 ? z : this.cam.z;
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
+    const to = { x: p.x, y: p.y, z: zz };
     if (reducedMotion() || dur <= 0) { this.cam = { ...to }; this.camAnim = null; return; }
     this.camAnim = { from: { ...this.cam }, to, t0: performance.now(), dur, set: { ...this.cam } };
   }
@@ -140,6 +145,8 @@ export class MapRenderer {
   resetAnim() { this.ownersReset = true; this.fleetsReset = true; for (const t of this.tracks.values()) t.trail.length = 0; this.vanish = []; this.ownerFx = []; }
 
   fit(state: GameState, focus?: Pt) {
+    // a zero-sized canvas (hidden, mid-layout) would give z = 0 and NaN everywhere downstream: fit later instead
+    if (!(this.w > 0 && this.h > 0) || !state.regions.length) return;
     let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
     for (const r of state.regions) for (const p of r.poly) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); }
     const z = Math.min(this.w / (maxX - minX + 80), this.h / (maxY - minY + 80));
@@ -168,8 +175,9 @@ export class MapRenderer {
   fleetAt(fleets: FleetDraw[], sx: number, sy: number): FleetDraw | null {
     let best: FleetDraw | null = null, bd = 1e9;
     for (const f of fleets) {
-      if (f.ghost) continue;
-      const s = this.toScreen(f.pos);
+      if (f.ghost || f.alpha <= 0.05) continue;
+      // hit-test where the token was actually drawn last frame (LIVE glide, smoothing offsets), not its layout slot
+      const s = this.toScreen(this.drawnPos.get(f.id) ?? f.pos);
       const d = Math.hypot(s.x - sx, s.y - sy);
       if (d < (this.compact ? 26 : 16) && d < bd) { bd = d; best = f; }
     }
@@ -199,13 +207,16 @@ export class MapRenderer {
     if (this.seed !== st.seed) this.prepare(st);
     const W = this.canvas.width, H = this.canvas.height;
     if (!W || !H) return;
+    // the battle viewer covers the whole screen: keep the last frame instead of animating the map underneath it
+    // (it was ~5-7 ms of every viewer frame, plus re-blurring the side panels' backdrop-filter over it)
+    if (battleViewerOpen() && this.layer && this.layerKey) return;
     const now = I.now;
     this.dt = this.lastNow ? Math.min(100, Math.max(0, now - this.lastNow)) : 16;
     this.lastNow = now; this.now = now;
     this.stepCam(now);
     this.trackOwners(I);
     // hover & selection live in the dynamic pass (faded), so they don't force a rebuild of the static layer
-    const base = [this.objId(st), this.objId(I.visible), I.you, I.owners.join(','), W, H, this.dpr, I.cutOff ? this.objId(I.cutOff) : 0].join('|');
+    const base = [this.objId(st), this.staticSig(I), this.objId(I.visible), I.visible.size, I.you, I.owners.join(','), W, H, this.dpr, I.cutOff ? `${this.objId(I.cutOff)}:${I.cutOff.size}` : 0].join('|');
     const cam = this.cam;
     if (!this.lastCam || cam.x !== this.lastCam.x || cam.y !== this.lastCam.y || cam.z !== this.lastCam.z) { this.camMovedAt = now; this.lastCam = { ...cam }; }
     if (!this.layer || this.layer.width !== W || this.layer.height !== H) {
@@ -270,6 +281,25 @@ export class MapRenderer {
     for (const r of st.regions) this.drawSiteAnim(r, I, this.colorOf(st, I.owners[r.id]));
     this.drawDynamic(I);
     ctx.restore();
+  }
+
+  /** Hash of every region field the static layer draws, so an in-place change (a battery, a vein, a trait, a project,
+   *  loyalty, a renamed region…) rebuilds the cache even when the state object is the same one. Cheap: ints only. */
+  private staticSig(I: DrawInput): number {
+    let h = 17;
+    const mix = (v: number) => { h = (Math.imul(h, 31) + (v | 0)) | 0; };
+    const str = (t: string | null | undefined) => { if (!t) { mix(0); return; } for (let i = 0; i < t.length; i++) mix(t.charCodeAt(i)); mix(t.length); };
+    const st = I.state;
+    for (const r of st.regions) {
+      mix(r.owner ?? -9); mix(r.garrison); mix(r.dev); str(r.kind); str(r.relic as string | undefined); str(r.name);
+      str(r.trait as string | undefined); str(r.vein as string | undefined); str(r.project?.key); mix(r.memorials.length);
+      if (I.you !== null) mix(Math.round((r.loyalty[I.you] ?? 0) * 100));
+      const b = r.buildings as Record<string, number | undefined>;
+      for (const k in b) { str(k); mix(b[k] ?? 0); }
+    }
+    for (const p of st.players) str(p.color);
+    mix(st.rules.empire?.enabled === false ? 1 : 0);
+    return h;
   }
 
   private colorOf(st: GameState, o: number | null | undefined) { return o === null || o === undefined || o < 0 ? NEUTRAL_COLOR : st.players[o]?.color ?? NEUTRAL_COLOR; }
@@ -354,6 +384,12 @@ export class MapRenderer {
     // ---------------------------------------------------------------- sites & labels
     this.labelBoxes = [];
     this.hiddenLabels.clear();
+    // every site's disc is an obstacle too, so a neighbour's name is never printed across a star or crown
+    for (const r of st.regions) {
+      if (r.kind === 'void') continue;
+      const sz = this.siteSize(r) * 1.3;
+      this.labelBoxes.push({ x: r.site.x - sz, y: r.site.y - sz, w: sz * 2, h: sz * 2 });
+    }
     const prio = (r: Region) => ({ throne: 0, crown: 1, home: 2, relic: 3, colony: 4, void: 5 })[r.kind];
     for (const r of st.regions.slice().sort((a, b) => prio(a) - prio(b))) this.drawSite(r, I, colorOf(I.owners[r.id]));
     ctx.restore();
@@ -390,7 +426,8 @@ export class MapRenderer {
     for (const e of engs) {
       const r = st.regions[e.region];
       if (!r) continue;
-      const p = { x: r.site.x + this.px(30), y: r.site.y - this.px(26) };
+      // to the right of the star: above it is where the region's name is printed, and the marker hid it
+      const p = { x: r.site.x + this.siteSize(r) * 1.6 + this.px(16), y: r.site.y - this.px(4) };
       const pulse = 0.5 + 0.5 * Math.sin(I.now / 260);
       // firelight flicker: a ragged, uneven glow instead of a smooth sine
       const flick = reduced ? 1 : 0.8 + 0.35 * Math.sin(I.now / 47 + e.region) * Math.sin(I.now / 83 + e.region * 3);
@@ -615,9 +652,11 @@ export class MapRenderer {
     const s = this.px(1);
     const seen = new Set<number>();
     const draws: { f: FleetDraw; tr: Track | null }[] = [];
+    this.drawnPos.clear();
     for (const f of I.fleets) {
       if (f.ghost) { draws.push({ f, tr: null }); continue; }
       seen.add(f.id);
+      if (f.alpha > 0.05) this.drawnPos.set(f.id, { x: f.pos.x, y: f.pos.y });
       const color = this.colorOf(I.state, f.owner);
       let tr = this.tracks.get(f.id);
       if (!tr) {
@@ -808,7 +847,7 @@ export class MapRenderer {
         break;
       }
       case 'capture': this.burst(P, fx.color, Math.round(18 * m), 0.25, 900); break;
-      case 'excavate': for (let i = 0; i < 16 * m; i++) this.particles.push({ x: P.x + (Math.random() - 0.5) * this.px(24), y: P.y, vx: (Math.random() - 0.5) * this.px(0.02), vy: -this.px(0.04 + Math.random() * 0.08), t0: this.now, life: 900 + Math.random() * 600, size: 1.5 + Math.random() * 1.5, color: fx.color, drag: 0.999, streak: false, grav: 0 }); break;
+      case 'excavate': for (let i = 0; i < 16 * m && this.particles.length < (this.compact ? 220 : 450); i++) this.particles.push({ x: P.x + (Math.random() - 0.5) * this.px(24), y: P.y, vx: (Math.random() - 0.5) * this.px(0.02), vy: -this.px(0.04 + Math.random() * 0.08), t0: this.now, life: 900 + Math.random() * 600, size: 1.5 + Math.random() * 1.5, color: fx.color, drag: 0.999, streak: false, grav: 0 }); break;
       case 'clash': case 'battle': this.burst(P, '#ffd27a', Math.round(12 * m), 0.28, 700, true); break;
       case 'build': this.burst(P, fx.color, Math.round(8 * m), 0.12, 700); break;
     }
@@ -832,7 +871,7 @@ export class MapRenderer {
   }
   /** A single bright weapon flash (one short-lived particle). */
   private flash(x: number, y: number) {
-    if (this.particles.length > (this.compact ? 220 : 450)) return;
+    if (this.particles.length >= (this.compact ? 220 : 450)) return;
     this.particles.push({ x, y, vx: 0, vy: 0, t0: this.now, life: 160, size: 7, color: '#fff2c8', drag: 1, streak: false, grav: 0 });
   }
   private ring(p: Pt, color: string, dur: number, from: number, to: number) {
@@ -966,12 +1005,14 @@ export class MapRenderer {
       { x: p.x - lw * 0.45, y: p.y + size * 1.9 + this.px(30) },
     ];
     let spot = cands[0], free = false;
-    const hit = (c: Pt) => { const box = { x: c.x - lw / 2, y: c.y - lh, w: lw, h: lh * 1.2 }; return this.labelBoxes.some(b => box.x < b.x + b.w && box.x + box.w > b.x && box.y < b.y + b.h && box.y + box.h > b.y); };
+    // a little air around each label: names that touch read as one long name
+    const padX = this.px(4), padY = this.px(1.5);
+    const hit = (c: Pt) => { const box = { x: c.x - lw / 2 - padX, y: c.y - lh - padY, w: lw + padX * 2, h: lh * 1.2 + padY * 2 }; return this.labelBoxes.some(b => box.x < b.x + b.w && box.x + box.w > b.x && box.y < b.y + b.h && box.y + box.h > b.y); };
     for (const c of cands) if (!hit(c)) { spot = c; free = true; break; }
-    const minor = r.kind === 'colony' || r.kind === 'void' || r.kind === 'relic';
-    if (!free) ctx.globalAlpha = minor ? 0 : 0.45;
-    if (!free && minor) this.hiddenLabels.set(r.id, { x: spot.x, y: spot.y, name, font: ctx.font, sp: this.px(1.2) });
-    this.labelBoxes.push({ x: spot.x - lw / 2, y: spot.y - lh, w: lw, h: lh * 1.2 });
+    // no free spot (dense clusters, far zoom): print nothing rather than a pile of overlapping names; hover reveals it.
+    // (Crowns/Throne/capitals are placed first, so they almost always find a spot.)
+    if (!free) { ctx.globalAlpha = 0; this.hiddenLabels.set(r.id, { x: spot.x, y: spot.y, name, font: ctx.font, sp: this.px(1.2) }); }
+    else this.labelBoxes.push({ x: spot.x - lw / 2, y: spot.y - lh, w: lw, h: lh * 1.2 });
     const ly = spot.y;
     letterSpaced(ctx, name, spot.x, ly, this.px(1.2));
     ctx.globalAlpha = 1;
@@ -988,14 +1029,23 @@ export class MapRenderer {
     const emp = I.state.rules.empire?.enabled !== false;
     const T = emp && r.trait ? WORLD_TRAITS[r.trait] : null, V = emp && r.vein ? VEINS[r.vein] : null;
     if (T && !this.compact) sub.unshift(T.icon);
-    const txt = sub.join('  '), vtxt = V ? V.icon : '';
+    let txt = sub.join('  '), vtxt = V ? V.icon : '';
     if (txt || vtxt) {
-      const sx = below ? spot.x : p.x, sy = below ? spot.y + this.px(13) : p.y + size * 1.9 + this.px(14);
+      // the detail line is dropped (not overprinted) where it would run into another label or star; keep the vein icon
+      const sx0 = !free ? p.x : below ? spot.x : p.x, sy0 = free && below ? spot.y + this.px(13) : p.y + size * 1.9 + this.px(14);
+      const wAll = ctx.measureText(txt + (txt && vtxt ? '  ' : '') + vtxt).width;
+      const sb = { x: sx0 - wAll / 2, y: sy0 - this.px(10), w: wAll, h: this.px(12) };
+      const own = free ? this.labelBoxes.length - 1 : -1;
+      if (this.labelBoxes.some((b, i) => i !== own && sb.x < b.x + b.w && sb.x + sb.w > b.x && sb.y < b.y + b.h && sb.y + sb.h > b.y)) txt = '';
+    }
+    if (txt || vtxt) {
+      const sx = free && below ? spot.x : p.x, sy = free && below ? spot.y + this.px(13) : p.y + size * 1.9 + this.px(14);
       const gap = txt && vtxt ? ctx.measureText('  ').width : 0;
       const w1 = txt ? ctx.measureText(txt).width : 0, w2 = vtxt ? ctx.measureText(vtxt).width : 0;
       const x0 = sx - (w1 + gap + w2) / 2;
       ctx.textAlign = 'left';
       if (txt) { ctx.fillStyle = 'rgba(200,195,230,0.7)'; ctx.fillText(txt, x0, sy); }
+      this.labelBoxes.push({ x: x0, y: sy - this.px(10), w: w1 + gap + w2, h: this.px(12) });
       if (V) {
         const mined = (r.buildings.extractor ?? 0) > 0;
         ctx.save();
