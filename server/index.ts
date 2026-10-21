@@ -35,6 +35,8 @@ export interface RunningServer {
 
 const MAX_BODY = 256 * 1024;
 const MAX_WS_PAYLOAD = 256 * 1024;
+/** Open game sockets per client address (each one costs a filtered view per update). */
+const MAX_CONNS_PER_IP = 64;
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.webp': 'image/webp', '.txt': 'text/plain' };
 const SEC_HEADERS = { 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY' };
 
@@ -74,7 +76,7 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
   const joinLimiter = new RateLimiter(60, 60_000);
 
   // ---------------------------------------------------------------- sockets
-  interface Conn { ws: WebSocket; game: string; seat: number | null; alive: boolean; msgs: Bucket; chats: Bucket; drops: number }
+  interface Conn { ws: WebSocket; game: string; seat: number | null; alive: boolean; msgs: Bucket; chats: Bucket; drops: number; ip: string }
   const conns = new Set<Conn>();
   const onlineSeats = (id: string) => {
     const out = new Set<number>();
@@ -89,12 +91,13 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
   const chatFor = (g: StoredGame, seat: number | null) =>
     g.chat.filter(m => m.to === null || (seat !== null && (m.to === seat || m.seat === seat))).slice(-200);
 
-  function pushView(g: StoredGame, only?: Conn) {
+  /** Send fresh views to every connection of a game (or only those `only` selects: one connection or a predicate). */
+  function pushView(g: StoredGame, only?: Conn | ((c: Conn) => boolean)) {
     const meta = store.meta(g, onlineSeats(g.id));
     // views are per seat, so compute each once
     const views = new Map<number | null, ReturnType<Store['view']>>();
     for (const c of conns) {
-      if (c.game !== g.id || (only && c !== only)) continue;
+      if (c.game !== g.id || (only && (typeof only === 'function' ? !only(c) : c !== only))) continue;
       if (!views.has(c.seat)) views.set(c.seat, store.view(g, c.seat));
       send(c, {
         type: 'view', meta, view: views.get(c.seat)!,
@@ -233,8 +236,12 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     const gid = url.searchParams.get('game') ?? '';
     const g = ID_RE.test(gid) ? store.games.get(gid) : undefined;
     if (!g) { ws.send(JSON.stringify({ type: 'error', error: 'no such game', code: 'no_game' } satisfies ServerMsg)); ws.close(4404, 'no such game'); return; }
+    const ip = clientIp(req);
+    let open = 0;
+    for (const o of conns) if (o.ip === ip) open++;
+    if (open >= MAX_CONNS_PER_IP) { ws.send(JSON.stringify({ type: 'error', error: 'too many connections', code: 'rate_limited' } satisfies ServerMsg)); ws.close(4429, 'too many connections'); return; }
     const token = url.searchParams.get('token');
-    const c: Conn = { ws, game: g.id, seat: store.seatFor(g, token), alive: true, msgs: new Bucket(40, 4), chats: new Bucket(5, 0.5), drops: 0 };
+    const c: Conn = { ws, game: g.id, seat: store.seatFor(g, token), alive: true, msgs: new Bucket(40, 4), chats: new Bucket(5, 0.5), drops: 0, ip };
     conns.add(c);
     ws.on('pong', () => { c.alive = true; });
     ws.on('close', () => {
@@ -294,18 +301,27 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
           }
           case 'history': {
             if (!Number.isInteger(m.turn)) return send(c, { type: 'error', error: 'bad turn', code: 'bad_message' });
-            const r = game.history.find(h => h.turn === m.turn) ?? null;
-            send(c, { type: 'history', turn: m.turn, result: r ? filterHistoryFor(game, r, c.seat) : null });
+            if (m.tick !== undefined && !Number.isInteger(m.tick)) return send(c, { type: 'error', error: 'bad tick', code: 'bad_message' });
+            // LIVE: a cycle (turn) has several ticks; `tick` picks one (else the cycle's first stored tick)
+            const r = game.history.find(h => h.turn === m.turn && (m.tick === undefined || h.tick === m.tick)) ?? null;
+            send(c, { type: 'history', turn: m.turn, tick: m.tick, result: r ? filterHistoryFor(game, r, c.seat) : null });
             break;
           }
           case 'liveOrder': case 'liveCancel': case 'liveFree': case 'liveHalt': {
             if (c.seat === null) return send(c, { type: 'error', error: 'spectators cannot give orders', code: 'forbidden' });
-            store.advanceLive(game, Date.now());   // catch up first so the order lands on the right tick
-            if (m.type === 'liveOrder') store.liveOrder(game, c.seat, m.order);
-            else if (m.type === 'liveCancel') store.liveCancel(game, c.seat, m.index);
-            else if (m.type === 'liveFree') store.liveFree(game, c.seat, m.action);
-            else store.liveHalt(game, c.seat, m.fleet);
-            pushView(game, c);
+            // catch up first so the order lands on the right tick; if that ran ticks, everyone needs the
+            // new world (the timer won't push it: for it, nothing is due any more)
+            if (store.advanceLive(game, Date.now())) pushView(game);
+            const seat = c.seat;
+            try {
+              if (m.type === 'liveOrder') store.liveOrder(game, seat, m.order);
+              else if (m.type === 'liveCancel') store.liveCancel(game, seat, m.index);
+              else if (m.type === 'liveFree') store.liveFree(game, seat, m.action);
+              else store.liveHalt(game, seat, m.fleet);
+            } finally {
+              // every tab of this seat sees its bank/queue change (a halt is visible to anyone watching that fleet)
+              pushView(game, m.type === 'liveHalt' ? undefined : o => o.seat === seat);
+            }
             break;
           }
           case 'ping': break;

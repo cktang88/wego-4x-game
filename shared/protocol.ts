@@ -45,7 +45,7 @@ export type ServerMsg =
   | { type: 'view'; meta: GameMeta; view: PlayerView; mySubmission: Submission | null; chat: ChatMsg[] }
   | { type: 'meta'; meta: GameMeta }
   | { type: 'chat'; msg: ChatMsg }
-  | { type: 'history'; turn: number; result: TurnResult | null }
+  | { type: 'history'; turn: number; tick?: number; result: TurnResult | null }
   | { type: 'error'; error: string; code?: string };
 
 /** Client -> server */
@@ -53,7 +53,7 @@ export type ClientMsg =
   | { type: 'submit'; submission: Submission; turn?: number }   // turn: the turn these orders were planned for (stale ones are rejected)
   | { type: 'unsubmit' }
   | { type: 'chat'; text: string; to: number | null }
-  | { type: 'history'; turn: number }
+  | { type: 'history'; turn: number; tick?: number }   // tick: LIVE only (default: the cycle's first stored tick)
   | { type: 'liveOrder'; order: unknown }
   | { type: 'liveCancel'; index: number }
   | { type: 'liveFree'; action: unknown }

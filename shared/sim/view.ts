@@ -14,11 +14,15 @@ export interface PlayerView {
 const HIDDEN_DOCTRINE: Doctrine = { stance: 'defensive', retreatAt: 0.35, target: 'weakest', guard: false };
 
 /** Battle lines in the chronicle (see recordBattle in resolve.ts). */
-const BATTLE_LINE = /^The .+: \d+ ships destroyed\./;
+export const BATTLE_LINE = /^The .+: \d+ ships destroyed\./;
 
 function maskRivalFleet(f: Fleet) {
   // doctrine (stance, retreat threshold, guard) is a secret standing order
   f.doctrine = { ...HIDDEN_DOCTRINE };
+  // so are its supply situation (how long it has been cut off) and how many orders it used this turn
+  delete f.oos;
+  f.ordersThisTurn = 0;
+  f.guardUsed = false;
 }
 
 export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
@@ -45,11 +49,14 @@ export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
   }
   // rivals' scans reveal where they are looking (and that they paid for it)
   v.scans = v.scans.filter(sc => sc.owner === p);
-  v.engagements = (v.engagements ?? []).filter(e => cov.has(e.region) || s.fleets.some(f => f.owner === p && f.region === e.region));
+  // a battle in progress is only visible where you can see fleets (nebulae hide it), or where you fight
+  v.engagements = (v.engagements ?? []).filter(e => seesFleetsIn(s, p, e.region, cov) || s.fleets.some(f => f.owner === p && f.region === e.region));
   // last turn's per-player stats would reveal rivals' unseen battles (captures are public anyway)
   if (v.turnStats) {
     const own = <T>(arr: T[] | undefined, zero: T) => (arr ?? []).map((x, i) => (i === p ? x : zero));
-    v.turnStats = { ...v.turnStats, kills: own(v.turnStats.kills, 0), battlesWon: own(v.turnStats.battlesWon, 0), crownBattlesWon: own(v.turnStats.crownBattlesWon, 0) };
+    v.turnStats = { ...v.turnStats, kills: own(v.turnStats.kills, 0), battlesWon: own(v.turnStats.battlesWon, 0), crownBattlesWon: own(v.turnStats.crownBattlesWon, 0),
+      // "<player>:<region>" keys: rivals' influence targets this turn are secret
+      influenced: (v.turnStats.influenced ?? []).filter(k => k.startsWith(`${p}:`)) };
   }
   let lastSeen: Set<RegionId> | null = null;
   if (s.last) {
@@ -79,7 +86,8 @@ export function filterResultFor(s: GameState, r: TurnResult, p: PlayerId | null)
   if (p === null) return r;
   // current coverage is only "end of turn" coverage for the most recent turn; for older
   // turns it would leak events in regions the player only came to watch later
-  const isLast = !!s.last && s.last.turn === r.turn;
+  // (LIVE: every tick of a cycle has the same turn number, so the tick must match too)
+  const isLast = !!s.last && s.last.turn === r.turn && s.last.tick === r.tick;
   return filterResult(s, r, p, isLast ? coverage(s, p) : null).result;
 }
 
@@ -169,6 +177,7 @@ function filterResult(s: GameState, r: TurnResult, p: PlayerId, endCov: Set<Regi
   return {
     result: {
       turn: r.turn,
+      ...(r.tick !== undefined ? { tick: r.tick } : {}),   // LIVE: which tick of the cycle
       events,
       battles: r.battles.filter(b => battleIds.has(b.id)),
       signals: r.signals.filter(x => x.observer === p),

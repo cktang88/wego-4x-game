@@ -3,7 +3,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
-import { createGame, resolveTurn, planTurn, viewFor, emptySubmission, defaultRules, isObj, mergeRules, makeLive, advanceTo, queueOrder, cancelQueued, queueFree, haltOrder, nextTickAt, tickMs, LIVE_SPEEDS, cleanOrder, cleanFree } from '../shared/index.ts';
+import { createGame, resolveTurn, planTurn, viewFor, emptySubmission, defaultRules, isObj, mergeRules, makeLive, advanceTo, queueOrder, cancelQueued, queueFree, haltOrder, nextTickAt, tickMs, orderMs, LIVE_SPEEDS, cleanOrder, cleanFree } from '../shared/index.ts';
 import type { GameState, Submission, TurnResult, PlayerView } from '../shared/index.ts';
 import type { ChatMsg, CreateGameReq, GameMeta, SeatInfo } from '../shared/protocol.ts';
 import { spectatorView } from './history.ts';
@@ -28,6 +28,7 @@ export interface StoredGame {
   chat: ChatMsg[];
   history: TurnResult[];     // full (unfiltered) results of resolved turns (capped at MAX_HISTORY)
   resolveFailures?: number;  // consecutive failed resolutions (sim bug); used for backoff
+  liveRetryAt?: number;      // LIVE: after a failed tick, don't retry before this (epoch ms)
 }
 
 export const ID_RE = /^[0-9a-f]{6,32}$/;
@@ -38,6 +39,9 @@ export const MAX_DEADLINE_HOURS = 24 * 30;
 export const MIN_DEADLINE_HOURS = 1 / 60;   // one minute
 const MAX_RULES_JSON = 64 * 1024;
 const FAIL_BACKOFF_MS = 10 * 60_000;
+const LIVE_FAIL_BACKOFF_MS = 30_000;
+/** LIVE catch-up budget per call: each tick costs ~10 ms, and this runs on the event loop. */
+const LIVE_TICKS_PER_CALL = 50;
 
 /** A client-facing error (bad input / state conflict), as opposed to a server bug. */
 export class UserError extends Error {
@@ -64,8 +68,18 @@ const RULE_CLAMPS: Record<string, [number, number]> = {
   'map.minSiteDist': [1, 5000],
   'victory.turnLimit': [1, 200],
   maxFleets: [1, 20],
+  // LIVE clock: a zero/negative/tiny interval would make the server resolve hundreds of ticks per
+  // timer call forever (or never end a cycle: `tick % 0` is NaN)
+  'live.tickMinutes': [1, 24 * 60],
+  'live.ticksPerCycle': [1, 48],
+  'live.orderEveryHours': [0.1, 24 * 7],
+  'live.bankCap': [1, 50],
+  'live.startOrders': [0, 50],
+  'live.stepCost': [1, 20],
 };
 const BAD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+/** Clamped knobs that may legitimately be fractional (the others are counts and get rounded). */
+const FRACTIONAL = new Set(['live.tickMinutes', 'live.orderEveryHours']);
 
 /**
  * Validate a rules override against the default rules: only keys that exist in
@@ -86,7 +100,7 @@ export function sanitizeRules(over: unknown): Record<string, unknown> {
       if (typeof d === 'number') {
         if (typeof v !== 'number' || !Number.isFinite(v)) continue;
         const [lo, hi] = RULE_CLAMPS[p] ?? [-1e6, 1e6];
-        out[k] = Math.max(lo, Math.min(hi, Number.isInteger(d) && RULE_CLAMPS[p] ? Math.round(v) : v));
+        out[k] = Math.max(lo, Math.min(hi, Number.isInteger(d) && RULE_CLAMPS[p] && !FRACTIONAL.has(p) ? Math.round(v) : v));
       } else if (typeof d === 'boolean') { if (typeof v === 'boolean') out[k] = v; }
       else if (typeof d === 'string') { if (typeof v === 'string' && v.length <= 200) out[k] = v; }
       else if (Array.isArray(d)) { if (Array.isArray(v)) out[k] = JSON.parse(JSON.stringify(v), (key, val) => (BAD_KEYS.has(key) ? undefined : val)); }
@@ -134,6 +148,20 @@ export class Store {
         g.chat ??= []; g.history ??= []; g.pending ??= {};
         // games saved before newer rule groups existed: fill missing knobs from defaults
         g.state.rules = mergeRules(defaultRules(), g.state.rules);
+        // ...and state fields added later
+        g.state.engagements ??= [];
+        g.state.chronicle ??= [];
+        g.state.scans ??= [];
+        g.state.log ??= [];
+        const L = g.state.live;
+        if (L) {
+          if (!isObj(L.queue)) L.queue = {};
+          if (!isObj(L.free)) L.free = {};
+          const n = g.state.players.length;
+          if (!Array.isArray(L.bank) || L.bank.length !== n) L.bank = g.state.players.map((_: unknown, i: number) => Number(L.bank?.[i]) || 0);
+          if (!Array.isArray(L.nextOrderAt) || L.nextOrderAt.length !== n || L.nextOrderAt.some((x: unknown) => typeof x !== 'number' || !Number.isFinite(x)))
+            L.nextOrderAt = g.state.players.map((_: unknown, i: number) => (Number.isFinite(L.nextOrderAt?.[i]) ? L.nextOrderAt[i] : Date.now() + orderMs(g.state)));
+        }
         // migrate plaintext tokens from older saves to hashes
         for (const s of g.seats) if (s.token && !s.token.startsWith('h:')) s.token = hashToken(s.token);
         this.games.set(g.id, g);
@@ -217,7 +245,8 @@ export class Store {
     this.liveSeat(g, seat);
     const fa = cleanFree(raw);
     if (!fa) throw new UserError('malformed action', 400);
-    queueFree(g.state, seat, fa);
+    const err = queueFree(g.state, seat, fa);
+    if (err) throw new UserError(err, 409);
     this.save(g);
   }
   liveHalt(g: StoredGame, seat: number, fleet: unknown) {
@@ -229,9 +258,17 @@ export class Store {
   /** Run any ticks that are due. Returns true if the world changed. Never throws. */
   advanceLive(g: StoredGame, now: number): boolean {
     if (!g.state.live || g.state.winner !== null) return false;
+    // a tick that throws (sim bug) is retried with backoff instead of every timer call
+    if (g.liveRetryAt && now < g.liveRetryAt) return false;
     try {
-      const r = advanceTo(g.state, now, pid => g.seats[pid]?.kind === 'ai', 200);
+      const r = advanceTo(g.state, now, pid => g.seats[pid]?.kind === 'ai', LIVE_TICKS_PER_CALL);
+      if (r.error !== undefined) {
+        g.resolveFailures = (g.resolveFailures ?? 0) + 1;
+        g.liveRetryAt = now + LIVE_FAIL_BACKOFF_MS * Math.min(g.resolveFailures, 20);
+        this.onResolveError(g, r.error);
+      } else if (r.results.length) { g.resolveFailures = 0; g.liveRetryAt = undefined; }
       if (!r.results.length) return false;
+      // ticks that did resolve are kept even if a later one failed
       g.state = r.state;
       for (const res of r.results) g.history.push(res);
       if (g.history.length > MAX_HISTORY * 8) g.history.splice(0, g.history.length - MAX_HISTORY * 8);

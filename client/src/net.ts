@@ -17,7 +17,8 @@ export interface GameSource {
   submit(sub: Submission): void;
   unsubmit(): void;
   sendChat(text: string, to: number | null): void;
-  history(turn: number): Promise<TurnResult | null>;
+  /** A resolved turn's result. LIVE: `tick` picks one tick of that cycle (default: its first stored tick). */
+  history(turn: number, tick?: number): Promise<TurnResult | null>;
   close(): void;
   // LIVE mode: orders are spent one at a time and execute at the next tick
   liveOrder?(o: Order): void;
@@ -82,7 +83,15 @@ export class LocalSource implements GameSource {
       seats: this.save.seats.map((s, i) => ({ seat: i, name: st.players[i].name, kind: s.kind, aiLevel: s.aiLevel, claimed: s.kind === 'human',
         submitted: s.kind === 'ai' || !!this.save.pending[i], online: true, missedTurns: 0 })),
     };
-    try { localStorage.setItem(this.storageKey, JSON.stringify(this.save)); } catch { /* quota */ }
+    this.persist();
+  }
+  /** Autosave. A LIVE game's replay history can outgrow the storage quota: drop the oldest replays rather than the game. */
+  private persist() {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try { localStorage.setItem(this.storageKey, JSON.stringify(this.save)); return; } catch { /* quota (or storage blocked) */ }
+      if (!this.save.history.length) return;
+      this.save.history.splice(0, Math.ceil(this.save.history.length / 2));
+    }
   }
 
   submit(sub: Submission) {
@@ -120,8 +129,8 @@ export class LocalSource implements GameSource {
     this.onChange('view');
   }
   sendChat(text: string) { this.chat.push({ at: Date.now(), seat: this.save.current, to: null, text }); this.onChange('chat'); }
-  async history(turn: number) {
-    const r = this.save.history.find(h => h.turn === turn);
+  async history(turn: number, tick?: number) {
+    const r = this.save.history.find(h => h.turn === turn && (tick === undefined || h.tick === tick));
     if (!r) return null;
     return this.save.reveal || this.save.state.winner !== null ? r : filterResultFor(this.save.state, r, this.save.current);
   }
@@ -129,18 +138,29 @@ export class LocalSource implements GameSource {
   close() { clearInterval(this.liveTimer); }
 
   // ---------------------------------------------------------------- LIVE
+  private liveFailed = false;
   private tickLive() {
     const st = this.save.state;
     if (!st.live || st.winner !== null) return;
     const r = advanceTo(st, Date.now(), pid => this.save.seats[pid]?.kind === 'ai', 500);
+    if (r.error !== undefined && !this.liveFailed) {
+      // report once (this runs every second); the failed tick is retried and the game kept as it was
+      this.liveFailed = true;
+      console.error('[live] tick failed', r.error);
+      this.lastError = 'A tick failed to resolve; the game was kept as it was and will retry.';
+      this.onChange('error');
+    }
     if (!r.results.length) return;
+    if (r.error === undefined) this.liveFailed = false;
     this.save.state = r.state;
     this.save.history.push(...r.results);
-    if (this.save.history.length > 200) this.save.history.splice(0, this.save.history.length - 200);
+    if (this.save.history.length > 120) this.save.history.splice(0, this.save.history.length - 120);
     this.refresh();
     this.onChange('view');
   }
   private liveAct(fn: () => string | null | boolean) {
+    // a background tab's timer is throttled: run any overdue ticks first so the order lands on the right one
+    this.tickLive();
     const res = fn();
     if (typeof res === 'string') { this.lastError = res; this.onChange('error'); return; }
     if (res === false) { this.lastError = 'not possible'; this.onChange('error'); return; }
@@ -149,12 +169,13 @@ export class LocalSource implements GameSource {
   }
   liveOrder(o: Order) { this.liveAct(() => queueOrder(this.save.state, this.save.current, o, Date.now())); }
   liveCancel(i: number) { this.liveAct(() => cancelQueued(this.save.state, this.save.current, i)); }
-  liveFree(fa: FreeAction) { this.liveAct(() => { queueFree(this.save.state, this.save.current, fa); return null; }); }
+  liveFree(fa: FreeAction) { this.liveAct(() => queueFree(this.save.state, this.save.current, fa)); }
   liveHalt(fleet: number) { this.liveAct(() => haltOrder(this.save.state, this.save.current, fleet)); }
 }
 
 // ============================================================ remote
 const HISTORY_TIMEOUT_MS = 8000;
+const histKey = (turn: number, tick?: number) => (tick === undefined ? `${turn}` : `${turn}:${tick}`);
 
 export class RemoteSource implements GameSource {
   kind = 'remote' as const;
@@ -166,7 +187,8 @@ export class RemoteSource implements GameSource {
   onChange: (k: ChangeKind) => void = () => {};
   private ws: WebSocket | null = null;
   private closed = false;
-  private pendingHistory = new Map<number, Set<(r: TurnResult | null) => void>>();
+  /** In-flight history requests, keyed by "turn" or "turn:tick". */
+  private pendingHistory = new Map<string, Set<(r: TurnResult | null) => void>>();
   private ready: Promise<void>;
   private resolveReady!: () => void;
   private retry = 500;
@@ -192,13 +214,14 @@ export class RemoteSource implements GameSource {
       if (ws !== this.ws || this.closed) return;   // ignore stragglers from a replaced socket
       let m: ServerMsg;
       try { m = JSON.parse(String(ev.data)) as ServerMsg; } catch { return; }
+      if (!m || typeof m !== 'object') return;
       switch (m.type) {
         case 'view':
           this.meta = m.meta; this.view = m.view; this.mySubmission = m.mySubmission; this.chat = m.chat;
           this.resolveReady(); this.onChange('view'); break;
         case 'meta': this.meta = m.meta; this.onChange('meta'); break;
         case 'chat': this.chat.push(m.msg); if (this.chat.length > 500) this.chat.splice(0, this.chat.length - 500); this.onChange('chat'); break;
-        case 'history': this.settleHistory(m.turn, m.result); break;
+        case 'history': this.settleHistory(histKey(m.turn, m.tick), m.result); break;
         case 'error':
           this.lastError = m.error;
           if (m.code === 'no_game') this.shutdown();   // don't hammer the server for a game that doesn't exist
@@ -209,7 +232,7 @@ export class RemoteSource implements GameSource {
       if (ws !== this.ws) return;
       clearInterval(this.pinger); this.pinger = undefined;
       // answers to in-flight history requests will never arrive on this socket
-      for (const turn of [...this.pendingHistory.keys()]) this.settleHistory(turn, null);
+      for (const key of [...this.pendingHistory.keys()]) this.settleHistory(key, null);
       if (this.closed) return;
       const delay = this.retry * (0.75 + Math.random() * 0.5);
       this.retry = Math.min(8000, this.retry * 2);
@@ -219,10 +242,10 @@ export class RemoteSource implements GameSource {
     clearInterval(this.pinger);
     this.pinger = window.setInterval(() => this.send({ type: 'ping' }), 25000);
   }
-  private settleHistory(turn: number, r: TurnResult | null) {
-    const waiters = this.pendingHistory.get(turn);
+  private settleHistory(key: string, r: TurnResult | null) {
+    const waiters = this.pendingHistory.get(key);
     if (!waiters) return;
-    this.pendingHistory.delete(turn);
+    this.pendingHistory.delete(key);
     for (const w of waiters) w(r);
   }
   private send(m: ClientMsg): boolean {
@@ -242,28 +265,29 @@ export class RemoteSource implements GameSource {
   liveCancel(index: number) { this.sendOrWarn({ type: 'liveCancel', index }); }
   liveFree(action: FreeAction) { this.sendOrWarn({ type: 'liveFree', action }); }
   liveHalt(fleet: number) { this.sendOrWarn({ type: 'liveHalt', fleet }); }
-  history(turn: number): Promise<TurnResult | null> {
+  history(turn: number, tick?: number): Promise<TurnResult | null> {
+    const key = histKey(turn, tick);
     return new Promise(res => {
       let done = false;
       const finish = (r: TurnResult | null) => { if (done) return; done = true; clearTimeout(timer); res(r); };
       const timer = window.setTimeout(() => {
-        const set = this.pendingHistory.get(turn);
+        const set = this.pendingHistory.get(key);
         set?.delete(finish);
-        if (set && !set.size) this.pendingHistory.delete(turn);
+        if (set && !set.size) this.pendingHistory.delete(key);
         finish(null);
       }, HISTORY_TIMEOUT_MS);
-      const set = this.pendingHistory.get(turn);
+      const set = this.pendingHistory.get(key);
       const first = !set;
-      if (set) set.add(finish); else this.pendingHistory.set(turn, new Set([finish]));
+      if (set) set.add(finish); else this.pendingHistory.set(key, new Set([finish]));
       // one request per turn is enough; concurrent callers share the answer
-      if (first && !this.send({ type: 'history', turn })) this.settleHistory(turn, null);
+      if (first && !this.send(tick === undefined ? { type: 'history', turn } : { type: 'history', turn, tick })) this.settleHistory(key, null);
     });
   }
   private shutdown() {
     this.closed = true;
     clearInterval(this.pinger); this.pinger = undefined;
     clearTimeout(this.reconnectTimer); this.reconnectTimer = undefined;
-    for (const turn of [...this.pendingHistory.keys()]) this.settleHistory(turn, null);
+    for (const key of [...this.pendingHistory.keys()]) this.settleHistory(key, null);
   }
   close() {
     this.shutdown();
