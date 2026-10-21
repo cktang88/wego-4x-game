@@ -2,6 +2,7 @@
 //   npm run sim -- --games 30 --levels expert,standard,novice --rules '{"orders":{"perTurn":4}}'
 //   npm run sim -- --games 60 --suite      (runs the three standard skill matchups)
 import { createGame, resolveTurn, planTurn, type GameState } from '../shared/index.ts';
+import { styleOf } from '../shared/sim/ai-empire.ts';
 
 const args = process.argv.slice(2);
 const arg = (k: string, d: string) => { const i = args.indexOf(`--${k}`); return i >= 0 ? args[i + 1] : d; };
@@ -39,6 +40,10 @@ for (const lvStr of suite) {
   const vpSrc: Record<string, number> = {};
   const vpSrcLvl: Record<string, Record<string, number>> = {};
   let relics = 0;
+  const styleWins: Record<string, number> = {}, styleSeats: Record<string, number> = {};
+  const techTurn: Record<string, number[]> = {}, lawCount: Record<string, number> = {}, empireBuilds: Record<string, number> = {};
+  const techLv: Record<string, number[]> = {};
+  let techsOwned = 0, oosNotes = 0, stolen = 0;
   const vpSpread: number[] = [];
   const t0 = Date.now();
   for (let g = 0; g < games; g++) {
@@ -58,6 +63,10 @@ for (const lvStr of suite) {
         if (e.k === 'capture') { captures++; if (e.how === 'influence') influenceCaps++; }
         if (e.k === 'pact') pacts++;
         if (e.k === 'betrayal') betrayals++;
+        if (e.k === 'tech') { (techTurn[e.tech] ??= []).push(s.turn - 1); if (e.stolen) stolen++; }
+        if (e.k === 'law') lawCount[e.law] = (lawCount[e.law] ?? 0) + 1;
+        if (e.k === 'project' && e.done && ['academy', 'extractor', 'battery', 'pshield', 'depot', 'gate'].includes(e.key)) empireBuilds[e.key] = (empireBuilds[e.key] ?? 0) + 1;
+        if (e.k === 'note' && e.text.includes('out of supply')) oosNotes++;
         if (e.k === 'build') { const l = s.players[e.owner].aiLevel; (builds[l] ??= {})[e.cls] = (builds[l][e.cls] ?? 0) + 1; }
       }
       for (const b of s.last!.battles) shipsLost += Object.values(b.losses).reduce((a, x) => a + x, 0);
@@ -83,6 +92,8 @@ for (const lvStr of suite) {
     const w = s.winner ?? 0;
     if (leaderT6 === w) earlyDecided++;
     wins[s.players[w].aiLevel] = (wins[s.players[w].aiLevel] ?? 0) + 1;
+    for (const p of s.players) { const st = styleOf(s, p.id); styleSeats[st] = (styleSeats[st] ?? 0) + 1; techsOwned += p.techs?.length ?? 0; (techLv[p.aiLevel] ??= []).push(p.techs?.length ?? 0); }
+    styleWins[styleOf(s, w)] = (styleWins[styleOf(s, w)] ?? 0) + 1;
     seatWins[w]++;
     reasons[s.winReason.replace(/\d+/g, 'N')] = (reasons[s.winReason.replace(/\d+/g, 'N')] ?? 0) + 1;
     const vps = s.players.map(p => p.vp).sort((a, b) => b - a);
@@ -99,5 +110,9 @@ for (const lvStr of suite) {
   console.log('VP src/player:', Object.fromEntries(Object.entries(vpSrcLvl).map(([l, m]) => [l, Object.entries(m).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}:${(n / seats(l)).toFixed(1)}`).join(' ')])));
   console.log('builds/game  :', Object.fromEntries(Object.entries(builds).map(([l, b]) => [l, Object.fromEntries(Object.entries(b).map(([c, n]) => [c, +(n / games).toFixed(1)]))])));
   console.log('orders (% by level):', Object.fromEntries(Object.entries(orderMix).map(([l, m]) => { const t = Object.values(m).reduce((a, b) => a + b, 0); return [l, Object.entries(m).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}:${Math.round(100 * n / t)}`).join(' ')]; })));
+  console.log('style win%   :', Object.fromEntries(Object.keys(styleSeats).map(k => [k, `${Math.round(100 * (styleWins[k] ?? 0) / styleSeats[k])}% of ${styleSeats[k]} seats`])));
+  console.log(`techs/player ${(techsOwned / games / 3).toFixed(1)} ${JSON.stringify(Object.fromEntries(Object.entries(techLv).map(([k, v]) => [k, avg(v)])))} | stolen ${stolen} | out-of-supply events/game ${(oosNotes / games).toFixed(1)} | empire projects/game`, Object.fromEntries(Object.entries(empireBuilds).map(([k, v]) => [k, +(v / games).toFixed(1)])));
+  console.log('tech: times bought (avg turn):', Object.entries(techTurn).sort((a, b) => b[1].length - a[1].length).map(([k, v]) => `${k}:${v.length}(${avg(v)})`).join(' '));
+  console.log('laws enacted :', lawCount);
   console.log(`relics/game ${(relics / games).toFixed(1)} | warden woke ${warden}/${games} (killed ${wardenKilled}) | pacts ${pacts} | betrayals ${betrayals} | margin ${avg(vpSpread)} VP | decided-by-T6 ${earlyDecided}/${games}`);
 }

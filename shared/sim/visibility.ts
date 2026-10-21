@@ -6,7 +6,7 @@ import type { GameState, PlayerId, RegionId } from './types.ts';
 export function coverage(s: GameState, p: PlayerId): Set<RegionId> {
   const R = s.rules.sensors;
   const out = new Set<RegionId>();
-  const bonus = s.players[p]?.relics.includes('chorus') ? 1 : 0;
+  const bonus = (s.players[p]?.relics.includes('chorus') ? 1 : 0) + (s.players[p]?.techs?.includes('scanners') && s.rules.empire?.enabled !== false ? 1 : 0);
   for (const r of s.regions) {
     if (r.owner !== p) continue;
     for (const x of within(s, r.id, R.ownedRange + (r.buildings.sensor ?? 0) + bonus)) out.add(x);
@@ -29,7 +29,7 @@ export function seesFleetsIn(s: GameState, p: PlayerId, rid: RegionId, cov?: Set
   if (r.feature === 'nebula' && s.rules.sensors.nebulaHidesFleets) {
     const scanned = s.scans.some(sc => sc.owner === p && sc.until >= s.turn && (sc.region === rid || s.regions[sc.region].neighbors.includes(rid)));
     const present = s.fleets.some(f => f.owner === p && f.region === rid && f.ships.length);
-    return scanned || present || r.owner === p;
+    return scanned || present || r.owner === p || (!!s.players[p]?.techs?.includes('scanners') && s.rules.empire?.enabled !== false);
   }
   return true;
 }

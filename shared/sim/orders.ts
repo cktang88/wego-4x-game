@@ -3,6 +3,8 @@
 import type { Res } from '../config/rules.ts';
 import { fleetSpeed } from './graph.ts';
 import type { GameState, Order, PlayerId } from './types.ts';
+import { classBlock, gateNeighbors, hasLaw, hasTech, lawBlock, lawCost, maxDevAt, projectBlock, projectCostMod, shipCostMod, blueprintFor } from './empire.ts';
+import { LAW } from '../config/empire.ts';
 
 export const ORDER_INFO: Record<Order['type'], { name: string; icon: string; help: string }> = {
   move:      { name: 'Move',      icon: '➤', help: 'Move a fleet up to its speed in regions. Overdrive: +1 range, but the fleet is fatigued next turn (weaker attacks).' },
@@ -16,6 +18,8 @@ export const ORDER_INFO: Record<Order['type'], { name: string; icon: string; hel
   conceal:   { name: 'Conceal',   icon: '☾', help: 'Hide all your signals this turn. Rivals only see a jamming signal from your capital.' },
   excavate:  { name: 'Excavate',  icon: '✧', help: 'A fleet in a relic region you own digs up its relic: VP, a permanent bonus, and a piece of the truth.' },
   pact:      { name: 'Pact',      icon: '⚭', help: 'Offer a non-aggression pact. If both players offer each other on the same turn it forms for several turns. Breaking one costs VP.' },
+  law:       { name: 'Enact law', icon: '⚑', help: 'Enact a law from your Charter (costs influence). Switching a pair to its other side costs double.' },
+  refit:     { name: 'Refit',     icon: '⚒', help: 'At one of your shipyards: every ship in the fleet gets its class\'s current module, and is fully repaired.' },
 };
 
 export function orderCost(s: GameState, o: Order, p: PlayerId): Partial<Res> {
@@ -24,16 +28,23 @@ export function orderCost(s: GameState, o: Order, p: PlayerId): Partial<Res> {
     case 'build': {
       const c = { ...(Object.hasOwn(s.rules.ships, o.cls) ? s.rules.ships[o.cls].cost : undefined) };
       if (s.players[p]?.relics.includes('loom') && c.industry) c.industry = Math.round(c.industry * 0.85);
-      return c;
+      return shipCostMod(s, p, o.cls, c);
     }
-    case 'develop': return { ...(Object.hasOwn(s.rules.projects, o.project) ? s.rules.projects[o.project].cost : undefined) };
+    case 'develop': return projectCostMod(s, p, o.project, o.region, { ...(Object.hasOwn(s.rules.projects, o.project) ? s.rules.projects[o.project].cost : undefined) });
     case 'influence': {
       const r = s.regions[o.target];
-      return { influence: r && r.owner !== null && r.owner !== p ? I.rivalSubvertCost : I.orderCost };
+      const c = r && r.owner !== null && r.owner !== p ? I.rivalSubvertCost : I.orderCost;
+      return { influence: hasTech(s, p, 'subversion') ? Math.round(c * s.rules.empire.subversionCostMult) : c };
     }
-    case 'scan': return { influence: I.scanCost };
-    case 'feint': return { influence: I.feintCost };
-    case 'conceal': return { influence: I.concealCost };
+    case 'scan': return hasLaw(s, p, 'open') ? {} : { influence: I.scanCost };
+    case 'feint': return hasLaw(s, p, 'open') ? {} : { influence: I.feintCost };
+    case 'conceal': return hasLaw(s, p, 'open') ? {} : { influence: I.concealCost };
+    case 'law': return { influence: LAW[o.law] ? lawCost(s, p, o.law) : 0 };
+    case 'refit': {
+      const f = s.fleets.find(x => x.id === o.fleet);
+      const n = f ? f.ships.filter(sh => sh.mod !== blueprintFor(s, p, sh.cls)).length : 0;
+      return n ? { industry: n * s.rules.empire.refitIndustryPerShip } : {};
+    }
     case 'pact': return { influence: I.pactCost };
     default: return {};
   }
@@ -78,6 +89,8 @@ export function describeOrder(s: GameState, o: Order): string {
     case 'conceal': return 'Conceal all signals';
     case 'excavate': return `${fn(o.fleet)} excavates`;
     case 'pact': return `Offer pact to ${s.players[o.with]?.name ?? '?'}`;
+    case 'law': return `Enact ${LAW[o.law]?.name ?? o.law}`;
+    case 'refit': return `Refit ${fn(o.fleet)}`;
   }
 }
 
@@ -105,7 +118,7 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       if (!s.live && o.path.length > sp) return `too far (speed ${sp})`;   // LIVE: any distance; travel takes time
       let cur = fleet!.region;
       for (const r of o.path) {
-        if (!s.regions[cur].neighbors.includes(r)) return 'path is not connected';
+        if (!s.regions[cur] || !gateNeighbors(s, p, cur).includes(r)) return 'path is not connected';
         cur = r;
       }
       if (o.overdrive && fleet!.fatigued) return 'fleet is fatigued and cannot overdrive';
@@ -131,6 +144,8 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       if (!d) return 'unknown ship class';
       if (!own(o.region)) return 'not your region';
       if ((r.buildings.shipyard ?? 0) < d.needsShipyard) return `needs shipyard level ${d.needsShipyard}`;
+      const cb = classBlock(s, p, o.cls);
+      if (cb) return cb;
       if (o.fleet !== null) {
         const f = s.fleets.find(x => x.id === o.fleet);
         if (!f || f.owner !== p || f.region !== o.region) return 'target fleet not here';
@@ -145,10 +160,10 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       if (!pd) return 'unknown project';
       if (!own(o.region)) return 'not your region';
       if (r.project) return 'a project is already underway here';
-      if (r.kind === 'void' && o.project !== 'sensor' && o.project !== 'fortress') return 'nothing to build on in the void';
+      if (r.kind === 'void' && !['sensor', 'fortress', 'extractor', 'depot', 'gate', 'battery'].includes(o.project)) return 'nothing to build on in the void';
       const lvl = o.project === 'develop' ? r.dev : (r.buildings[o.project] ?? 0);
-      if (lvl >= pd.max) return 'already at max level';
-      return null;
+      if (lvl >= (o.project === 'develop' ? maxDevAt(s, r.id) : pd.max)) return 'already at max level';
+      return projectBlock(s, p, o.project, r.id);
     }
     case 'fortify': return null;
     case 'influence': {
@@ -157,6 +172,7 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       if (r.owner === p) return r.loyalty.some((x, i) => i !== p && x > 0) ? null : 'no rival agents to purge here';
       if (r.kind === 'void') return 'nobody lives there';
       if (r.owner !== null && s.players[r.owner].capital === r.id) return 'capitals cannot be subverted';
+      if (r.owner !== null && hasLaw(s, r.owner, 'martial')) return `${s.players[r.owner].name} is under Martial Law`;
       if (r.owner !== null && s.pacts.some(x => x.until >= s.turn && ((x.a === p && x.b === r.owner) || (x.b === p && x.a === r.owner)))) return 'you have a pact with its owner';
       const near = r.neighbors.some(n => s.regions[n].owner === p) || s.fleets.some(f => f.owner === p && f.region === r.id && f.ships.length);
       if (!near) return 'must border a region you own (or have a fleet there)';
@@ -172,6 +188,13 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
     }
     case 'pact': {
       if (o.with === p || !Number.isInteger(o.with) || !s.players[o.with] || s.players[o.with].eliminated) return 'invalid partner';
+      return null;
+    }
+    case 'law': return typeof o.law === 'string' ? lawBlock(s, p, o.law) : 'unknown law';
+    case 'refit': {
+      const r = s.regions[fleet!.region];
+      if (r.owner !== p || !(r.buildings.shipyard ?? 0)) return 'must be at one of your shipyards';
+      if (!fleet!.ships.some(sh => sh.mod !== blueprintFor(s, p, sh.cls) || sh.hp < sh.maxHp)) return 'already up to date and repaired';
       return null;
     }
   }

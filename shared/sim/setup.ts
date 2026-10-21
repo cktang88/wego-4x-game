@@ -4,6 +4,7 @@ import { generateMap } from './mapgen.ts';
 import { Rng } from './rng.ts';
 import type { Commander, Fleet, GameState, Player, PlayerId, RegionId, Ship } from './types.ts';
 import { EDICTS } from './edicts.ts';
+import { baseHp, blueprintFor, maxDevAt } from './empire.ts';
 
 export interface PlayerSetup { name?: string; kind: 'human' | 'ai'; aiLevel?: Player['aiLevel'] }
 export interface GameSetup {
@@ -54,6 +55,7 @@ export function createGame(setup: GameSetup): GameState {
       id: i, name: ps.name || PLAYER_DEFAULT_NAMES[i], color: PLAYER_COLORS[i], kind: ps.kind === 'human' ? 'human' : 'ai',
       aiLevel: ps.aiLevel === 'novice' || ps.aiLevel === 'expert' ? ps.aiLevel : 'standard', res: { ...rules.start.resources }, vp: 0, vpLog: [], relics: [],
       capital: home, eliminated: false, pactOffers: [], missedTurns: 0, reserveCommanders: [],
+      techs: [], laws: [], blueprint: {}, researched: 0,
     };
     s.players.push(p);
     const r = s.regions[home];
@@ -65,7 +67,7 @@ export function createGame(setup: GameSetup): GameState {
   for (let i = 0; i < 3; i++) {
     rules.start.fleets.forEach((classes, k) => {
       const f = newFleet(s, rng, i, homes[i], FLEET_NAMES[k % FLEET_NAMES.length]);
-      for (const c of classes) f.ships.push(newShip(s, rng, c));
+      for (const c of classes) f.ships.push(newShip(s, rng, c, i));
     });
   }
   s.rngState = rng.state;
@@ -95,14 +97,15 @@ export function newFleet(s: GameState, rng: Rng, owner: PlayerId, region: Region
   return f;
 }
 
-export function newShip(s: GameState, rng: Rng, cls: string): Ship {
-  const d = s.rules.ships[cls];
+export function newShip(s: GameState, rng: Rng, cls: string, owner: PlayerId | -1 = -1): Ship {
+  const mod = blueprintFor(s, owner, cls);
+  const hp = baseHp(s, cls, mod);
   const used = new Set(s.fleets.flatMap(f => f.ships.map(x => x.name)));
   let name = rng.pick(SHIP_NAMES);
   for (let i = 0; i < 40 && used.has(name); i++) name = rng.pick(SHIP_NAMES);
   if (used.has(name)) name = `${name} ${roman(2 + Math.floor(rng.next() * 4))}`;
   return {
-    id: s.nextId++, name, cls, hp: d.hp, maxHp: d.hp,
+    id: s.nextId++, name, cls, hp, maxHp: hp, mod,
     sys: { engines: true, weapons: true, shields: true },
     kills: 0, battles: 0, title: null, bornTurn: s.turn,
   };
@@ -115,7 +118,14 @@ export function maxGarrison(s: GameState, rid: RegionId): number {
   if (r.kind === 'void') return 2 + (r.buildings.fortress ?? 0) * g.perFortress;
   let m = g.ownedBase + r.dev * g.perDev + (r.buildings.fortress ?? 0) * g.perFortress + (g.kindBonus[r.kind] ?? 0);
   if (s.players[r.owner]?.relics.includes('aegis')) m += 6;
-  return m;
+  const E = s.rules.empire;
+  if (E?.enabled !== false && E) {
+    const pl = s.players[r.owner];
+    if (r.trait === 'bulwark') m *= E.bulwarkGarrisonMult;
+    if (pl?.laws?.includes('bastion')) m *= E.bastionGarrisonMult;
+    if (pl?.techs?.includes('citadel')) m *= E.citadelGarrisonMult;
+  }
+  return Math.round(m);
 }
 
 export function ordinal(n: number): string {

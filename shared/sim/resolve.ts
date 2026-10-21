@@ -18,6 +18,8 @@
 //  After pulse N: the Warden acts, upkeep and income, pacts, then scoring.
 //  VP is only ever scored on the final end-of-turn state.
 // ============================================================================
+import { TECH, LAW, MODULES } from '../config/empire.ts';
+import { techCost, researchBlock, opposite, blueprintFor, baseHp, hasTech, hasLaw, connected, supplied, maxDevAt } from './empire.ts';
 import { RELICS, LORE } from '../config/content.ts';
 import { fightRounds, hostile, wouldFight, engagementAt, newReport, disengage, type FightOutcome } from './combat.ts';
 import { EDICTS } from './edicts.ts';
@@ -55,7 +57,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   if (newCycle) {
     s.turnStats = { kills: [0, 0, 0], battlesWon: [0, 0, 0], crownBattlesWon: [0, 0, 0], captures: [0, 0, 0], honors: [0, 0, 0], bounty: [0, 0, 0], influenced: [] };
     for (const f of s.fleets) { f.ordersThisTurn = 0; f.guardUsed = false; }
-    for (const p of s.players) p.pactOffers = [];
+    for (const p of s.players) { p.pactOffers = []; p.researched = 0; }
     s.cycleStartOwners = s.regions.map(r => r.owner);
     s.concealed = [];
   }
@@ -71,7 +73,11 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   const freeFails: GameEvent[] = [];
   for (const p of s.players) for (const fa of subs[p.id].free) {
     const err = applyFree(s, rng, p.id, fa);
-    if (err) freeFails.push({ k: 'fail', pulse: 0, owner: p.id, text: `${fa.type} failed: ${err}` });
+    if (err) freeFails.push({ k: 'fail', pulse: 0, owner: p.id, text: `${fa.type === 'research' ? `Research (${TECH[fa.tech]?.name ?? fa.tech})` : fa.type} failed: ${err}` });
+    else if (fa.type === 'research') {
+      freeFails.push({ k: 'tech', pulse: 0, owner: p.id, tech: fa.tech });
+      if (TECH[fa.tech]?.tier === 4) s.chronicle.push({ turn: s.turn, players: [p.id], major: true, text: `${p.name} completes ${TECH[fa.tech].name}. No other empire can ever have it.` });
+    } else if (fa.type === 'revoke') freeFails.push({ k: 'law', pulse: 0, owner: p.id, law: fa.law, revoked: true });
   }
 
   // iterate regions from a turn-dependent offset so no part of the map always resolves first
@@ -193,12 +199,12 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
 
     // ---------------------------------------------------------- 1. prepare
     for (const { p, o } of orders) {
-      if (!['fortify', 'scan', 'feint', 'conceal', 'pact'].includes(o.type)) continue;
+      if (!['fortify', 'scan', 'feint', 'conceal', 'pact', 'law', 'refit'].includes(o.type)) continue;
       const err = validateOrder(s, p, o);
       if (err) { fail(pulse, p, o, err); continue; }
       const cost = orderCost(s, o, p);
-      if (!canAfford(s.players[p].res, cost, R)) { fail(pulse, p, o, 'not enough resources'); continue; }
-      pay(s.players[p].res, cost, R);
+      if (!canAfford(s.players[p].res, cost, creditRate(s, p))) { fail(pulse, p, o, 'not enough resources'); continue; }
+      pay(s.players[p].res, cost, creditRate(s, p));
       switch (o.type) {
         case 'fortify': {
           const f = s.fleets.find(x => x.id === o.fleet)!;
@@ -231,6 +237,30 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
           concealed.add(p);
           emit({ k: 'note', pulse, owner: p, text: 'Signals concealed this turn.' });
           break;
+        case 'law': {
+          const pl = s.players[p];
+          const opp = opposite(o.law);
+          const repealed = !!opp && !!pl.laws?.includes(opp);
+          pl.laws = (pl.laws ?? []).filter(x => x !== opp);
+          pl.laws.push(o.law);
+          emit({ k: 'law', pulse, owner: p, law: o.law });
+          s.chronicle.push({ turn: s.turn, players: [p], text: `${pl.name} enacts ${LAW[o.law].name}${repealed ? `, repealing ${LAW[opp!].name}` : ''}.` });
+          break;
+        }
+        case 'refit': {
+          const f = s.fleets.find(x => x.id === o.fleet)!;
+          for (const sh of f.ships) {
+            const mod = blueprintFor(s, p, sh.cls);
+            const frac = sh.hp / Math.max(1, sh.maxHp);
+            sh.mod = mod;
+            sh.maxHp = baseHp(s, sh.cls, mod);
+            sh.hp = Math.max(1, Math.round(sh.maxHp * Math.max(frac, 1)));
+            sh.sys = { engines: true, weapons: true, shields: true };
+          }
+          emit({ k: 'refit', pulse, owner: p, fleet: f.id, region: f.region });
+          signal(pulse, p, f.region, `${s.players[p].name} refitting ships at ${s.regions[f.region].name}`);
+          break;
+        }
         case 'pact':
           s.players[p].pactOffers.push(o.with);
           emit({ k: 'note', pulse, owner: p, text: `Pact offered to ${s.players[o.with].name}.` });
@@ -250,12 +280,12 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       const key = `${p}:${r.id}`;
       if (R.influenceLimits.onePerTargetPerTurn && influencedThisTurn.has(key)) { fail(pulse, p, o, `already influenced ${r.name} this turn`); continue; }
       const cost = orderCost(s, o, p);
-      if (!canAfford(s.players[p].res, cost, R)) { fail(pulse, p, o, 'not enough influence'); continue; }
-      pay(s.players[p].res, cost, R);
+      if (!canAfford(s.players[p].res, cost, creditRate(s, p))) { fail(pulse, p, o, 'not enough influence'); continue; }
+      pay(s.players[p].res, cost, creditRate(s, p));
       influencedThisTurn.add(key);
       if (r.owner === p) { purges.push({ p, r: r.id }); continue; }
       const adj = r.neighbors.some(n => s.regions[n].owner === p);
-      r.loyalty[p] = (r.loyalty[p] ?? 0) + R.influence.pushAmount + (adj ? R.influence.adjacentBonus : 0);
+      r.loyalty[p] = (r.loyalty[p] ?? 0) + Math.round((R.influence.pushAmount + (adj ? R.influence.adjacentBonus : 0)) * (hasTech(s, p, 'subversion') ? R.empire.subversionPushMult : 1));
       if (R.influenceLimits.capAtThreshold) r.loyalty[p] = Math.min(r.loyalty[p], flipThreshold(s, r.id));
       emit({ k: 'influence', pulse, region: r.id, owner: p, loyalty: r.loyalty[p] });
       signal(pulse, p, r.id, `${s.players[p].name} agents active in ${r.name}${r.owner !== null ? ` (loyalty ${r.loyalty[p]}/${flipThreshold(s, r.id)})` : ''}`);
@@ -477,12 +507,12 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       const regionId = o.type === 'excavate' ? s.fleets.find(f => f.id === o.fleet)!.region : o.region;
       if (s.fleets.some(f => f.region === regionId && f.ships.length && hostile(s, f.owner, p))) { fail(pulse, p, o, 'enemies present'); continue; }
       const cost = orderCost(s, o, p);
-      if (!canAfford(s.players[p].res, cost, R)) { fail(pulse, p, o, 'not enough resources'); continue; }
-      pay(s.players[p].res, cost, R);
+      if (!canAfford(s.players[p].res, cost, creditRate(s, p))) { fail(pulse, p, o, 'not enough resources'); continue; }
+      pay(s.players[p].res, cost, creditRate(s, p));
       if (o.type === 'build') {
         let f = o.fleet !== null ? s.fleets.find(x => x.id === o.fleet)! : null;
         if (!f) f = newFleet(s, rng, p, o.region);
-        const sh = newShip(s, rng, o.cls);
+        const sh = newShip(s, rng, o.cls, p);
         f.ships.push(sh);
         emit({ k: 'build', pulse, region: o.region, owner: p, cls: o.cls, fleet: f.id, name: sh.name });
         signal(pulse, p, o.region, `Shipyard activity at ${s.regions[o.region].name}`, { confirmed: false });
@@ -544,17 +574,27 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     const top = Math.max(...s.players.filter(x => !x.eliminated).map(x => x.vp));
     const boost = top - p.vp >= R.comeback.gap && s.regions.find(r => r.kind === 'throne')?.owner !== p.id ? 1 + R.comeback.incomeBonus : 1;
     p.res.industry += Math.round(inc.industry * boost); p.res.credits += Math.round(inc.credits * boost); p.res.influence += inc.influence;
-    const upkeep = s.fleets.filter(f => f.owner === p.id).reduce((a, f) => a + f.ships.reduce((b, sh) => b + (R.ships[sh.cls]?.upkeep ?? 0), 0), 0);
+    const upkeep = upkeepOf(s, p.id);
     p.res.credits -= upkeep;
   }
+  const supplyOf = s.players.map(p => (R.empire?.enabled !== false && !p.eliminated ? supplied(s, p.id) : null));
   for (const f of s.fleets) {
     if (f.owner === -1) continue;
     const r = s.regions[f.region];
-    if (engagementAt(s, r.id) && wouldFight(s, r.id)) { f.fatigued = !!f.od; f.od = false; continue; } // no repairs mid-battle
+    // supply: out of supply means no repairs, and after a grace period the crews start to suffer
+    const sup = supplyOf[f.owner];
+    const inSupply = !sup || sup.has(f.region);
+    f.oos = inSupply ? 0 : (f.oos ?? 0) + 1;
+    if (!inSupply && f.oos > R.empire.oosGraceTurns) {
+      for (const sh of f.ships) sh.hp = Math.max(1, sh.hp - R.empire.oosAttrition);
+      if (f.oos === R.empire.oosGraceTurns + 1) emit({ k: 'note', pulse: endPulse, owner: f.owner, text: `${f.name} is out of supply at ${r.name} and wearing down.`, region: r.id });
+    }
+    if (engagementAt(s, r.id) && wouldFight(s, r.id)) { f.fatigued = !!f.od && !hasLaw(s, f.owner, 'vanguard'); f.od = false; continue; } // no repairs mid-battle
     const owned = r.owner === f.owner;
-    const yard = owned && (r.buildings.shipyard ?? 0) > 0;
+    const yard = owned && ((r.buildings.shipyard ?? 0) > 0 || (r.buildings.depot ?? 0) > 0);
+    const regen = hasTech(s, f.owner, 'regen') && inSupply;
     for (const sh of f.ships) {
-      if (owned) sh.hp = Math.min(sh.maxHp, sh.hp + R.economy.shipRepairPerTurn + (yard ? R.economy.shipyardRepairBonus : 0));
+      if (owned || regen) sh.hp = Math.min(sh.maxHp, sh.hp + R.economy.shipRepairPerTurn + (yard ? R.economy.shipyardRepairBonus : 0) + (regen ? R.empire.regenRepair : 0));
       if (yard) sh.sys = { engines: true, weapons: true, shields: true };
       else if (owned && sh.hp === sh.maxHp) {
         // field repair restores one knocked-out subsystem per turn at full hull
@@ -563,14 +603,16 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       }
     }
     if (s.players[f.owner].res.credits < 0) for (const sh of f.ships) sh.hp = Math.max(1, sh.hp - R.economy.bankruptAttrition);
-    f.fatigued = !!f.od;
+    f.fatigued = !!f.od && !hasLaw(s, f.owner, 'vanguard');
     f.od = false;
   }
   for (const r of s.regions) {
     const underAttack = (engagementAt(s, r.id) && wouldFight(s, r.id)) || s.fleets.some(f => f.siege === r.id && f.region === r.id && f.ships.length);
     if (underAttack) { /* a garrison under siege or in battle can't rebuild */ }
     else if (r.owner !== null) {
-      r.garrison = Math.min(maxGarrison(s, r.id), r.garrison + R.garrison.regenPerTurn);
+      const o = r.owner;
+      const bonus = (hasLaw(s, o, 'bastion') ? R.empire.lawRegenBonus : 0) + (hasLaw(s, o, 'martial') ? R.empire.lawRegenBonus : 0);
+      r.garrison = Math.min(maxGarrison(s, r.id), r.garrison + (R.garrison.regenPerTurn + bonus) * (hasTech(s, o, 'regen') ? 2 : 1));
     } else if (r.garrison < (r.baseGarrison ?? 0)) {
       r.garrison = Math.min(r.baseGarrison, r.garrison + R.neutral.garrisonRegen);
     }
@@ -580,7 +622,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       if (r.owner !== r.project.owner) r.project = null;
       else if (r.project.progress >= pd.turns) {
         const key = r.project.key;
-        if (key === 'develop') r.dev = Math.min(R.economy.maxDev, r.dev + 1);
+        if (key === 'develop') r.dev = Math.min(maxDevAt(s, r.id), r.dev + 1);
         else r.buildings[key] = (r.buildings[key] ?? 0) + 1;
         emit({ k: 'project', pulse: endPulse, region: r.id, owner: r.owner!, key, done: true });
         r.project = null;
@@ -625,6 +667,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     const crowns = owned.filter(heldAllTurn).length;
     if (crowns) addVp(s, p.id, crowns * R.victory.vpPerCrownPerTurn + (crowns >= 2 ? R.victory.crownMajorityVp : 0) + (p.relics.includes('crown_key') ? R.crowns.crownKeyFlatVp : 0), `Holding ${crowns} Crown${crowns > 1 ? 's' : ''}`);
     if (owned.length > crowns) s.chronicle.push({ turn: s.turn, players: [p.id], text: `${p.name} must hold its new Crown through a whole turn before it pays.` });
+    if (hasTech(s, p.id, 'mandate')) addVp(s, p.id, 1, 'Imperial Mandate');
+    if (crowns && hasTech(s, p.id, 'citadel')) addVp(s, p.id, crowns * R.empire.citadelCrownVp, 'Citadel Worlds');
   }
   {
     const crowns = s.regions.filter(r => r.kind === 'crown');
@@ -743,12 +787,20 @@ export function cleanOrder(s: GameState, o: unknown): Order | null {
     case 'conceal': return { type: 'conceal' };
     case 'pact':
       return isId(o.with) && o.with < s.players.length ? { type: 'pact', with: o.with } : null;
+    case 'law':
+      return typeof o.law === 'string' && Object.hasOwn(LAW, o.law) ? { type: 'law', law: o.law } : null;
+    case 'refit':
+      return isId(o.fleet) ? { type: 'refit', fleet: o.fleet } : null;
   }
   return null;
 }
 
 export function cleanFree(fa: unknown): FreeAction | null {
-  if (!isRec(fa) || !isId(fa.fleet)) return null;
+  if (!isRec(fa)) return null;
+  if (fa.type === 'research') return typeof fa.tech === 'string' && Object.hasOwn(TECH, fa.tech) ? { type: 'research', tech: fa.tech } : null;
+  if (fa.type === 'revoke') return typeof fa.law === 'string' && Object.hasOwn(LAW, fa.law) ? { type: 'revoke', law: fa.law } : null;
+  if (fa.type === 'blueprint') return typeof fa.cls === 'string' && typeof fa.mod === 'string' && fa.cls.length < 32 && fa.mod.length < 32 ? { type: 'blueprint', cls: fa.cls, mod: fa.mod } : null;
+  if (!isId(fa.fleet)) return null;
   switch (fa.type) {
     case 'doctrine': {
       const d = fa.doctrine;   // copy known fields only; applyFree validates their values
@@ -774,6 +826,30 @@ function sanitize(s: GameState, sub: Submission | undefined, tick = false): Subm
 }
 
 function applyFree(s: GameState, rng: Rng, p: PlayerId, fa: Submission['free'][number]): string | null {
+  const pl = s.players[p];
+  if (fa.type === 'research') {
+    const b = researchBlock(s, p, fa.tech);
+    if (b) return b;
+    const cost = techCost(s, p, fa.tech);
+    if (!canAfford(pl.res, cost, creditRate(s, p))) return 'not enough resources';
+    pay(pl.res, cost, creditRate(s, p));
+    (pl.techs ??= []).push(fa.tech);
+    pl.researched = (pl.researched ?? 0) + 1;
+    return null;
+  }
+  if (fa.type === 'revoke') {
+    if (!pl.laws?.includes(fa.law)) return 'not enacted';
+    pl.laws = pl.laws.filter(x => x !== fa.law);
+    return null;
+  }
+  if (fa.type === 'blueprint') {
+    if (!Object.hasOwn(s.rules.ships, fa.cls)) return 'unknown ship class';
+    const m = MODULES.find(x => x.id === fa.mod);
+    if (!m) return 'unknown module';
+    if (m.tech && !hasTech(s, p, m.tech)) return `needs ${TECH[m.tech]?.name ?? m.tech}`;
+    (pl.blueprint ??= {})[fa.cls] = fa.mod;
+    return null;
+  }
   const f = s.fleets.find(x => x.id === fa.fleet && x.owner === p);
   if (!f) return 'no such fleet of yours';
   switch (fa.type) {
@@ -813,18 +889,51 @@ function applyFree(s: GameState, rng: Rng, p: PlayerId, fa: Submission['free'][n
 }
 
 export function income(s: GameState, p: PlayerId) {
-  const R = s.rules;
+  return incomeDetail(s, p).total;
+}
+
+/** Income with the reasons (for the UI breakdowns). */
+export function incomeDetail(s: GameState, p: PlayerId) {
+  const R = s.rules, E = R.empire, on = E?.enabled !== false;
   const out = { industry: 0, credits: 0, influence: 0 };
+  const why: string[] = [];
+  const conn = on ? connected(s, p) : null;
+  let cut = 0;
+  const pl = s.players[p];
   for (const r of s.regions) {
     if (r.owner !== p) continue;
     const y = R.economy.yields[r.kind] ?? R.economy.yields.colony;
     const mult = Math.max(1, r.dev);
-    out.industry += y.industry * mult + (r.buildings.mine ?? 0) * R.economy.mineBonus;
-    out.credits += y.credits * mult + (r.buildings.tradehub ?? 0) * R.economy.tradeHubBonus;
-    out.influence += y.influence * (r.kind === 'void' ? 0 : 1) + (r.kind === 'home' ? Math.floor(r.dev / 2) : 0);
+    let ind = y.industry * mult + (r.buildings.mine ?? 0) * R.economy.mineBonus;
+    let cr = y.credits * mult + (r.buildings.tradehub ?? 0) * (R.economy.tradeHubBonus + (on && hasTech(s, p, 'trade') ? E.tradeHubBonus : 0) + (on && hasLaw(s, p, 'mercantile') ? E.mercantileHubBonus : 0));
+    let inf = y.influence * (r.kind === 'void' ? 0 : 1) + (r.kind === 'home' ? Math.floor(r.dev / 2) : 0);
+    if (on) {
+      if (r.trait === 'forge') ind += E.forgePerDev * mult;
+      if (r.trait === 'gas') cr += E.gasCredits;
+      if (r.buildings.depot) ind += E.depotIndustry;
+      if (r.vein && (r.buildings.extractor ?? 0) > 0 && conn!.has(r.id)) cr += E.extractorCredits;
+      if (hasLaw(s, p, 'federal') && r.kind === 'colony') { ind += 1; if (r.dev >= 3) inf += 1; }
+      if (r.id === pl.capital && hasLaw(s, p, 'central')) { ind *= E.centralMult; cr *= E.centralMult; inf *= E.centralMult; }
+      if (!conn!.has(r.id)) { ind *= E.cutOffYield; cr *= E.cutOffYield; inf *= E.cutOffYield; cut++; }
+    }
+    out.industry += ind; out.credits += cr; out.influence += inf;
   }
-  if (s.players[p].relics.includes('well')) out.credits += 6;
-  return out;
+  if (cut) why.push(`${cut} region${cut === 1 ? '' : 's'} cut off from your capital (half yield)`);
+  if (pl.relics.includes('well')) out.credits += 6;
+  if (on) {
+    if (hasTech(s, p, 'trade')) {
+      const pacts = s.pacts.filter(x => x.until >= s.turn && (x.a === p || x.b === p)).length;
+      if (pacts) { out.credits += pacts * E.pactCredits; why.push(`+${pacts * E.pactCredits}¢ from pacts (Trade Compacts)`); }
+    }
+    if (hasLaw(s, p, 'mercantile')) out.credits *= E.mercantileMult;
+    if (hasTech(s, p, 'markets')) out.credits *= E.marketsCreditsMult;
+    if (hasLaw(s, p, 'industrial')) { out.industry *= E.industrialMult; out.credits *= E.industrialCreditMult; }
+    if (hasLaw(s, p, 'open')) out.influence += E.openInfluence;
+    if (hasTech(s, p, 'bureaucracy')) out.influence += 2;
+    if (hasLaw(s, p, 'martial')) out.influence += E.martialInfluence;
+  }
+  const total = { industry: Math.round(out.industry), credits: Math.round(out.credits), influence: Math.max(0, Math.round(out.influence)) };
+  return { total, why };
 }
 
 export function addVp(s: GameState, p: PlayerId, n: number, why: string) {
@@ -852,6 +961,17 @@ function capture(s: GameState, rid: RegionId, by: PlayerId, how: 'force' | 'infl
   r.garrison = Math.min(r.garrison, Math.max(maxGarrison(s, rid), s.rules.garrison.afterCapture));
   s.turnStats.captures[by]++;
   emit({ k: 'capture', pulse, region: rid, by, from, how });
+  if (from !== null && (r.buildings.academy ?? 0) > 0 && s.rules.empire?.enabled !== false) {
+    // seized archives: steal one technology the victim has and you could have (never a ★)
+    const mine = s.players[by].techs ?? [];
+    const pool = (s.players[from].techs ?? []).filter(t => !mine.includes(t) && TECH[t].tier < 4 && (() => { const b = researchBlock(s, by, t); return !b || b.startsWith('one technology'); })());
+    if (pool.length) {
+      const t = pool.sort()[s.turn % pool.length];
+      (s.players[by].techs ??= []).push(t);
+      emit({ k: 'tech', pulse, owner: by, tech: t, stolen: true });
+      s.chronicle.push({ turn: s.turn, region: rid, players: [by, from], text: `${s.players[by].name} seizes the archives of ${r.name} and steals ${TECH[t].name} from ${s.players[from].name}.` });
+    }
+  }
   if (from !== null) {
     if (r.homeOf === from && !(s.capitalsTaken ?? []).includes(from)) {
       (s.capitalsTaken ??= []).push(from);
@@ -921,4 +1041,15 @@ export function flipThreshold(s: GameState, rid: RegionId): number {
   const mult = r.kind === 'crown' || r.kind === 'throne' ? s.rules.influenceLimits.crownMult : 1;
   if (r.owner === null) return s.rules.influence.flipThreshold * mult;
   return (s.rules.influence.rivalFlipThreshold + (r.buildings.fortress ?? 0) * s.rules.influenceLimits.perFortress) * mult;
+}
+
+/** Credits cover missing industry at the rules' rate, or 1:1 with Free Markets. */
+export function creditRate(s: GameState, p: PlayerId) {
+  return hasTech(s, p, 'markets') ? { economy: { creditsPerIndustry: 1 } } : s.rules;
+}
+
+/** Credits a player pays for their ships each turn. */
+export function upkeepOf(s: GameState, p: PlayerId): number {
+  const raw = s.fleets.filter(f => f.owner === p).reduce((a, f) => a + f.ships.reduce((b, sh) => b + (s.rules.ships[sh.cls]?.upkeep ?? 0), 0), 0);
+  return hasTech(s, p, 'depots') ? Math.round(raw * (1 - s.rules.empire.depotUpkeepCut)) : raw;
 }

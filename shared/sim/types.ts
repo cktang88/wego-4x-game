@@ -31,6 +31,8 @@ export interface Region {
   heldSince: number;        // turn current owner took it
   memorials: string[];      // fallen commanders & famous ships, forever
   baseGarrison: number;     // starting neutral garrison (neutral garrisons regenerate toward it)
+  trait?: string | null;    // world trait (config/empire.ts TRAITS)
+  vein?: string | null;     // strategic resource deposit (config/empire.ts VEINS)
 }
 
 export interface Subsystems { engines: boolean; weapons: boolean; shields: boolean } // true = working
@@ -46,6 +48,7 @@ export interface Ship {
   battles: number;
   title: string | null;     // earned, e.g. "the Unbroken"
   bornTurn: number;
+  mod?: string | null;      // fitted module (config/empire.ts MODULES)
 }
 
 export type Stance = 'aggressive' | 'defensive' | 'evasive';
@@ -85,6 +88,7 @@ export interface Fleet {
   guardUsed: boolean;
   history: string[];        // short chronicle lines
   bornTurn: number;
+  oos?: number;             // consecutive turns out of supply
 }
 
 /** A battle in progress. Persists across pulses and turns until one side is gone. */
@@ -138,6 +142,10 @@ export interface Player {
   pactOffers: PlayerId[];   // players this one offered a pact to this turn
   missedTurns: number;      // consecutive deadlines missed (steward takes over)
   reserveCommanders: Commander[]; // escaped commanders waiting for a new fleet
+  techs?: string[];         // researched technologies (public)
+  laws?: string[];          // enacted laws (public)
+  blueprint?: Record<string, string>; // ship class -> module fitted to new builds (public)
+  researched?: number;      // technologies bought this turn/cycle
 }
 
 export interface Edict {
@@ -161,7 +169,9 @@ export type Order =
   | { type: 'feint'; target: RegionId }
   | { type: 'conceal' }
   | { type: 'excavate'; fleet: FleetId }
-  | { type: 'pact'; with: PlayerId };
+  | { type: 'pact'; with: PlayerId }
+  | { type: 'law'; law: string }
+  | { type: 'refit'; fleet: FleetId };
 
 export type OrderSlots = (Order | null)[];
 
@@ -170,7 +180,10 @@ export type FreeAction =
   | { type: 'doctrine'; fleet: FleetId; doctrine: Doctrine }
   | { type: 'split'; fleet: FleetId; ships: number[] }
   | { type: 'merge'; fleet: FleetId; into: FleetId }
-  | { type: 'rename'; fleet: FleetId; name: string };
+  | { type: 'rename'; fleet: FleetId; name: string }
+  | { type: 'research'; tech: string }
+  | { type: 'blueprint'; cls: string; mod: string }
+  | { type: 'revoke'; law: string };
 
 export interface Submission {
   orders: OrderSlots;
@@ -196,6 +209,9 @@ export type GameEvent =
   | { k: 'pact'; pulse: number; a: PlayerId; b: PlayerId; formed: boolean }
   | { k: 'betrayal'; pulse: number; by: PlayerId; victim: PlayerId; region: RegionId }
   | { k: 'fail'; pulse: number; owner: PlayerId; text: string }
+  | { k: 'tech'; pulse: number; owner: PlayerId; tech: string; stolen?: boolean }
+  | { k: 'law'; pulse: number; owner: PlayerId; law: string; revoked?: boolean }
+  | { k: 'refit'; pulse: number; owner: PlayerId; fleet: FleetId; region: RegionId }
   | { k: 'note'; pulse: number; owner: PlayerId | null; text: string; region?: RegionId };
 
 export interface ShotRec { from: number; to: number; dmg: number; crit?: keyof Subsystems; kill?: boolean; miss?: boolean }

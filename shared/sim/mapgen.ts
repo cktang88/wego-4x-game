@@ -5,7 +5,7 @@ import { REGION_NAMES, CROWN_NAMES, THRONE_NAME } from '../config/content.ts';
 import { Rng, hashString } from './rng.ts';
 import type { Pt, Region, RegionKind, Feature } from './types.ts';
 
-interface Site { p: Pt; kind: RegionKind; feature: Feature; garrisonRoll: number; wedge: number; relic: boolean }
+interface Site { p: Pt; kind: RegionKind; feature: Feature; garrisonRoll: number; wedge: number; relic: boolean; trait?: string | null; vein?: string | null }
 
 const rot = (p: Pt, a: number): Pt => ({ x: p.x * Math.cos(a) - p.y * Math.sin(a), y: p.x * Math.sin(a) + p.y * Math.cos(a) });
 const polar = (r: number, a: number): Pt => ({ x: r * Math.cos(a), y: r * Math.sin(a) });
@@ -58,6 +58,27 @@ function tryGenerate(rules: Rules, seed: number, strict: boolean): GeneratedMap 
     tmpl.push({ p, kind, feature, garrisonRoll: rng.next(), wedge: 0, relic: kind === 'relic' });
   }
   if (tmpl.length < 4) return null;
+  // ---- the Empire layer: veins & world traits (own RNG stream, so map geometry is unchanged)
+  {
+    const erng = new Rng((seed ^ 0x51ed2701) >>> 0);
+    const E = rules.empire;
+    const cands = tmpl.filter(t => t.kind === 'colony' || t.kind === 'void');
+    const ang = (t: Site) => Math.atan2(t.p.y, t.p.x);
+    if (E?.enabled !== false && cands.length >= 2) {
+      // veins sit near the wedge borders, so each one lies between two empires: Antimatter on one edge, Crystals on the other
+      const byAng = cands.slice().sort((a, b) => ang(a) - ang(b));
+      byAng[byAng.length - 1].vein = 'antimatter';
+      byAng[0].vein = 'crystal';
+    }
+    if (E?.enabled !== false) {
+      const kinds = ['forge', 'garden', 'bulwark', 'gas'];
+      let k = Math.floor(erng.next() * kinds.length);
+      for (const t of tmpl) {
+        if (t.kind !== 'colony' || t.vein) continue;
+        if (erng.chance(E.traitChance)) t.trait = kinds[k++ % kinds.length];   // round-robin: a varied mix in every wedge
+      }
+    }
+  }
 
   // ---- realise all sites (throne + 3 rotated wedges)
   const sites: Site[] = [{ p: { x: 0, y: 0 }, kind: 'throne', feature: 'none', garrisonRoll: 1, wedge: -1, relic: false }];
@@ -143,11 +164,12 @@ function tryGenerate(rules: Rules, seed: number, strict: boolean): GeneratedMap 
     else if (s.kind === 'crown') garrison = g.crownNeutral;
     else if (s.kind === 'void') garrison = 0;
     else if (s.kind !== 'home') garrison = Math.round(g.neutralMin + (g.neutralMax - g.neutralMin) * s.garrisonRoll);
+    if (s.trait === 'bulwark' && rules.empire?.enabled !== false) garrison = Math.round(garrison * rules.empire.bulwarkGarrisonMult);
     return {
       id: i, name, kind: s.kind, feature: s.feature, site: s.p, poly, centroid: centroid(poly), neighbors: neighbors[i],
       owner: null, homeOf: null, dev: s.kind === 'void' ? 0 : 1, buildings: {}, project: null, garrison,
       loyalty: [0, 0, 0], relic: s.relic ? 'unclaimed' : null, wreckage: 0, battles: 0, heldSince: 0,
-      memorials: [], baseGarrison: garrison,
+      memorials: [], baseGarrison: garrison, trait: s.trait ?? null, vein: s.vein ?? null,
     } as Region;
   });
   const homes = [0, 1, 2].map(w => sites.findIndex(s => s.kind === 'home' && s.wedge === w));

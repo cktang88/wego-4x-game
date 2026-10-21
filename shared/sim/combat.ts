@@ -8,6 +8,7 @@
 // produce identical battles from the same orders.
 import { TRAITS } from '../config/content.ts';
 import { ordinal } from './setup.ts';
+import { shipStats, hasTech, hasLaw } from './empire.ts';
 import type { Rng } from './rng.ts';
 import type { BattleReport, Engagement, Fleet, GameState, PlayerId, RegionId, Ship, ShotRec, Subsystems } from './types.ts';
 
@@ -179,6 +180,7 @@ export function fightRounds(
       if (f.fortified) h += R.combat.fortifyHitBonus;
       if (lastStand.has(f.id)) h += R.lastStand.hitBonus;
       if (s.players[f.owner]?.relics.includes('lens')) h += 0.04;
+      if (region.owner !== f.owner && hasLaw(s, f.owner, 'vanguard')) h += R.empire.vanguardHit;
       if (sh.ship && sh.ship.battles >= R.combat.veteranBattles) h += R.combat.veteranHitBonus;
       if (tg.fleet) {
         const rec = f.commander.rivals[tg.fleet.commander.name];
@@ -194,7 +196,7 @@ export function fightRounds(
     }
     if (region.feature === 'nebula') h -= R.combat.nebulaHitPenalty;
     if (tg.ship) {
-      h -= R.ships[tg.ship.cls].evasion * (tg.ship.sys.engines ? 1 : 0.3);
+      h -= shipStats(s, tg.ship, tg.owner).evasion * (tg.ship.sys.engines ? 1 : 0.3);
       const tf = tg.fleet!;
       h -= traitVal(tf, 'evasion');
       if (tf.fortified) h -= R.combat.fortifyEvasion;
@@ -209,7 +211,7 @@ export function fightRounds(
     if (!cands.length) return null;
     const pref = sh.fleet?.doctrine.target ?? 'weakest';
     const hpOf = (t: Unit) => (t.ship ? t.ship.hp : region.garrison) - t.pending;
-    const atkOf = (t: Unit) => (t.ship ? R.ships[t.ship.cls].attack * R.ships[t.ship.cls].shots : 3);
+    const atkOf = (t: Unit) => { if (!t.ship) return 3; const st = shipStats(s, t.ship, t.owner); return st.attack * st.shots; };
     const costOf = (t: Unit) => (t.ship ? (R.ships[t.ship.cls].cost.industry ?? 0) : 999);
     let sorted: Unit[];
     switch (pref) {
@@ -242,16 +244,18 @@ export function fightRounds(
     for (const sh of shooters) {
       let n: number, atk: number, siege = 0;
       if (sh.ship) {
-        const d = R.ships[sh.ship.cls];
+        const d = shipStats(s, sh.ship, sh.owner);
         if (!sh.ship.sys.weapons) continue;
-        n = Math.max(1, Math.round(d.shots * volleyMult));
+        const alpha = volleyMult === 1 && E.rounds === 1 && hasTech(s, sh.owner, 'alpha') ? 2 : 1;
+        n = Math.max(1, Math.round(d.shots * volleyMult * alpha));
         atk = d.attack;
         siege = d.siege + traitVal(sh.fleet, 'garrisonDmg');
         if (sh.fleet?.fatigued) atk = Math.max(1, Math.round(atk * R.overdrive.fatigueAttackMult));
       } else {
         const fort = region.buildings.fortress ?? 0;
-        n = Math.max(1, Math.round((R.garrison.shotsBase + fort * R.garrison.shotsPerFortress + Math.floor(region.garrison / R.garrison.hpPerShot)) * volleyMult));
-        atk = R.garrison.attackBase + fort * R.garrison.attackPerFortress;
+        const bat = region.buildings.battery ?? 0;
+        n = Math.max(1, Math.round((R.garrison.shotsBase + fort * R.garrison.shotsPerFortress + bat * R.empire.batteryShots + Math.floor(region.garrison / R.garrison.hpPerShot)) * volleyMult));
+        atk = R.garrison.attackBase + fort * R.garrison.attackPerFortress + bat * R.empire.batteryAttack;
       }
       // lethality: fraction of a ship's shots that fire each round (stochastic rounding keeps it fair)
       const want = n * R.combat.lethality;
@@ -261,15 +265,18 @@ export function fightRounds(
         if (!tg) break;
         if (!rng.chance(hitChance(sh, tg))) { shots.push({ from: sh.uid, to: tg.uid, dmg: 0, miss: true }); continue; }
         let dmg: number;
-        if (!tg.ship) dmg = Math.max(1, atk - (R.garrison.armor + (region.buildings.fortress ?? 0) * R.garrison.armorPerFortress)) + siege;
-        else {
-          const shd = tg.ship.sys.shields ? R.ships[tg.ship.cls].shields : 0;
+        if (!tg.ship) {
+          const ps = region.buildings.pshield ? R.empire.pshieldReduction : 0;
+          dmg = Math.max(ps ? 0 : 1, atk - (R.garrison.armor + (region.buildings.fortress ?? 0) * R.garrison.armorPerFortress) - ps) + siege;
+          if (dmg <= 0) { shots.push({ from: sh.uid, to: tg.uid, dmg: 0, miss: true }); continue; }
+        } else {
+          const shd = tg.ship.sys.shields ? shipStats(s, tg.ship, tg.owner).shields : 0;
           dmg = Math.max(1, Math.ceil(atk * (1 - R.shieldsCap.maxReduction)), atk - shd);
         }
         tg.pending += dmg;
         const rec: ShotRec = { from: sh.uid, to: tg.uid, dmg };
         if (tg.ship && tg.ship.hp - tg.pending > 0 && rng.chance(R.combat.critChance)) {
-          const working = (['engines', 'weapons', 'shields'] as (keyof Subsystems)[]).filter(k => tg.ship!.sys[k] && (k !== 'shields' || R.ships[tg.ship!.cls].shields > 0));
+          const working = (['engines', 'weapons', 'shields'] as (keyof Subsystems)[]).filter(k => tg.ship!.sys[k] && (k !== 'shields' || shipStats(s, tg.ship!, tg.owner).shields > 0));
           if (working.length) rec.crit = rng.pick(working);
         }
         if (tg.ship && tg.ship.hp - tg.pending <= 0 && !killedBy.has(tg.uid)) { rec.kill = true; killedBy.set(tg.uid, sh.fleet); }

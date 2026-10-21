@@ -24,6 +24,8 @@ export interface ShipClassDef {
   needsShipyard: number; // min shipyard level required at the building region
   upkeep: number;      // credits per turn
   glyph: string;       // renderer shape key
+  tech?: string[];     // needs ANY of these technologies (see config/empire.ts)
+  vein?: string;       // needs access to this strategic resource (a connected Extractor)
 }
 
 export const DEFAULT_RULES = {
@@ -95,7 +97,14 @@ export const DEFAULT_RULES = {
     mine:     { name: 'Mine',     cost: { industry: 25 },              turns: 1, max: 3, desc: '+industry per turn.' },
     tradehub: { name: 'Trade Hub',cost: { industry: 25 },              turns: 1, max: 3, desc: '+credits per turn.' },
     sensor:   { name: 'Sensor Array', cost: { industry: 20, influence: 2 }, turns: 1, max: 2, desc: '+1 sensor range from this region.' },
-  } as Record<string, { name: string; cost: Partial<Res>; turns: number; max: number; desc: string }>,
+    // --- the Empire layer (docs/EMPIRE.md)
+    academy:  { name: 'Academy',  cost: { industry: 30, credits: 10 }, turns: 2, max: 2, desc: 'Research costs 15% less per level (all your Academies, up to 45%). If captured, the captor steals a technology.' },
+    extractor:{ name: 'Extractor', cost: { industry: 30 },             turns: 2, max: 1, desc: 'Mines this vein: +3¢ a turn and access to its resource while connected to your capital.', vein: true },
+    battery:  { name: 'Battery',  cost: { industry: 25, credits: 5 },  turns: 1, max: 2, desc: 'Orbital guns: the garrison gets +2 shots and +2 damage per level.', tech: 'batteries' },
+    pshield:  { name: 'Planetary Shield', cost: { industry: 40, credits: 15 }, turns: 2, max: 1, desc: 'Hits on the garrison do 3 less damage. Only siege damage gets through.', tech: 'pshield', needs: 'crystal' },
+    depot:    { name: 'Depot',    cost: { industry: 20 },              turns: 1, max: 1, desc: 'Logistics hub: +3 industry; supply reaches 2 regions from here; fleets here repair fully.', tech: 'depots' },
+    gate:     { name: 'Warp Gate', cost: { industry: 45, credits: 15 }, turns: 2, max: 1, desc: 'Your fleets jump between any two of your gates as a single step.', tech: 'gates', needs: 'crystal' },
+  } as Record<string, { name: string; cost: Partial<Res>; turns: number; max: number; desc: string; tech?: string; needs?: string; vein?: boolean }>,
 
   // ---------------------------------------------------------------- garrisons
   garrison: {
@@ -128,8 +137,8 @@ export const DEFAULT_RULES = {
     corvette: { name: 'Corvette', role: 'Cheap, quick raider.', hp: 8,  attack: 3, shots: 1, shields: 0, speed: 3, siege: 0, sensor: 0, evasion: 0.15, cost: { industry: 12, credits: 4 },  needsShipyard: 1, upkeep: 1, glyph: 'arrow' },
     frigate:  { name: 'Frigate',  role: 'Line workhorse.',     hp: 14, attack: 3, shots: 2, shields: 1, speed: 2, siege: 1, sensor: 0, evasion: 0.05, cost: { industry: 28, credits: 10 },  needsShipyard: 1, upkeep: 2, glyph: 'wedge' },
     bombard:  { name: 'Bombard',  role: 'Cracks planets.',     hp: 18, attack: 1, shots: 2, shields: 2, speed: 1, siege: 6, sensor: 0, evasion: 0.00, cost: { industry: 38, credits: 16 },  needsShipyard: 2, upkeep: 2, glyph: 'block' },
-    cruiser:  { name: 'Cruiser',  role: 'Shielded brawler.',   hp: 28, attack: 4, shots: 3, shields: 2, speed: 2, siege: 2, sensor: 0, evasion: 0.00, cost: { industry: 50, credits: 26 },  needsShipyard: 2, upkeep: 4, glyph: 'long' },
-    dread:    { name: 'Dreadnought', role: 'Slow apocalypse.', hp: 56, attack: 8, shots: 3, shields: 3, speed: 1, siege: 4, sensor: 0, evasion: 0.00, cost: { industry: 90, credits: 50 }, needsShipyard: 3, upkeep: 7, glyph: 'dread' },
+    cruiser:  { name: 'Cruiser',  role: 'Shielded brawler.',   hp: 28, attack: 4, shots: 3, shields: 2, speed: 2, siege: 2, sensor: 0, evasion: 0.00, cost: { industry: 50, credits: 26 },  needsShipyard: 2, upkeep: 4, glyph: 'long', tech: ['cruisers'], vein: 'antimatter' },
+    dread:    { name: 'Dreadnought', role: 'Slow apocalypse.', hp: 56, attack: 8, shots: 3, shields: 3, speed: 1, siege: 4, sensor: 0, evasion: 0.00, cost: { industry: 90, credits: 50 }, needsShipyard: 3, upkeep: 7, glyph: 'dread', tech: ['siege', 'alpha'], vein: 'antimatter' },
   } as Record<string, ShipClassDef>,
   maxShipsPerFleet: 8,
   maxFleets: 6,
@@ -324,5 +333,65 @@ export const PLAYTEST_DEFAULTS = {
   },
   intel: {
     ghostEchoChance: 0.35,      // chance per unclaimed relic per turn of a fake "unidentified movement"
+  },
+  // ---------------------------------------------------------------- the Empire layer (docs/EMPIRE.md)
+  empire: {
+    enabled: true,
+    // research: price = (base[tier] + perRegion x tier x regions owned) x (1 - academy discount); credits share below
+    techBase: [0, 10, 18, 28, 40],
+    techPerRegionPerTier: 1.5,
+    techCreditShare: 0.35,       // this fraction of the price is credits, the rest industry
+    academyDiscount: 0.15,       // per Academy level you own...
+    academyMaxDiscount: 0.45,    // ...up to this
+    researchPerTurn: 1,          // technologies you can buy per turn (LIVE: per cycle)
+    // laws
+    lawSlotsStart: 1,
+    lawSlotTurns: [10],          // +1 slot at each of these turns
+    lawCost: 6,                  // influence to enact; switching a pair to its other side costs double
+    // modules / refit
+    armorHpMult: 1.25,
+    refitIndustryPerShip: 4,
+    // supply
+    cutOffYield: 0.5,            // regions not connected to your capital yield this much
+    supplyRange: 1,              // fleets this close to connected territory are in supply
+    depotRange: 2,
+    oosGraceTurns: 1,            // turns out of supply before attrition starts
+    oosAttrition: 2,             // hp per ship per turn after that
+    // veins & traits
+    extractorCredits: 3,
+    forgePerDev: 1,
+    gasCredits: 4,
+    gardenDevBonus: 1,
+    gardenDevelopDiscount: 0.3,
+    bulwarkGarrisonMult: 1.5,
+    traitChance: 0.6,            // share of plain colonies that get a trait
+    // technology effects
+    pshieldReduction: 3,
+    batteryShots: 2,
+    batteryAttack: 2,
+    siegeDoctrineBonus: 3,
+    tradeHubBonus: 3,
+    pactCredits: 4,
+    subversionCostMult: 0.6,
+    subversionPushMult: 1.5,
+    marketsCreditsMult: 1.2,
+    citadelGarrisonMult: 1.5,
+    regenRepair: 3,
+    depotIndustry: 3,
+    depotUpkeepCut: 0.25,
+    citadelCrownVp: 1,
+    // laws
+    bastionGarrisonMult: 1.3,
+    lawRegenBonus: 3,
+    vanguardHit: 0.08,
+    mercantileMult: 1.25,
+    mercantileHubBonus: 2,
+    industrialMult: 1.2,
+    industrialShipDiscount: 0.1,
+    industrialCreditMult: 0.9,
+    centralMult: 1.5,
+    federalDevelopDiscount: 0.35,
+    openInfluence: 3,
+    martialInfluence: -1,
   },
 };

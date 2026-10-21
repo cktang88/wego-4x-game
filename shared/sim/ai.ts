@@ -14,10 +14,12 @@ import { EDICTS } from './edicts.ts';
 import { findPath, fleetPower, fleetSpeed, within } from './graph.ts';
 import { canAfford, orderCost, pay, validateOrder } from './orders.ts';
 import { Rng } from './rng.ts';
-import { emptySubmission, currentLeader, flipThreshold } from './resolve.ts';
+import { emptySubmission, currentLeader, flipThreshold, creditRate } from './resolve.ts';
 import { maxGarrison } from './setup.ts';
 import type { Fleet, FreeAction, GameState, Order, PlayerId, Region, RegionId, Submission } from './types.ts';
 import { coverage, seesFleetsIn } from './visibility.ts';
+import { empireFree, empireCands, empireRegionValue, canField } from './ai-empire.ts';
+import { shipStats } from './empire.ts';
 
 interface Cand { o: Order; v: number; tag: string }
 type Level = 'novice' | 'standard' | 'expert';
@@ -88,11 +90,14 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     }
   }
 
+  // -------------------------------------------------- the Empire layer: research & blueprints (free)
+  sub.free.push(...empireFree({ s, pid, lvl, rng, threatened }));
+
   // -------------------------------------------------- order slots (greedy over projected state)
   const usedTargets = new Set<string>();
   const fleetUses = new Map<number, number>();
   for (let slot = 0; slot < R.orders.perTurn; slot++) {
-    const valid = candidates().filter(c => c.v > 0.3 && !usedTargets.has(c.tag) && !validateOrder(s, pid, c.o) && canAfford(me0().res, orderCost(s, c.o, pid), s.rules));
+    const valid = candidates().filter(c => c.v > 0.3 && !usedTargets.has(c.tag) && !validateOrder(s, pid, c.o) && canAfford(me0().res, orderCost(s, c.o, pid), creditRate(s, pid)));
     if (!valid.length) continue;
     // tiny seeded jitter so exact ties never break by region id (which would favour one map wedge)
     for (const c of valid) c.v += rng.next() * 0.02;
@@ -121,7 +126,8 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
   function topVp() { return s.players.every(p => p.id === pid || p.eliminated || p.vp < me0().vp + 3); }
 
   function project(o: Order) {
-    pay(me0().res, orderCost(s, o, pid), s.rules);
+    pay(me0().res, orderCost(s, o, pid), creditRate(s, pid));
+    if (o.type === 'law') { const l = me0().laws ??= []; l.push(o.law); }
     if ('fleet' in o && o.fleet !== null && o.type !== 'build') fleetUses.set(o.fleet, (fleetUses.get(o.fleet) ?? 0) + 1);
     if (o.type === 'move') { const f = s.fleets.find(x => x.id === o.fleet)!; f.region = o.path[o.path.length - 1]; f.fortified = false; }
     if (o.type === 'seize') {
@@ -158,6 +164,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     }
     const rivalCapital = r.owner !== null && r.owner !== pid && s.players[r.owner].capital === r.id;
     if (rivalCapital) v += 8;
+    if (!novice) v += empireRegionValue(s, pid, r);
     if (expert) {
       if (r.owner !== null && r.owner === leader && leader !== pid) v += 4;                 // bounty + slows the leader
       if (r.kind === 'crown') {
@@ -402,6 +409,9 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       }
     }
 
+    // ------------- the Empire layer: laws, projects, refits
+    out.push(...empireCands({ s, pid, lvl, rng, threatened }, s.regions.filter(x => x.owner === pid), mainArmy ? mainArmy.region : null));
+
     // ------------- influence regions next door
     for (const r of s.regions) {
       if (r.kind === 'void') continue;
@@ -564,7 +574,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
   function expertBuild(r: Region, need: number, joinable: Fleet | undefined, mainArmy: Fleet | undefined): { cls: string; v: number } | null {
     const yard = r.buildings.shipyard ?? 0;
     const res = me0().res;
-    const ok = (c: string) => R.ships[c] && R.ships[c].needsShipyard <= yard && canAfford(res, orderCost(s, { type: 'build', region: r.id, cls: c, fleet: null }, pid), s.rules);
+    const ok = (c: string) => R.ships[c] && R.ships[c].needsShipyard <= yard && canField(s, pid, c) && canAfford(res, orderCost(s, { type: 'build', region: r.id, cls: c, fleet: null }, pid), creditRate(s, pid));
     const army = mainArmy ? mainArmy.ships : [];
     const bombards = army.filter(x => (R.ships[x.cls]?.siege ?? 0) >= 5).length;
     // a hard nut within reach of the army (fortified capitals, crowns, the Throne) wants siege hulls
@@ -624,7 +634,7 @@ function unitsKey(f: Fleet): string { return f.ships.map(x => `${x.cls[0]}${x.cl
 export function unitsOf(s: GameState, f: Fleet, defending = false): SimUnit[] {
   const R = s.rules;
   return f.ships.map(sh => {
-    const d = R.ships[sh.cls];
+    const d = { ...shipStats(s, sh, f.owner), cost: R.ships[sh.cls].cost };
     let atk = sh.sys.weapons ? d.attack : 0;
     if (f.fatigued) atk = Math.max(1, Math.round(atk * R.overdrive.fatigueAttackMult));
     const eva = d.evasion * (sh.sys.engines ? 1 : 0.3) + (f.fortified && defending ? R.combat.fortifyEvasion : 0);
@@ -641,7 +651,9 @@ function simBattle(s: GameState, rid: number, A: SimUnit[], D: SimUnit[], gar: n
   const a: U[] = A.map(u => ({ ...u, cur: u.hp, pend: 0 }));
   const d: U[] = D.map(u => ({ ...u, cur: u.hp, pend: 0 }));
   const garU: U = { hp: gar, atk: 0, shots: 0, sh: 0, siege: 0, eva: 0, cost: 0, cur: gar, pend: 0, gar: true };
-  const armor = G.armor + fort * G.armorPerFortress;
+  const reg = s.regions[rid];
+  const armor = G.armor + fort * G.armorPerFortress + (reg.buildings.pshield ? R.empire.pshieldReduction : 0);
+  const bat = reg.buildings.battery ?? 0;
   const shieldCap = R.shieldsCap?.maxReduction ?? 1; // shields absorb at most this share of a hit
   const hp = (xs: U[]) => xs.reduce((t, x) => t + Math.max(0, x.cur), 0);
   const a0 = hp(a) || 1, d0 = hp(d) + gar || 1;
@@ -653,7 +665,7 @@ function simBattle(s: GameState, rid: number, A: SimUnit[], D: SimUnit[], gar: n
       if (i >= live.length) return;
       const t = live[i];
       const ph = Math.max(0.1, Math.min(0.95, C.baseHit + sh.bonus - t.eva - neb));
-      const dmg = t.gar ? Math.max(1, sh.atk - armor) + sh.siege : Math.max(1, Math.ceil(sh.atk * (1 - shieldCap)), sh.atk - t.sh);
+      const dmg = t.gar ? Math.max(reg.buildings.pshield ? 0 : 1, sh.atk - armor) + sh.siege : Math.max(1, Math.ceil(sh.atk * (1 - shieldCap)), sh.atk - t.sh);
       t.pend += ph * dmg;
     }
   };
@@ -664,7 +676,7 @@ function simBattle(s: GameState, rid: number, A: SimUnit[], D: SimUnit[], gar: n
     const dTargets = garU.cur > 0 ? [...ld, garU] : ld;
     fire(la.map(u => ({ atk: u.atk, shots: u.atk > 0 ? u.shots : 0, siege: u.siege, bonus: 0 })), dTargets);
     const dShooters = ld.map(u => ({ atk: u.atk, shots: u.atk > 0 ? u.shots : 0, siege: 0, bonus: 0 }));
-    if (garU.cur > 0) dShooters.push({ atk: G.attackBase + fort * G.attackPerFortress, shots: G.shotsBase + fort * G.shotsPerFortress + Math.floor(garU.cur / G.hpPerShot), siege: 0, bonus: 0.05 });
+    if (garU.cur > 0) dShooters.push({ atk: G.attackBase + fort * G.attackPerFortress + bat * R.empire.batteryAttack, shots: G.shotsBase + fort * G.shotsPerFortress + bat * R.empire.batteryShots + Math.floor(garU.cur / G.hpPerShot), siege: 0, bonus: 0.05 });
     fire(dShooters, la);
     for (const u of [...a, ...d, garU]) { u.cur -= u.pend; u.pend = 0; }
     const fa = hp(a) / a0, fd = (hp(d) + Math.max(0, garU.cur)) / d0;

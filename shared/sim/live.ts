@@ -14,6 +14,7 @@
 //  so the server (authoritative) and the browser (solo games) share it.
 // ============================================================================
 import { resolveTurn } from './resolve.ts';
+import { fleetSpeed } from './graph.ts';
 import { planTurn } from './ai.ts';
 import { validateOrder, ORDER_INFO } from './orders.ts';
 import type { FreeAction, GameState, LiveState, Order, PlayerId, TurnResult } from './types.ts';
@@ -124,9 +125,11 @@ export function runTick(s0: GameState, isAI: (pid: PlayerId) => boolean): GameSt
   for (const p of s0.players) {
     if (!isAI(p.id) || p.eliminated || s0.winner !== null || L0.bank[p.id] < 1) continue;
     const plan = planTurn(s0, p.id);
-    const best = plan.orders.find(o => o && !(o.type === 'move' && s0.fleets.find(f => f.id === o.fleet)?.route));
+    // the plan's first order is its best; every few ticks take a later one so laws/projects get their turn too
+    const opts = plan.orders.filter((o): o is Order => !!o && !(o.type === 'move' && !!s0.fleets.find(f => f.id === o.fleet)?.route));
+    const best = opts.length ? opts[L0.tick % 3 === 2 ? Math.min(opts.length - 1, 1 + ((L0.tick / 3) | 0) % Math.max(1, opts.length - 1)) : 0] : undefined;
     if (best) queueOrder(s0, p.id, best, tickTime);
-    for (const fa of plan.free) if (fa.type === 'doctrine') queueFree(s0, p.id, fa);
+    for (const fa of plan.free) if (fa.type === 'doctrine' || fa.type === 'research' || fa.type === 'blueprint') queueFree(s0, p.id, fa);
   }
   const ticks = s0.rules.live.ticksPerCycle;
   const t = L0.tick;
@@ -166,7 +169,7 @@ export function queuedText(s: GameState, o: Order): string {
 export function etaTicks(s: GameState, fleetId: number): number | null {
   const f = s.fleets.find(x => x.id === fleetId);
   if (!f?.route || !f.route.path.length) return null;
-  const sp = Math.max(1, Math.min(...f.ships.map(x => (x.sys.engines ? s.rules.ships[x.cls]?.speed ?? 1 : 1)))) + (f.route.overdrive ? s.rules.overdrive.speedBonus : 0);
+  const sp = Math.max(1, fleetSpeed(s, f)) + (f.route.overdrive ? s.rules.overdrive.speedBonus : 0);
   const need = f.route.path.length * s.rules.live.stepCost - f.route.mp;
   return Math.max(1, Math.ceil(need / sp));
 }
