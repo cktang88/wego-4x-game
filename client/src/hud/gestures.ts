@@ -6,7 +6,7 @@ import type { GameScreen } from '../game.ts';
 import type { Order, Pt } from '../../../shared/sim/types.ts';
 import { MAX_JOINERS, orderCost, costText } from '../../../shared/sim/orders.ts';
 import { blueprintFor } from '../../../shared/sim/empire.ts';
-import { esc } from '../ui/dom.ts';
+import { esc, uiScale } from '../ui/dom.ts';
 import { intentFor, targetMap, commitIntent, isLane, VERB_COLOR, type DragSrc, type Intent } from './verbs.ts';
 import { cardAction } from './card.ts';
 import { offerCharge } from './signature.ts';
@@ -330,7 +330,8 @@ export class Gestures {
     g.hoverRegion = rid;
     const ghost = g.hud.h.ghost;
     ghost.classList.remove('hidden');
-    ghost.style.transform = `translate(${x - 18}px, ${(d.touch ? y - GHOST : y) - 18}px)`;
+    const gh = ghost.offsetWidth / 2 || 18;
+    ghost.style.transform = `translate(${x - gh}px, ${(d.touch ? y - GHOST : y) - gh}px)`;
     ghost.style.setProperty('--pc', g.color(g.you));
     ghost.textContent = String(d.src.ships?.length ?? f?.ships.length ?? '');
     if (d.intent) this.showPreview(d.intent, d.x, d.y); else this.hidePreview();
@@ -402,8 +403,8 @@ export class Gestures {
       ctx.beginPath(); ctx.moveTo(cv.width / 2 - 10, cv.height / 2); ctx.lineTo(cv.width / 2 + 10, cv.height / 2); ctx.moveTo(cv.width / 2, cv.height / 2 - 10); ctx.lineTo(cv.width / 2, cv.height / 2 + 10); ctx.stroke();
     }
     const left = d.x > g.map.w / 2;
-    L.style.left = left ? '12px' : '';
-    L.style.right = left ? '' : '12px';
+    L.style.left = left ? '0.75rem' : '';
+    L.style.right = left ? '' : '0.75rem';
     const name = d.rid !== null ? g.st.regions[d.rid]?.name ?? '' : '';
     const lbl = L.querySelector('.lbl')!;
     const txt = `${esc(name)}${d.intent ? ` · <b style="color:${d.intent.color}">${esc(d.intent.icon)} ${esc(d.intent.text)}</b>` : ''}`;
@@ -484,7 +485,7 @@ export class Gestures {
   private renderRing() {
     const R = this.ring, el = this.g.hud.h.ring;
     if (!R) { el.classList.add('hidden'); el.innerHTML = ''; return; }
-    const rad = this.g.phone ? 74 : 64;
+    const rad = (this.g.phone ? 74 : 64) * uiScale();
     const cx = Math.max(rad + 30, Math.min(this.g.map.w - rad - 30, R.x)), cy = Math.max(rad + 30, Math.min(this.g.map.h - rad - 30, R.y));
     const hv = R.items.find(i => i.a === R.hover);
     el.classList.remove('hidden');

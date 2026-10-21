@@ -57,7 +57,7 @@ export function openTweaks() {
   }
   const o = overlay(`<div class="dialog wide scroll" style="max-height:90vh">
     <div class="row"><h2 class="grow">Tweaks: rules for new games</h2><button data-x="reset" class="danger">Reset all</button><button data-x="export">Copy JSON</button><button data-x="import">Paste JSON</button><button class="primary" data-x="close">Done</button></div>
-    <p class="dim" style="font-size:13px">Every balance number in the game. Changes apply to <b>new</b> games (local or online). Each game keeps the rules it started with, so everyone in an online game plays by the same rules. Gold labels are changed from the default. Ship stats live under <i>ships.*</i>. You can also edit <code>shared/config/rules.ts</code> directly.</p>
+    <p class="dim" style="font-size:var(--fs-xs)">Every balance number in the game. Changes apply to <b>new</b> games (local or online). Each game keeps the rules it started with, so everyone in an online game plays by the same rules. Gold labels are changed from the default. Ship stats live under <i>ships.*</i>. You can also edit <code>shared/config/rules.ts</code> directly.</p>
     <div class="tweaks">${groups.join('')}</div></div>`);
   o.querySelectorAll<HTMLInputElement>('[data-path]').forEach(inp => inp.addEventListener('change', () => {
     const path = inp.dataset.path!.split('.');

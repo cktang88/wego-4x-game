@@ -12,6 +12,7 @@ import { matBackdrop, lampOverlay, weaveTile, starfield } from '../art/mat.ts';
 import { drawGlow, beam, tracer, fireball, smoke, shieldHit } from '../art/fx.ts';
 import { fbm2, rand as artRand, mix as artMix, css as artCss, rgb as artRgb } from '../art/util.ts';
 import { drawStructure } from '../art/structures.ts';
+import { uiScale } from '../ui/dom.ts';
 
 export interface BattleViewerCtx {
   rules: Rules;
@@ -123,80 +124,80 @@ const CSS = `
 @keyframes bv-out{to{opacity:0}}
 @keyframes bv-shrink{to{transform:scale(.97)}}
 .bv-overlay .bv-panel{animation:bv-pop .34s cubic-bezier(.2,1.25,.4,1) both}
-@keyframes bv-pop{from{opacity:0;transform:scale(.94) translateY(10px)}}
+@keyframes bv-pop{from{opacity:0;transform:scale(.94) translateY(0.625rem)}}
 .bv-btn{transition:border-color .12s,box-shadow .15s,color .12s,background .12s,transform .06s}
 .bv-btn:active{transform:scale(.95)}
 .bv-card .bv-big{animation:bv-big .7s cubic-bezier(.2,.8,.2,1) both}
-@keyframes bv-big{from{opacity:0;letter-spacing:.5em;filter:blur(4px)}}
+@keyframes bv-big{from{opacity:0;letter-spacing:.5em;filter:blur(0.25rem)}}
 @media (prefers-reduced-motion:reduce){.bv-overlay,.bv-overlay .bv-panel,.bv-card .bv-big,.bv-side,.bv-closing,.bv-closing .bv-panel{animation:none!important}}
-.bv-panel{position:relative;display:flex;flex-direction:column;width:min(1180px,calc(100vw - 32px));height:min(780px,calc(100dvh - 32px));
-  background:#07080c;border:1px solid rgba(214,178,110,.28);border-radius:6px;overflow:hidden;
-  box-shadow:0 0 0 1px rgba(0,0,0,.6),0 0 48px rgba(0,0,0,.6),inset 0 0 60px rgba(214,178,110,.06)}
-.bv-head{display:flex;align-items:center;gap:12px;padding:8px 12px 8px 16px;border-bottom:1px solid rgba(214,178,110,.35);box-shadow:inset 0 1px 0 rgba(255,240,210,.08);
+.bv-panel{position:relative;display:flex;flex-direction:column;width:min(73.75rem,calc(100vw - 2rem));height:min(48.75rem,calc(100dvh - 2rem));
+  background:#07080c;border:1px solid rgba(214,178,110,.28);border-radius:0.375rem;overflow:hidden;
+  box-shadow:0 0 0 1px rgba(0,0,0,.6),0 0 3rem rgba(0,0,0,.6),inset 0 0 3.75rem rgba(214,178,110,.06)}
+.bv-head{display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.75rem 0.5rem 1rem;border-bottom:1px solid rgba(214,178,110,.35);box-shadow:inset 0 1px 0 rgba(255,240,210,.08);
   background:linear-gradient(90deg,rgba(70,74,90,.5),rgba(20,22,30,0) 70%)}
 .bv-title{flex:1;min-width:0}
-.bv-title b{display:block;font-size:15px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  text-shadow:0 0 12px rgba(230,190,110,.6)}
-.bv-title span{display:block;font-size:10.5px;letter-spacing:.24em;text-transform:uppercase;color:#a89a80;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bv-x{background:none;border:1px solid rgba(214,178,110,.3);color:#e6d6b0;width:32px;height:32px;border-radius:4px;font-size:20px;line-height:1;cursor:pointer;flex:none}
-.bv-x:hover{color:#fff;border-color:#e6c37a;box-shadow:0 0 12px rgba(230,180,90,.5)}
+.bv-title b{display:block;font-size:var(--fs-md);font-weight:600;letter-spacing:.22em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  text-shadow:0 0 0.75rem rgba(230,190,110,.6)}
+.bv-title span{display:block;font-size:var(--fs-xs);letter-spacing:.24em;text-transform:uppercase;color:#a89a80;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bv-x{background:none;border:1px solid rgba(214,178,110,.3);color:#e6d6b0;width:2rem;height:2rem;border-radius:0.25rem;font-size:1.25rem;line-height:1;cursor:pointer;flex:none}
+.bv-x:hover{color:#fff;border-color:#e6c37a;box-shadow:0 0 0.75rem rgba(230,180,90,.5)}
 .bv-stage{position:relative;flex:1;min-height:0;overflow:hidden;background:#05060a}
 .bv-stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
-.bv-ctrl{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid rgba(214,178,110,.18);background:rgba(14,15,20,.95);flex-wrap:wrap}
-.bv-btn{background:linear-gradient(#2c2f3a,#16171e);box-shadow:inset 0 1px 0 rgba(255,240,210,.12);border:1px solid rgba(214,178,110,.32);color:#ece2c8;font:600 11px ${FONT};letter-spacing:.18em;text-transform:uppercase;
-  padding:7px 10px;border-radius:3px;cursor:pointer;min-width:34px;white-space:nowrap}
-.bv-btn:hover{border-color:#e6c37a;box-shadow:0 0 10px rgba(230,180,90,.45);color:#fff}
-.bv-btn.bv-on{background:rgba(214,170,90,.28);border-color:#f0d79a;color:#fff;box-shadow:0 0 10px rgba(230,180,90,.4)}
+.bv-ctrl{display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.75rem;border-top:1px solid rgba(214,178,110,.18);background:rgba(14,15,20,.95);flex-wrap:wrap}
+.bv-btn{background:linear-gradient(#2c2f3a,#16171e);box-shadow:inset 0 1px 0 rgba(255,240,210,.12);border:1px solid rgba(214,178,110,.32);color:#ece2c8;font:600 var(--fs-xs) ${FONT};letter-spacing:.18em;text-transform:uppercase;
+  padding:0.4375rem 0.625rem;border-radius:0.1875rem;cursor:pointer;min-width:2.125rem;white-space:nowrap}
+.bv-btn:hover{border-color:#e6c37a;box-shadow:0 0 0.625rem rgba(230,180,90,.45);color:#fff}
+.bv-btn.bv-on{background:rgba(214,170,90,.28);border-color:#f0d79a;color:#fff;box-shadow:0 0 0.625rem rgba(230,180,90,.4)}
 .bv-speed{display:flex;gap:0}
 .bv-speed .bv-btn{border-radius:0;margin-left:-1px}
-.bv-speed .bv-btn:first-child{border-radius:3px 0 0 3px}.bv-speed .bv-btn:last-child{border-radius:0 3px 3px 0}
-.bv-round{font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:#d8c9a4;min-width:96px;text-align:center}
-.bv-bar{flex:1;min-width:120px;height:18px;position:relative;cursor:pointer}
-.bv-bar i{position:absolute;left:0;right:0;top:8px;height:2px;background:rgba(214,178,110,.18)}
-.bv-bar em{position:absolute;left:0;top:8px;height:2px;background:linear-gradient(90deg,#9a7430,#ffe2a0);box-shadow:0 0 8px #d4a650}
-.bv-bar s{position:absolute;top:5px;width:1px;height:8px;background:rgba(230,200,140,.45)}
-.bv-card{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto;
+.bv-speed .bv-btn:first-child{border-radius:0.1875rem 0 0 0.1875rem}.bv-speed .bv-btn:last-child{border-radius:0 0.1875rem 0.1875rem 0}
+.bv-round{font-size:var(--fs-xs);letter-spacing:.24em;text-transform:uppercase;color:#d8c9a4;min-width:6rem;text-align:center}
+.bv-bar{flex:1;min-width:7.5rem;height:1.125rem;position:relative;cursor:pointer}
+.bv-bar i{position:absolute;left:0;right:0;top:0.5rem;height:0.125rem;background:rgba(214,178,110,.18)}
+.bv-bar em{position:absolute;left:0;top:0.5rem;height:0.125rem;background:linear-gradient(90deg,#9a7430,#ffe2a0);box-shadow:0 0 0.5rem #d4a650}
+.bv-bar s{position:absolute;top:0.3125rem;width:1px;height:0.5rem;background:rgba(230,200,140,.45)}
+.bv-card{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:1rem;overflow:auto;
   background:radial-gradient(ellipse at center,rgba(14,14,20,.84),rgba(4,4,8,.95));z-index:3}
-.bv-card-in{max-width:880px;width:100%;text-align:center;margin:auto}
-.bv-kicker{font-size:11px;letter-spacing:.42em;text-transform:uppercase;color:#a89a80}
-.bv-big{font-size:clamp(22px,4.6vw,40px);font-weight:600;letter-spacing:.16em;text-transform:uppercase;margin:6px 0 4px;
-  text-shadow:0 0 18px rgba(230,190,110,.7),0 0 2px #fff}
-.bv-sub{font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:#b4a684}
-.bv-rule{height:1px;margin:14px auto;width:60%;background:linear-gradient(90deg,transparent,rgba(230,196,120,.6),transparent)}
-.bv-sides{display:flex;flex-wrap:wrap;justify-content:center;gap:12px;margin-top:6px}
-.bv-side{flex:1 1 200px;max-width:280px;text-align:left;padding:10px 12px;border:1px solid rgba(255,255,255,.08);border-left:2px solid var(--c);
+.bv-card-in{max-width:55rem;width:100%;text-align:center;margin:auto}
+.bv-kicker{font-size:var(--fs-xs);letter-spacing:.42em;text-transform:uppercase;color:#a89a80}
+.bv-big{font-size:clamp(1.375rem,4.6vw,2.5rem);font-weight:600;letter-spacing:.16em;text-transform:uppercase;margin:0.375rem 0 0.25rem;
+  text-shadow:0 0 1.125rem rgba(230,190,110,.7),0 0 0.125rem #fff}
+.bv-sub{font-size:var(--fs-xs);letter-spacing:.3em;text-transform:uppercase;color:#b4a684}
+.bv-rule{height:1px;margin:0.875rem auto;width:60%;background:linear-gradient(90deg,transparent,rgba(230,196,120,.6),transparent)}
+.bv-sides{display:flex;flex-wrap:wrap;justify-content:center;gap:0.75rem;margin-top:0.375rem}
+.bv-side{flex:1 1 12.5rem;max-width:17.5rem;text-align:left;padding:0.625rem 0.75rem;border:1px solid rgba(255,255,255,.08);border-left:0.125rem solid var(--c);
   background:linear-gradient(90deg,color-mix(in srgb,var(--c) 14%,transparent),transparent);animation:bv-slide .45s ease-out both}
-@keyframes bv-slide{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-.bv-side h3{margin:0 0 6px;font-size:13px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--c);text-shadow:0 0 10px var(--c)}
-.bv-side p{margin:2px 0;font-size:12px;letter-spacing:.06em;color:#ddd4bc}
-.bv-side small{display:block;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#a89a80;margin-top:6px}
-.bv-vs{align-self:center;font-size:12px;letter-spacing:.3em;color:#8a7e66}
-.bv-hint{margin-top:14px;font-size:10px;letter-spacing:.3em;color:#8a7e66;text-transform:uppercase}
-.bv-caption{position:absolute;left:50%;bottom:14px;transform:translate(-50%,6px);max-width:min(760px,calc(100% - 24px));z-index:2;
-  padding:8px 18px;text-align:center;font-size:clamp(12px,1.7vw,15px);letter-spacing:.08em;color:#f6efdc;pointer-events:none;
+@keyframes bv-slide{from{opacity:0;transform:translateY(0.5rem)}to{opacity:1;transform:none}}
+.bv-side h3{margin:0 0 0.375rem;font-size:var(--fs-xs);font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--c);text-shadow:0 0 0.625rem var(--c)}
+.bv-side p{margin:0.125rem 0;font-size:var(--fs-xs);letter-spacing:.06em;color:#ddd4bc}
+.bv-side small{display:block;font-size:var(--fs-xs);letter-spacing:.2em;text-transform:uppercase;color:#a89a80;margin-top:0.375rem}
+.bv-vs{align-self:center;font-size:var(--fs-xs);letter-spacing:.3em;color:#a89a80}
+.bv-hint{margin-top:0.875rem;font-size:var(--fs-xs);letter-spacing:.3em;color:#a89a80;text-transform:uppercase}
+.bv-caption{position:absolute;left:50%;bottom:0.875rem;transform:translate(-50%,0.375rem);max-width:min(47.5rem,calc(100% - 1.5rem));z-index:2;
+  padding:0.5rem 1.125rem;text-align:center;font-size:clamp(var(--fs-sm),1.7vw,1rem);letter-spacing:.08em;color:#f6efdc;pointer-events:none;
   background:linear-gradient(90deg,transparent,rgba(10,10,14,.9) 15%,rgba(10,10,14,.9) 85%,transparent);
   border-top:1px solid rgba(230,196,120,.25);border-bottom:1px solid rgba(230,196,120,.25);
-  opacity:0;transition:opacity .35s,transform .35s;text-shadow:0 0 8px rgba(230,190,110,.6)}
+  opacity:0;transition:opacity .35s,transform .35s;text-shadow:0 0 0.5rem rgba(230,190,110,.6)}
 .bv-caption.bv-show{opacity:1;transform:translate(-50%,0)}
-.bv-end table{margin:10px auto 0;border-collapse:collapse;font-size:12px;letter-spacing:.1em}
-.bv-end th{font-weight:500;font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:#a89a80;padding:4px 10px;border-bottom:1px solid rgba(214,178,110,.2)}
-.bv-end td{padding:5px 10px;text-align:center;border-bottom:1px solid rgba(255,255,255,.05)}
+.bv-end table{margin:0.625rem auto 0;border-collapse:collapse;font-size:var(--fs-xs);letter-spacing:.1em}
+.bv-end th{font-weight:500;font-size:var(--fs-xs);letter-spacing:.24em;text-transform:uppercase;color:#a89a80;padding:0.25rem 0.625rem;border-bottom:1px solid rgba(214,178,110,.2)}
+.bv-end td{padding:0.3125rem 0.625rem;text-align:center;border-bottom:1px solid rgba(255,255,255,.05)}
 .bv-end td:first-child{text-align:left;text-transform:uppercase;letter-spacing:.16em;font-weight:600}
-.bv-mvp{display:inline-block;margin-top:14px;padding:8px 16px;border:1px solid rgba(255,210,120,.45);background:rgba(255,190,80,.07);
-  box-shadow:0 0 18px rgba(255,190,80,.15)}
-.bv-mvp small{display:block;font-size:10px;letter-spacing:.34em;color:#ffcf7a;text-transform:uppercase}
-.bv-mvp b{font-size:16px;letter-spacing:.12em}
-.bv-hl{list-style:none;margin:14px auto 0;padding:0;max-width:640px;text-align:left}
-.bv-hl li{font-size:12.5px;letter-spacing:.04em;color:#ddd4bc;padding:4px 0 4px 16px;position:relative;border-bottom:1px solid rgba(255,255,255,.04)}
-.bv-hl li:before{content:'';position:absolute;left:2px;top:10px;width:5px;height:5px;transform:rotate(45deg);background:#d4a650;box-shadow:0 0 6px #d4a650}
-.bv-endbtns{margin-top:16px;display:flex;gap:10px;justify-content:center}
+.bv-mvp{display:inline-block;margin-top:0.875rem;padding:0.5rem 1rem;border:1px solid rgba(255,210,120,.45);background:rgba(255,190,80,.07);
+  box-shadow:0 0 1.125rem rgba(255,190,80,.15)}
+.bv-mvp small{display:block;font-size:var(--fs-xs);letter-spacing:.34em;color:#ffcf7a;text-transform:uppercase}
+.bv-mvp b{font-size:1rem;letter-spacing:.12em}
+.bv-hl{list-style:none;margin:0.875rem auto 0;padding:0;max-width:40rem;text-align:left}
+.bv-hl li{font-size:var(--fs-xs);letter-spacing:.04em;color:#ddd4bc;padding:0.25rem 0 0.25rem 1rem;position:relative;border-bottom:1px solid rgba(255,255,255,.04)}
+.bv-hl li:before{content:'';position:absolute;left:0.125rem;top:0.625rem;width:0.3125rem;height:0.3125rem;transform:rotate(45deg);background:#d4a650;box-shadow:0 0 0.375rem #d4a650}
+.bv-endbtns{margin-top:1rem;display:flex;gap:0.625rem;justify-content:center}
 @media (max-width:640px){
   .bv-panel{width:100vw;height:100dvh;border-radius:0;border:none}
-  .bv-ctrl{gap:6px;padding:6px 8px}
-  .bv-btn{padding:7px 8px;letter-spacing:.1em}
+  .bv-ctrl{gap:0.375rem;padding:0.375rem 0.5rem}
+  .bv-btn{padding:0.4375rem 0.5rem;letter-spacing:.1em}
   .bv-bar{order:10;flex-basis:100%}
   .bv-round{min-width:0;flex:1}
-  .bv-sides{gap:8px}.bv-side{flex-basis:140px;padding:8px}
+  .bv-sides{gap:0.5rem}.bv-side{flex-basis:8.75rem;padding:0.5rem}
   .bv-vs{display:none}
 }`;
 
@@ -495,15 +496,15 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       const lost = report.losses[String(sd.owner)] ?? 0;
       const fled = sd.units.filter(u => u.retreatT < Infinity).length;
       const gar = rs.garrison ? (units.get(rs.garrison.id)!.deathT < Infinity ? 'Fallen' : `${Math.max(0, hpAt(units.get(rs.garrison.id)!, 1e9))} hp`) : '—';
-      return `<tr><td style="color:${esc(sd.color)};text-shadow:0 0 8px ${esc(sd.color)}">${esc(sd.name)}</td><td>${rs.ships.length}</td><td>${lost}</td><td>${fled}</td><td>${gar}</td></tr>`;
+      return `<tr><td style="color:${esc(sd.color)};text-shadow:0 0 0.5rem ${esc(sd.color)}">${esc(sd.name)}</td><td>${rs.ships.length}</td><td>${lost}</td><td>${fled}</td><td>${gar}</td></tr>`;
     }).join('');
     const mvpHtml = mvp && (mvp.dmg > 0 || mvp.kills > 0)
       ? `<div class="bv-mvp"><small>★ Ship of the battle</small><b style="color:${esc(sides[mvp.side].color)}">${esc(mvp.name)}</b>
-         <div style="font-size:11px;letter-spacing:.18em;color:#cbbfee;text-transform:uppercase">${esc(mvp.clsName)} · ${mvp.kills} kill${mvp.kills === 1 ? '' : 's'} · ${mvp.dmg} damage</div></div>`
+         <div style="font-size:var(--fs-xs);letter-spacing:.18em;color:#cbbfee;text-transform:uppercase">${esc(mvp.clsName)} · ${mvp.kills} kill${mvp.kills === 1 ? '' : 's'} · ${mvp.dmg} damage</div></div>`
       : '';
     const hl = report.highlights.length ? `<ul class="bv-hl">${report.highlights.map(h => `<li>${esc(h)}</li>`).join('')}</ul>` : '';
     outro.innerHTML = `<div class="bv-card-in"><div class="bv-kicker">${report.ongoing ? 'This turn' : 'Battle concluded'} · ${nRounds} round${nRounds === 1 ? '' : 's'}</div>
-      <div class="bv-big" style="color:${esc(col)};text-shadow:0 0 22px ${esc(col)}">${esc(head)}</div><div class="bv-sub">${sub}</div>
+      <div class="bv-big" style="color:${esc(col)};text-shadow:0 0 1.375rem ${esc(col)}">${esc(head)}</div><div class="bv-sub">${sub}</div>
       <div class="bv-rule"></div>
       <table><tr><th>Side</th><th>Ships</th><th>Lost</th><th>Fled</th><th>Garrison</th></tr>${rows}</table>
       ${mvpHtml}${hl}
@@ -516,6 +517,9 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   // ---------------------------------------------------------------- state
   let T = 0, playing = true, speed = 1, raf = 0, last = performance.now(), closed = false;
   let W = 0, H = 0, dpr = 1;
+  /** UI scale (ui/dom.ts uiScale): canvas text grows with the HUD on big screens; never below 13 CSS px x U. */
+  let U = 1;
+  const F = (w: number | string, px: number) => `${w} ${(Math.max(13, px) * U).toFixed(2)}px ${FONT}`;
   let mouse: { x: number; y: number } | null = null;
   const g = canvas.getContext('2d')!;
   let bg: HTMLCanvasElement | null = null;
@@ -535,11 +539,12 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     W = Math.max(200, stage.clientWidth); H = Math.max(160, stage.clientHeight);
     // capped at 2 like the map: at 3x a full-screen phone canvas is 2.25x the pixels for no visible gain (47 ms -> ~25 ms frames)
     dpr = Math.min(2, window.devicePixelRatio || 1);
+    U = uiScale();
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
     farDist = Math.max(W, H) * 0.9;
     const n = sides.length;
     const portrait = H > W * 1.15;
-    const mTop = 46, mBot = 84, mSide = 22;
+    const mTop = 46 * U, mBot = 84 * U, mSide = 22 * U;
     const cx = W / 2, cy = mTop + (H - mTop - mBot) / 2;
     const minD = Math.min(W - 2 * mSide, H - mTop - mBot);
     // per side: direction from centre (u), perpendicular (p)
@@ -626,7 +631,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       if (!sd.units.length) { minX = maxX = cx + u[0] * gapHalf * 2; minY = maxY = cy + u[1] * gapHalf * 2; }
       if (u[1] > 0.5) {
         // bottom side: label beside the formation, clear of the caption bar
-        g.font = `600 11px ${FONT}`; setLs(g, '0.24em');
+        g.font = F(600, 13); setLs(g, '0.24em');
         const tw = g.measureText(sd.name.toUpperCase()).width + 8;
         setLs(g, '0px');
         if (maxX + 16 + tw < W) sd.label = { x: maxX + 16, y: (minY + maxY) / 2, align: 'left' };
@@ -792,7 +797,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       const large = u.glyph === 'dread' || u.glyph === 'long' || shipUnits.length <= 8;
       if (large) {
         g.globalAlpha = ps.a * 0.8;
-        g.font = `600 ${clamp(L * 0.16, 9, 11)}px ${FONT}`;
+        g.font = F(600, 13);
         g.textAlign = 'center'; g.textBaseline = 'top';
         g.fillStyle = '#e4dcc8';
         setLs(g, '0.1em');
@@ -851,7 +856,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     // hp + label
     const bw = r * 2.4, by = y + r * 1.55 + 6;
     if (!dead) drawHpBar(x - bw / 2, by, bw, 3, hpNow / u.maxHp, 1, color, lagHp(u, tt) / u.maxHp);
-    g.font = `600 10px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'top';
+    g.font = F(600, 13); g.textAlign = 'center'; g.textBaseline = 'top';
     g.fillStyle = dead ? 'rgba(255,120,120,.85)' : rgba(color, 0.95);
     setLs(g, '0.22em');
     g.fillText(dead ? 'GARRISON FALLEN' : `GARRISON ${Math.max(0, hpNow)}`, x, by + 6);
@@ -1065,7 +1070,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       if (e < 1.1) {
         const k = e / 1.1;
         g.globalAlpha = 1 - k * k;
-        g.font = `700 ${12 + Math.min(6, sh.rec.dmg * 0.6)}px ${FONT}`;
+        g.font = F(700, 14 + Math.min(6, sh.rec.dmg * 0.6));
         g.lineWidth = 3; g.strokeStyle = 'rgba(8,2,20,.85)';
         const x = tp.x + sh.off * 10, y = top - k * 22;
         g.strokeText(`-${sh.rec.dmg}`, x, y);
@@ -1077,7 +1082,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         const pop = e < 0.12 ? 1.4 - (e / 0.12) * 0.4 : 1;
         g.globalAlpha = 1 - clamp((k - 0.6) / 0.4);
         const txt = sh.rec.kill ? 'DESTROYED' : CRIT_TEXT[sh.rec.crit!] ?? 'CRITICAL';
-        g.font = `700 ${Math.round(11 * pop)}px ${FONT}`;
+        g.font = `700 ${(Math.max(13, 13 * pop) * U).toFixed(2)}px ${FONT}`;
         setLs(g, '0.2em');
         const y = slot(tp.x, top - 18 - k * 14, g.measureText(txt).width, 14);
         g.lineWidth = 3; g.strokeStyle = 'rgba(8,2,20,.9)';
@@ -1105,8 +1110,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         const tp = pose(u, t0);
         const txt = sh.rec.first ? 'FIRST STRIKE' : 'TWIST OF FATE';
         g.globalAlpha = 1 - clamp((e - 1.1) / 0.5);
-        g.font = `700 11px ${FONT}`; setLs(g, '0.22em');
-        const y = slot(tp.x, tp.y - Math.max(u.s, 8) - 30 - e * 8, g.measureText(txt).width, 14);
+        g.font = F(700, 13); setLs(g, '0.22em');
+        const y = slot(tp.x, tp.y - Math.max(u.s, 8) - 30 * U - e * 8, g.measureText(txt).width, 16 * U);
         g.lineWidth = 3; g.strokeStyle = 'rgba(8,2,20,.9)'; g.strokeText(txt, tp.x, y);
         g.shadowColor = sh.rec.first ? '#ffb340' : '#b070ff'; g.shadowBlur = 10;
         g.fillStyle = sh.rec.first ? '#ffe08a' : '#dcc0ff'; g.fillText(txt, tp.x, y);
@@ -1120,9 +1125,9 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       const e = tt - u.deathT;
       if (e < 0 || e > 2.2) continue;
       g.globalAlpha = 1 - clamp((e - 1.6) / 0.6);
-      g.font = `700 14px ${FONT}`; setLs(g, '0.3em');
+      g.font = F(700, 15); setLs(g, '0.3em');
       g.fillStyle = '#ff8095'; g.shadowColor = '#ff3355'; g.shadowBlur = 12;
-      g.fillText('GARRISON FALLS', u.hx, slot(u.hx, u.hy - u.s * 1.7 - 8, g.measureText('GARRISON FALLS').width, 16));
+      g.fillText('GARRISON FALLS', u.hx, slot(u.hx, u.hy - u.s * 1.7 - 8, g.measureText('GARRISON FALLS').width, 18 * U));
       g.shadowBlur = 0; setLs(g, '0px');
     }
     // retreat callouts
@@ -1133,10 +1138,10 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       const fu = shipUnits.find(u => u.fleet === r.fleet);
       if (!sd || !fu) continue;
       g.globalAlpha = 1 - clamp((e - 1.2) / 0.6);
-      g.font = `700 12px ${FONT}`; setLs(g, '0.28em');
+      g.font = F(700, 13.5); setLs(g, '0.28em');
       g.fillStyle = '#e8e0ff'; g.shadowColor = sd.color; g.shadowBlur = 10;
       const fn = (fleetName.get(r.fleet)?.name ?? 'Fleet').toUpperCase();
-      { const rx = clamp(fu.hx, 90, W - 90); g.fillText(`${fn} RETREATS`, rx, slot(rx, clamp(fu.hy - 40, 60, H - 60), g.measureText(`${fn} RETREATS`).width, 15)); }
+      { const rx = clamp(fu.hx, 90, W - 90); g.fillText(`${fn} RETREATS`, rx, slot(rx, clamp(fu.hy - 40, 60, H - 60), g.measureText(`${fn} RETREATS`).width, 17 * U)); }
       g.shadowBlur = 0; setLs(g, '0px');
     }
     g.restore();
@@ -1153,8 +1158,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         g.globalAlpha = a;
         g.textAlign = 'center'; g.textBaseline = 'middle';
         // narrow stages: keep the banner below the strength readout in the top-left corner
-        const y = W < 700 ? Math.max(Math.min(H * 0.18, 70), 14 + sides.length * 22 + 16) : Math.min(H * 0.18, 70);
-        g.font = `600 ${clamp(W * 0.03, 15, 24)}px ${FONT}`;
+        const y = W < 700 ? Math.max(Math.min(H * 0.18, 70 * U), (16 + sides.length * 27 + 18) * U) : Math.min(H * 0.18, 70 * U);
+        g.font = `600 ${clamp(W * 0.03, 15 * U, 24 * U)}px ${FONT}`;
         setLs(g, '0.5em');
         g.fillStyle = '#f4ead2'; g.shadowColor = 'rgba(214,166,80,0.9)'; g.shadowBlur = 14;
         g.fillText(`ROUND ${ri + 1}`, W / 2 + 6, y);
@@ -1169,7 +1174,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     g.save();
     g.textAlign = 'center'; g.textBaseline = 'middle';
     for (const sd of sides) {
-      g.font = `600 11px ${FONT}`; setLs(g, '0.24em');
+      g.font = F(600, 13); setLs(g, '0.24em');
       g.fillStyle = sd.color; g.shadowColor = sd.color; g.shadowBlur = 8;
       g.globalAlpha = clamp((tt - 0.4) / 0.6) * 0.95;
       g.textAlign = sd.label.align;
@@ -1181,7 +1186,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     // strength readout (top-left)
     g.save();
     g.textBaseline = 'middle'; g.textAlign = 'left';
-    let y = 14;
+    let y = 16 * U;
     for (const sd of sides) {
       let hp = 0, mx = 0, alive = 0, total = 0;
       for (const u of sd.units) {
@@ -1192,20 +1197,20 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         if (!u.garrison) { total++; if (h > 0 && !gone) alive++; }
       }
       g.fillStyle = sd.color;
-      g.beginPath(); g.moveTo(12, y - 3); g.lineTo(15, y); g.lineTo(12, y + 3); g.lineTo(9, y); g.closePath(); g.fill();
-      g.font = `600 9.5px ${FONT}`; setLs(g, '0.18em');
+      g.beginPath(); g.moveTo(12 * U, y - 3 * U); g.lineTo(15 * U, y); g.lineTo(12 * U, y + 3 * U); g.lineTo(9 * U, y); g.closePath(); g.fill();
+      g.font = F(600, 13); setLs(g, '0.16em');
       g.fillStyle = 'rgba(230,220,255,.85)';
       let label = sd.name.toUpperCase();
-      const lw = Math.min(170, W * 0.32);
-      while (label.length > 3 && g.measureText(label).width > lw - 26) label = label.slice(0, -2).trimEnd() + '…';
-      g.fillText(label, 20, y);
+      const lw = Math.min(230 * U, W * 0.44), lx = 20 * U;
+      while (label.length > 3 && g.measureText(label).width > lw - 34 * U) label = label.slice(0, -2).trimEnd() + '…';
+      g.fillText(label, lx, y);
       setLs(g, '0px');
       g.fillStyle = 'rgba(190,175,230,.8)';
       g.textAlign = 'right';
-      g.fillText(total ? `${alive}/${total}` : '', 20 + lw, y);
+      g.fillText(total ? `${alive}/${total}` : '', lx + lw, y);
       g.textAlign = 'left';
-      drawHpBar(20, y + 7, lw, 2, mx ? hp / mx : 0, 0.9, sd.color);
-      y += 22;
+      drawHpBar(lx, y + 9 * U, lw, 2 * U, mx ? hp / mx : 0, 0.9, sd.color);
+      y += 27 * U;
     }
     g.restore();
   }
@@ -1243,8 +1248,9 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       ...(u.kills || u.dmg ? [`${u.kills} kills · ${u.dmg} dmg`] : []),
       ...sys,
     ];
-    g.font = `600 11px ${FONT}`;
-    const w = Math.max(...lines.map(l => g.measureText(l).width)) + 20, h = lines.length * 15 + 10;
+    g.font = F(600, 13);
+    const lh = 17 * U;
+    const w = Math.max(...lines.map(l => g.measureText(l).width)) + 20 * U, h = lines.length * lh + 10 * U;
     let bx = ps.x + 18, by = ps.y - h / 2;
     if (bx + w > W - 6) bx = ps.x - 18 - w;
     by = clamp(by, 6, H - h - 6);
@@ -1254,8 +1260,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     g.textAlign = 'left'; g.textBaseline = 'top';
     lines.forEach((l, i) => {
       g.fillStyle = i === 0 ? color : i > 3 || (i === 3 && !(u.kills || u.dmg)) ? '#ffb347' : '#d6cdf2';
-      g.font = `${i === 0 ? 700 : 500} 11px ${FONT}`;
-      g.fillText(l, bx + 10, by + 6 + i * 15);
+      g.font = F(i === 0 ? 700 : 500, 13);
+      g.fillText(l, bx + 10 * U, by + 6 * U + i * lh);
     });
     g.restore();
   }

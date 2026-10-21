@@ -9,6 +9,20 @@ export function esc(s: unknown): string {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
+/** The UI scale factor (style.css: the root font-size over 16px): 1 up to 1440x900 and on phones, up to 1.5 on big
+ * screens. Canvas text and JS-placed HUD pieces multiply their CSS-px constants by it. */
+let uiK = 0, uiKey = '';
+export function uiScale(): number {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return 1;
+  const key = `${window.innerWidth}x${window.innerHeight}`;
+  if (key !== uiKey || !uiK) {
+    uiKey = key;
+    const fs = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    uiK = Number.isFinite(fs) && fs > 0 ? Math.max(1, Math.min(1.5, fs / 16)) : 1;
+  }
+  return uiK;
+}
+
 const reduced = () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 /** Leave a non-interactive copy of `el` behind that plays an exit animation (fx.css), so removals fade instead of popping.

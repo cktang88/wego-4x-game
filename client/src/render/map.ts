@@ -23,6 +23,7 @@ import { citizenCap, sysOn } from '../../../shared/sim/systems.ts';
 import { contestOn, systemStatus } from '../../../shared/sim/contest.ts';
 import { STARS } from '../../../shared/config/systems.ts';
 import { battleViewerOpen } from './battle.ts';
+import { uiScale } from '../ui/dom.ts';
 import {
   type Tier, type Lens, coarsePointer, medianRegionRadius, tierFor, slotFor, slotScale, anchorOf, powerOf, garrisonPower,
   garrisonMax, regionEdges, empireLabels, nearestRegion, ROMAN, isLane, hyperlanes,
@@ -129,6 +130,9 @@ export class MapRenderer {
   ctx: CanvasRenderingContext2D;
   cam = { x: 0, y: 0, z: 0.4 };
   w = 0; h = 0; dpr = 1;
+  /** UI scale (style.css root font-size / 16): screen-constant map furniture (labels, plates, chips, tokens) is
+   *  drawn in design px, `ui` CSS px each, so it grows with the HUD on big screens. 1 on phones and up to 1440x900. */
+  ui = 1;
   private stars: HTMLCanvasElement | null = null;
   private starPattern: CanvasPattern | null = null;
   private bgCanvas: HTMLCanvasElement | null = null;
@@ -195,9 +199,11 @@ export class MapRenderer {
   resize() {
     const r = this.canvas.getBoundingClientRect();
     const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const ui = uiScale();
     const W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
-    if (W === this.canvas.width && H === this.canvas.height && dpr === this.dpr && r.width === this.w && r.height === this.h) return;
+    if (W === this.canvas.width && H === this.canvas.height && dpr === this.dpr && r.width === this.w && r.height === this.h && ui === this.ui) return;
     this.dpr = dpr;
+    this.ui = ui;
     this.w = r.width; this.h = r.height;
     this.canvas.width = W;
     this.canvas.height = H;
@@ -290,7 +296,7 @@ export class MapRenderer {
     for (const f of fleets) {
       if (f.ghost || f.alpha <= 0.05) continue;
       const s = this.toScreen(this.drawnPos.get(f.id) ?? f.pos);
-      const d = Math.hypot(s.x - sx, s.y - sy);
+      const d = Math.hypot(s.x - sx, s.y - sy) / this.ui;
       if (d < this.hitR() && d < bd) { bd = d; best = f; }
     }
     return best;
@@ -301,7 +307,7 @@ export class MapRenderer {
     let best: TokHit | null = null, bd = Infinity;
     for (const h of this.tokHits) {
       const c = this.toScreen(h);
-      const dx = sx - c.x, dy = sy - c.y;
+      const dx = (sx - c.x) / this.ui, dy = (sy - c.y) / this.ui;
       const inBox = dx >= h.l && dx <= h.r && dy >= h.t && dy <= h.b;
       const d = Math.hypot(dx, dy);
       if (!inBox && d > h.cr) continue;
@@ -317,7 +323,7 @@ export class MapRenderer {
     for (let i = this.bannerHits.length - 1; i >= 0; i--) {
       const b = this.bannerHits[i];
       const c = this.toScreen(b);
-      const dx = sx - c.x, dy = sy - c.y;
+      const dx = (sx - c.x) / this.ui, dy = (sy - c.y) / this.ui;
       if (dx >= b.l - pad && dx <= b.r + pad && dy >= b.t - pad && dy <= b.b + pad) return b.rid;
     }
     return null;
@@ -341,18 +347,22 @@ export class MapRenderer {
   private get coarse() { return coarsePointer() || this.compact; }
   private hitR() { return this.coarse ? 26 : 22; }
 
-  /** Screen-constant size in world units. */
-  px(n: number) { return n / this.cam.z; }
+  /** Screen-constant size in world units: n design px (n * ui CSS px). */
+  px(n: number) { return n * this.ui / this.cam.z; }
+  /** Backing-store px per design px: the resolution for sprites sized in design px. */
+  private get rdpr() { return this.dpr * this.ui; }
+  /** Zoom in design px per world unit (tiers and slot scales are tuned in design px). */
+  private get zd() { return this.cam.z / this.ui; }
 
   private lastState: GameState | null = null;
   private computeTier(prev: Tier | null): Tier {
     const st = this.lastState;
     if (!st) return 'operational';
-    return tierFor(medianRegionRadius(st) * this.cam.z, prev, this.coarse);
+    return tierFor(medianRegionRadius(st) * this.zd, prev, this.coarse);
   }
-  private slotK() { return this.lastState ? slotScale(this.tier, medianRegionRadius(this.lastState) * this.cam.z) : 1; }
+  private slotK() { return this.lastState ? slotScale(this.tier, medianRegionRadius(this.lastState) * this.zd) : 1; }
   /** How much the system art (planets, structures, minis) grows at detail zoom (1 elsewhere). */
-  private artK() { return this.lastState ? slotScale('detail', medianRegionRadius(this.lastState) * this.cam.z) : 1; }
+  private artK() { return this.lastState ? slotScale('detail', medianRegionRadius(this.lastState) * this.zd) : 1; }
 
   /** Cached static layer (background, regions, borders, banners): redrawn only when its inputs change. */
   private layer: HTMLCanvasElement | null = null;
@@ -384,7 +394,7 @@ export class MapRenderer {
     this.rememberGarrisons(I);
     const lens = I.lens ?? 'political';
     // hover & selection live in the dynamic pass (faded), so they don't force a rebuild of the static layer
-    const base = [this.objId(st), this.staticSig(I), this.objId(I.visible), I.visible.size, I.you, I.owners.join(','), W, H, this.dpr,
+    const base = [this.objId(st), this.staticSig(I), this.objId(I.visible), I.visible.size, I.you, I.owners.join(','), W, H, this.dpr, this.ui,
       I.cutOff ? `${this.objId(I.cutOff)}:${I.cutOff.size}` : 0, this._tier, lens, I.peek ? 1 : 0, I.selectedRegion ?? -1, this.lkVer, this.coarse ? 1 : 0].join('|');
     const cam = this.cam;
     if (!this.lastCam || cam.x !== this.lastCam.x || cam.y !== this.lastCam.y || cam.z !== this.lastCam.z) { this.camMovedAt = now; this.lastCam = { ...cam }; }
@@ -610,8 +620,8 @@ export class MapRenderer {
         pts.forEach((p, i) => {
           if (i % (big ? 2 : 3)) return;
           const sz = ((big ? 1.8 : 1.2) + ((i * 7) % 5) * (big ? 0.55 : 0.3)) * (tier === 'detail' ? Math.sqrt(this.artK()) : 1);
-          const spr = rockSprite(i, sz * this.dpr);
-          const w = (spr.width / this.dpr) * S;
+          const spr = rockSprite(i, sz * this.rdpr);
+          const w = (spr.width / this.rdpr) * S;
           ctx.drawImage(spr, p.x - w / 2, p.y - w / 2, w, w);
         });
       }
@@ -665,8 +675,8 @@ export class MapRenderer {
       ctx.strokeStyle = strat ? 'rgba(150,180,255,0.16)' : 'rgba(150,185,255,0.24)'; ctx.lineWidth = (strat ? 2.2 : 3) * S; ctx.stroke();
       ctx.strokeStyle = strat ? 'rgba(215,228,255,0.38)' : 'rgba(225,235,255,0.55)'; ctx.lineWidth = (strat ? 0.8 : 1.1) * S; ctx.stroke();
       const dr = (strat ? 2.2 : 3.4);
-      const buoy = buoySprite(dr * this.dpr, false);
-      const bw = (buoy.width / this.dpr) * S;
+      const buoy = buoySprite(dr * this.rdpr, false);
+      const bw = (buoy.width / this.rdpr) * S;
       for (const r of st.regions) if (isLane(r)) ctx.drawImage(buoy, r.site.x - bw / 2, r.site.y - bw / 2, bw, bw);
       ctx.restore();
     }
@@ -720,7 +730,9 @@ export class MapRenderer {
         const widthAt = (fs: number) => { ctx.font = displayFont(fs * S); return Math.max(...lines.map(l => ctx.measureText(l).width / S + fs * 0.18 * (l.length - 1))); };
         let fs = 30;
         const w30 = widthAt(30);
-        fs = Math.max(11, Math.min(this.compact ? 18 : 26, (30 * span * 0.95) / Math.max(1, w30)));
+        fs = Math.min(this.compact ? 18 : 26, (30 * span * 0.95) / Math.max(1, w30));
+        // a territory too small for a readable name gets none (its worlds' plates still name the owner)
+        if (fs < 13) continue;
         ctx.font = displayFont(fs * S);
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.globalAlpha = political ? 0.6 : 0.3;
@@ -907,7 +919,7 @@ export class MapRenderer {
     }
     // ---- the world: a painted body floating over the mat (or the Throne's star, a relic site's dark star)
     const pr = this.siteR(r, bt) * S;
-    const prDev = this.siteR(r, bt) * this.dpr;
+    const prDev = this.siteR(r, bt) * this.rdpr;
     const art = regionArt(r, I.state.seed);
     const halo = ctx.createRadialGradient(p.x, p.y, pr * 0.8, p.x, p.y, pr * 2.6);
     halo.addColorStop(0, hexA(c, owner === null || owner === undefined ? 0.06 : 0.22)); halo.addColorStop(1, hexA(c, 0));
@@ -972,7 +984,7 @@ export class MapRenderer {
         const sx = p.x + Math.cos(a) * R, sy = p.y + Math.sin(a) * R * 0.85;
         const sz = (k === 'gate' ? 7 : k === 'shipyard' ? 7 : 5.5) * S * this.artK();
         drawBodyShadow(ctx, sx + sz * 0.4, sy + sz * 0.8, sz * 1.1, 0.4);
-        drawStructure(ctx, k, team, sx, sy, sz, (sz / S) * this.dpr);
+        drawStructure(ctx, k, team, sx, sy, sz, (sz / S) * this.rdpr);
       });
       if (b.pshield) shieldDome(ctx, p.x, p.y, pr * 1.28, 1.2 * S);
     } else if (bt === 'operational' && r.buildings.pshield && !fog) shieldDome(ctx, p.x, p.y, pr * 1.3, 1 * S);
@@ -988,7 +1000,7 @@ export class MapRenderer {
     if (defs.length) {
       const mil = lens === 'military';
       const is = (mil ? 7.5 : 6) * S;
-      ctx.font = numFont(12 * S);
+      ctx.font = numFont(13 * S);
       const parts = defs.map(d => ({ ...d, w: is * 2 + (d.n > 1 ? ctx.measureText(String(d.n)).width + 2 * S : 0) }));
       const w = parts.reduce((a, q) => a + q.w, 0) + 4 * S * (parts.length - 1) + 10 * S;
       const th = is * 2 + 5 * S;
@@ -999,7 +1011,7 @@ export class MapRenderer {
       let x = cx - w / 2 + 5 * S;
       for (const q of parts) {
         buildingIcon(ctx, q.k, x + is, ty + th / 2, is * 0.85, fog ? '#9a97b0' : STONE, 1.3 * S);
-        if (q.n > 1) { ctx.font = numFont(12 * S); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#ffffff'; ctx.fillText(String(q.n), x + is * 2 + 1 * S, ty + th / 2 + 0.5 * S); ctx.textBaseline = 'alphabetic'; }
+        if (q.n > 1) { ctx.font = numFont(13 * S); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#ffffff'; ctx.fillText(String(q.n), x + is * 2 + 1 * S, ty + th / 2 + 0.5 * S); ctx.textBaseline = 'alphabetic'; }
         x += q.w + 4 * S;
       }
       ctx.restore();
@@ -1085,13 +1097,18 @@ export class MapRenderer {
     //      and a ⛓ tag with its contested turns; an Occupied one a ⚑ tag, a Tribute-paying one a ⚖ tag (turns left)
     if (contestOn(st) && r.owner !== null && r.bodies) {
       const cs = systemStatus(st, r);
-      const tag = (deg: number, txt: string, col: string) => {
-        const p = at(deg, ring + 6 * S * k);
-        ctx.font = `700 ${Math.round(7.5 * S * k)}px system-ui, sans-serif`;
-        const w = ctx.measureText(txt).width + 6 * S * k, h = 10 * S * k;
+      // tags stack clockwise from 32°, spaced by their own height so the readable (>= 12.5px) text never collides
+      const fz = Math.max(12.5, 8 * k), th = fz * 1.25 * S, tr = ring + Math.max(6 * S * k, th * 0.6);
+      const step = Math.max(30, (th * 1.15 / tr) * 180 / Math.PI);
+      let deg = 32;
+      const tag = (txt: string, col: string) => {
+        const p = at(deg, tr);
+        deg += step;
+        ctx.font = numFont(fz * S);
+        const w = ctx.measureText(txt).width + fz * 0.7 * S, h = th;
         ctx.beginPath(); ctx.roundRect(p.x - w / 2, p.y - h / 2, w, h, h / 2);
         ctx.fillStyle = 'rgba(8,4,16,0.92)'; ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 1.1 * S * k; ctx.stroke();
-        ctx.fillStyle = '#f6ead0'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, p.x, p.y + 0.5 * S * k);
+        ctx.fillStyle = '#f6ead0'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, p.x, p.y + 0.5 * S);
         ctx.textBaseline = 'alphabetic';
       };
       if (cs.contested) {
@@ -1101,10 +1118,10 @@ export class MapRenderer {
         ctx.beginPath(); ctx.arc(x, y, rr, 0, TAU); ctx.strokeStyle = 'rgba(5,3,12,0.85)'; ctx.lineWidth = 2.6 * S * k; ctx.stroke();
         ctx.beginPath(); ctx.arc(x, y, rr, 0, TAU); ctx.strokeStyle = hc; ctx.lineWidth = 1.3 * S * k; ctx.stroke();
         ctx.setLineDash([]);
-        tag(32, `⛓${cs.contestedTurns}${cs.refugeesIn === 1 ? '!' : ''}`, hc);
+        tag(`⛓${cs.contestedTurns}${cs.refugeesIn === 1 ? '!' : ''}`, hc);
       }
-      if (cs.occupiedLeft > 0) tag(cs.contested ? 62 : 32, `⚑${cs.occupiedLeft}`, this.colorOf(st, r.owner));
-      if (cs.tribute) tag(cs.contested || cs.occupiedLeft > 0 ? 92 : 32, `⚖${cs.tributeLeft}`, this.colorOf(st, cs.tribute.to));
+      if (cs.occupiedLeft > 0) tag(`⚑${cs.occupiedLeft}`, this.colorOf(st, r.owner));
+      if (cs.tribute) tag(`⚖${cs.tributeLeft}`, this.colorOf(st, cs.tribute.to));
     }
     ctx.restore();
   }
@@ -1137,7 +1154,7 @@ export class MapRenderer {
         ctx.beginPath(); ctx.arc(mx, my, R + 2.6 * S, a0, a1);
         ctx.strokeStyle = i < tier ? '#ffd86b' : dorm ? 'rgba(150,150,160,0.35)' : 'rgba(200,180,140,0.32)'; ctx.lineWidth = 2 * S; ctx.stroke();
       }
-      ctx.font = numFont(11 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = numFont(13 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillStyle = dorm ? '#9a98a6' : '#ffe2a0';
       ctx.fillText(c?.icon ?? '◇', mx, my + 0.5 * S);
       ctx.textBaseline = 'alphabetic';
@@ -1273,7 +1290,7 @@ export class MapRenderer {
       const bw = 36 * S, bh = 5 * S;
       const box = { x: cx - bw / 2 - 12 * S, y: y - 3 * S, w: bw + 14 * S, h: 12 * S };
       if (!hit(box)) {
-        ctx.font = numFont(12 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.font = numFont(13 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         haloText(ctx, '✦', cx - bw / 2 - 6 * S, y + bh / 2, st.players[I.you].color, 'rgba(5,3,12,0.9)', 3 * S);
         ctx.textBaseline = 'alphabetic';
         roundRect(ctx, cx - bw / 2, y, bw, bh, 2 * S); ctx.fillStyle = 'rgba(5,3,12,0.9)'; ctx.fill();
@@ -1324,7 +1341,7 @@ export class MapRenderer {
             buildingIcon(ctx, k, x, yy + h / 2, isz * S, k === 'extractor' && r.vein ? (VEINS[r.vein]?.color ?? STONE) : STONE, 1.4 * S);
             const lv = r.buildings[k] ?? 0;
             if (lv > 1) {
-              ctx.font = numFont(12 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+              ctx.font = numFont(13 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
               haloText(ctx, String(lv), x + isz * S, yy + h - 3 * S, '#ffffff', 'rgba(5,3,12,0.95)', 3 * S);
               ctx.textBaseline = 'alphabetic';
             }
@@ -1351,7 +1368,7 @@ export class MapRenderer {
       const parts: { t: string; c: string }[] = [];
       if (T) parts.push({ t: `${T.icon} ${T.name.split(' ')[0].toUpperCase()}`, c: 'rgba(225,220,248,0.9)' });
       if (V) parts.push({ t: `${V.icon} ${V.name.toUpperCase()}`, c: (r.buildings.extractor ?? 0) > 0 ? '#ffffff' : 'rgba(225,220,248,0.75)' });
-      ctx.font = nameFont(12 * S);
+      ctx.font = nameFont(13 * S);
       const gap = 10 * S;
       const ws = parts.map(q => ctx.measureText(q.t).width);
       const w = ws.reduce((a, b) => a + b, 0) + gap * (parts.length - 1) + 12 * S;
@@ -1360,7 +1377,7 @@ export class MapRenderer {
         const yy = y;
         rows.push(() => {
           roundRect(ctx, box.x, yy, w, lineH, lineH / 2); ctx.fillStyle = 'rgba(9,6,20,0.7)'; ctx.fill();
-          ctx.font = nameFont(12 * S); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+          ctx.font = nameFont(13 * S); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
           let x = box.x + 6 * S;
           parts.forEach((q, i) => { ctx.fillStyle = q.c; ctx.fillText(q.t, x, yy + lineH / 2 + 0.5 * S); x += ws[i] + gap; });
           ctx.textBaseline = 'alphabetic';
@@ -1805,7 +1822,7 @@ export class MapRenderer {
       ctx.save(); ctx.globalAlpha = 0.35 * f.alpha; ctx.translate(f.pos.x, f.pos.y);
       ctx.restore();
       ctx.save(); ctx.globalAlpha = 0.4 * f.alpha;
-      drawShip(ctx, f.pos.x, f.pos.y - this.miniGeom().stand * S, this.miniGeom().len * S, this.miniGeom().len * this.dpr, (f.cls?.[0]) ?? 'frigate', f.owner, c, 0);
+      drawShip(ctx, f.pos.x, f.pos.y - this.miniGeom().stand * S, this.miniGeom().len * S, this.miniGeom().len * this.rdpr, (f.cls?.[0]) ?? 'frigate', f.owner, c, 0);
       ctx.restore();
     }
 
@@ -1831,8 +1848,8 @@ export class MapRenderer {
   private tokSizes() {
     const C = this.coarse;
     const t = this.tier;
-    if (t === 'strategic') return { R: 8, nf: C ? 14 : 12, sf: 0, ph: C ? 18 : 16 };
-    return { R: t === 'detail' ? 11 : 10, nf: C ? 16 : 15, sf: C ? 13 : 12, ph: C ? 21 : 20 };
+    if (t === 'strategic') return { R: 8, nf: C ? 14 : 13, sf: 0, ph: C ? 18 : 17 };
+    return { R: t === 'detail' ? 11 : 10, nf: C ? 16 : 15, sf: 13, ph: C ? 21 : 20 };
   }
 
   /** Mini geometry per tier (css px): base radius, lead hull length, flight-stand height. */
@@ -1903,7 +1920,7 @@ export class MapRenderer {
       const k = 0.5 + 0.5 * Math.sin(now / 420);
       drawGlow(ctx, 0, 0, rb * S * 1.7, [220, 180, 255], 0.35 + 0.2 * k);
     }
-    drawBase(ctx, 0, 0, rb * S, rb * this.dpr, fill, { sel, oos: t.oos, big: n > 2 });
+    drawBase(ctx, 0, 0, rb * S, rb * this.rdpr, fill, { sel, oos: t.oos, big: n > 2 });
     if (lurking) {
       // lying in wait: a dashed, dimmed rim (only its owner sees the token at all)
       ctx.save(); ctx.setLineDash([3 * S, 3 * S]); ctx.strokeStyle = 'rgba(230,220,255,0.85)'; ctx.lineWidth = 1.4 * S;
@@ -1924,7 +1941,7 @@ export class MapRenderer {
       const st = (G.stand + (q.i === 0 ? 2 : 0)) * S;
       const sy = gy - st + bob * S * (q.i % 2 ? 0.7 : 1);
       drawStand(ctx, gx, gy, sy + L * S * 0.05, Math.max(1.2, L * 0.07) * S);
-      drawShip(ctx, gx, sy, L * S, L * this.dpr * (scale > 1 ? scale : 1), q.cls, owner, team, d.ang, {
+      drawShip(ctx, gx, sy, L * S, L * this.rdpr * (scale > 1 ? scale : 1), q.cls, owner, team, d.ang, {
         shadow: { dx: st * 0.3, dy: st * 0.95, alpha: 0.42 }, engine: eng, bank: d.bank ?? 0,
       });
     }
@@ -2015,10 +2032,10 @@ export class MapRenderer {
       if (dug && tier !== 'strategic') marks.push({ t: '⛓', fill: '#2a2a30', ink: '#d8dbe6' });
       if (exposed) marks.push({ t: '◉', fill: '#5a1010', ink: '#ffd0c8' });
       if (marks.length) {
-        const R = (tier === 'strategic' ? 7 : 9.5) * S;
+        const R = (tier === 'strategic' ? 8.5 : 10) * S;
         let x = -((marks.length - 1) * (R * 2 + 2 * S)) / 2;
         const y = ry * S + R * 0.6;
-        ctx.font = numFont(R * 1.25, 700); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.font = numFont(Math.max(13 * S, R * 1.3), 700); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         for (const m of marks) {
           ctx.beginPath(); ctx.arc(x, y, R, 0, TAU);
           ctx.fillStyle = m.fill; ctx.fill();
@@ -2036,8 +2053,8 @@ export class MapRenderer {
         let eta = 0;
         try { eta = lf.route?.path.length ? Math.max(1, Math.ceil(lf.route.path.length / Math.max(1, fleetSpeed(I.state, lf)))) : 0; } catch { eta = 0; }
         const lt = eta ? `⌂ ${eta}${I.state.mode === 'live' ? '' : 'T'}` : '⌂';
-        ctx.font = numFont(11 * S, 700);
-        const lw = ctx.measureText(lt).width + 8 * S, lh = 14 * S;
+        ctx.font = numFont(13 * S, 700);
+        const lw = ctx.measureText(lt).width + 8 * S, lh = 16 * S;
         const lx = px0 + (t.side > 0 ? 0 : pw2 - lw), ly = py0 + ph + 2 * S;
         roundRect(ctx, lx, ly, lw, lh, 3 * S); ctx.fillStyle = 'rgba(40,22,10,0.95)'; ctx.fill();
         ctx.strokeStyle = 'rgba(255,170,110,0.8)'; ctx.lineWidth = 1 * S; ctx.stroke();
@@ -2049,9 +2066,9 @@ export class MapRenderer {
     const topY = -(G.stand + len0 * 0.55) * S;
     if (badge) {
       const bx = -t.side * rb * 0.85 * S, by = -(G.stand * 0.9) * S;
-      const bf = this.coarse ? 12 : 11;
+      const bf = this.coarse ? 13.5 : 13;
       ctx.font = numFont(bf * S);
-      const bw = Math.max(15 * S, ctx.measureText(badge).width + 7 * S), bh = 14 * S;
+      const bw = Math.max(17 * S, ctx.measureText(badge).width + 7 * S), bh = 16 * S;
       roundRect(ctx, bx - bw / 2, by - bh / 2, bw, bh, bh / 2);
       ctx.fillStyle = t.oos ? '#ffd27a' : '#f2efff'; ctx.fill();
       ctx.strokeStyle = 'rgba(8,4,16,0.9)'; ctx.lineWidth = 1.2 * S; ctx.stroke();
@@ -2183,7 +2200,7 @@ export class MapRenderer {
     ctx.strokeStyle = 'rgba(255,214,176,0.85)'; ctx.lineWidth = 1 * S; ctx.beginPath(); ctx.arc(P.x, P.y, D - 0.8 * S, 0, TAU); ctx.stroke();
     swords(ctx, P.x, P.y, D * 0.6, '#ffe7c2', 2 * S);
     const rc = `R${e.rounds}`;
-    ctx.font = numFont(11 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = numFont(13 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const rw = ctx.measureText(rc).width + 8 * S;
     roundRect(ctx, P.x + D + 5 * S, P.y - 7 * S, rw, 14 * S, 7 * S); gunmetal(ctx, P.y - 7 * S, P.y + 7 * S, 'rgba(255,214,176,0.6)', 1 * S);
     ctx.fillStyle = '#ffd6b0'; ctx.fillText(rc, P.x + D + 5 * S + rw / 2, P.y + 0.5 * S);
@@ -2296,7 +2313,7 @@ export class MapRenderer {
     for (const sd of list) { const w = (Math.max(0, sd.power) / total) * bw; if (w > 0.5 * S) { ctx.fillStyle = sd.color; ctx.fillRect(bx, by, w, bh); } bx += w; }
     // round counter
     const rc = `R${e.rounds}`;
-    ctx.font = numFont(12 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = numFont(13 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const rw = ctx.measureText(rc).width + 8 * S;
     roundRect(ctx, P.x + bw / 2 + 4 * S, by + bh / 2 - 7 * S, rw, 14 * S, 7 * S); ctx.fillStyle = 'rgba(5,3,12,0.95)'; ctx.fill();
     ctx.fillStyle = '#ffd6b0'; ctx.fillText(rc, P.x + bw / 2 + 4 * S + rw / 2, by + bh / 2 + 0.5 * S);
@@ -2575,7 +2592,7 @@ export class MapRenderer {
     }
     if (label && grow > 0.5) {
       const ls = grow < 1 ? easeOutBack(clamp01((grow - 0.5) / 0.5)) : 1;
-      ctx.font = numFont(12 * s * ls); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = numFont(13 * s * ls); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       if (ROMAN.test(label)) {
         const w = Math.max(20 * s, ctx.measureText(label).width + 10 * s) * ls;
         roundRect(ctx, pm.x - w / 2, pm.y - 9 * s * ls, w, 18 * s * ls, 9 * s * ls); ctx.fillStyle = 'rgba(8,4,16,0.94)'; ctx.fill();
@@ -2621,7 +2638,7 @@ export class MapRenderer {
       ctx.lineTo(tip.x + Math.cos(ang - 2.5) * 10 * s, tip.y + Math.sin(ang - 2.5) * 10 * s); ctx.closePath(); ctx.fill();
     }
     if (label) {
-      ctx.font = numFont(12 * s); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      ctx.font = numFont(13 * s); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
       const w = ctx.measureText(label).width + 10 * s;
       const hx = tip.x + (Math.cos(ang) >= 0 ? 12 * s : -12 * s - w), hy = tip.y - 22 * s;
       roundRect(ctx, hx, hy, w, 17 * s, 4 * s); ctx.fillStyle = 'rgba(8,4,16,0.92)'; ctx.fill();
@@ -2802,7 +2819,7 @@ export class MapRenderer {
         if (t > 0.3) {
           const k = clamp01((t - 0.3) / 0.4);
           const L = this.miniGeom().len * 1.1;
-          drawShip(ctx, P.x, P.y - 4 * S, L * S, L * this.dpr, fx.cls ?? 'frigate', fx.owner ?? 0, c, 0, { alpha: k * (1 - clamp01((t - 0.85) / 0.15)), flash: 1 - k, engine: 1 });
+          drawShip(ctx, P.x, P.y - 4 * S, L * S, L * this.rdpr, fx.cls ?? 'frigate', fx.owner ?? 0, c, 0, { alpha: k * (1 - clamp01((t - 0.85) / 0.15)), flash: 1 - k, engine: 1 });
         }
       } else if (fx.kind === 'explode') {
         const sz = fx.size ?? 1;
@@ -2838,7 +2855,7 @@ export class MapRenderer {
       }
       // 'ripple' / 'arrive' were expanding rings: no longer drawn (no abstract outlines on the map)
       if (fx.text) {
-        const pop = t < 0.12 ? 0.6 + 0.4 * easeOutBack(t / 0.12) : 1;
+        const pop = t < 0.12 ? 0.94 + 0.06 * easeOutBack(t / 0.12) : 1;
         ctx.font = numFont(this.px(14 * pop));
         ctx.textAlign = 'center';
         const y = P.y - this.px(36) - easeOutCubic(t) * this.px(20);

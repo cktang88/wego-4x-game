@@ -1268,7 +1268,7 @@ export class GameScreen {
   }
   focus(p: Pt) {
     // keep the point clear of the card and strip: aim a little above centre
-    const off = this.phone ? this.map.px(this.map.h * 0.18) : this.map.px(60);
+    const off = this.phone ? (this.map.h * 0.18) / this.map.cam.z : this.map.px(60);
     this.map.flyTo({ x: p.x, y: p.y + off });
   }
   setLens(l: Lens) { this.lens = l; this.renderAll(); }
@@ -1455,9 +1455,9 @@ export class GameScreen {
     // a finished game is shown fully revealed (you === null): remember whose seat this screen was
     // flourish (fx.css): light rays and embers in the winner's colour behind the card, a crown that drops in, ranks that rise in turn
     const sparks = reducedMotion() ? '' : Array.from({ length: 18 }, (_, i) => `<i style="--x:${(i * 37) % 100}%;--d:${(i * 0.23) % 2.4}s;--s:${0.6 + ((i * 7) % 5) / 5}"></i>`).join('');
-    const o = overlay(`<div class="vic-rays" aria-hidden="true"></div><div class="vic-sparks" aria-hidden="true">${sparks}</div><div class="dialog vic-card" data-victory style="text-align:center"><div class="vic-crown" aria-hidden="true">♛</div><h1 class="vic-name" style="color:${w.color};font-size:30px">${esc(w.name)}</h1><h2>${w.id === this.mySeat() ? 'Victory' : 'has won'}</h2>
+    const o = overlay(`<div class="vic-rays" aria-hidden="true"></div><div class="vic-sparks" aria-hidden="true">${sparks}</div><div class="dialog vic-card" data-victory style="text-align:center"><div class="vic-crown" aria-hidden="true">♛</div><h1 class="vic-name" style="color:${w.color};font-size:1.875rem">${esc(w.name)}</h1><h2>${w.id === this.mySeat() ? 'Victory' : 'has won'}</h2>
       <p class="dim">${esc(st.winReason)}</p>${ranks.map((p, i) => `<div class="vic-rank" style="color:${p.color};--i:${i}">${esc(p.name)}: ${p.vp} VP</div>`).join('')}
-      <p class="dim" style="margin-top:12px">The whole map is now revealed. Browse the Chronicle to relive it.</p><div class="row" style="justify-content:center"><button data-x>Look around</button>${this.st.soul ? '<button class="primary" data-saga>⚜ The Saga</button>' : ''}<button ${this.st.soul ? '' : 'class="primary" '}data-l>Lobby</button></div></div>`);
+      <p class="dim" style="margin-top:0.75rem">The whole map is now revealed. Browse the Chronicle to relive it.</p><div class="row" style="justify-content:center"><button data-x>Look around</button>${this.st.soul ? '<button class="primary" data-saga>⚜ The Saga</button>' : ''}<button ${this.st.soul ? '' : 'class="primary" '}data-l>Lobby</button></div></div>`);
     o.classList.add('victory');
     o.style.setProperty('--win', w.color);
     // the winner's banner goes up over every region they hold, rippling out from their capital

@@ -149,7 +149,7 @@ function detailHtml(g: GameScreen, pid: number, editable: boolean, kind: 'tech' 
     if (editable && (inf.s === 'avail' || inf.s === 'short' || inf.s === 'busy')) btn = `<button class="primary small" data-research="${t.id}" ${inf.s === 'avail' ? '' : `disabled title="${esc(inf.why)}"`}>Research · ${costText(cost)}</button>`;
     else if (editable && inf.s === 'pending' && !g.live) btn = `<button class="small" data-unres>Cancel research</button>`;
     return `<div class="edetail" style="--bc:${B.color}"><div class="row"><b class="grow">${t.icon} ${esc(t.name)}</b><span class="faint">${B.icon} ${B.name} ${TIER[t.tier]}</span></div><div>${esc(t.desc)}</div>
-      <div class="row" style="margin-top:4px">${btn}<span class="${inf.s === 'short' || inf.s === 'locked' || inf.s === 'rival' ? 'why' : 'note'} grow" style="margin:0">${esc(inf.why)}</span></div></div>`;
+      <div class="row" style="margin-top:0.25rem">${btn}<span class="${inf.s === 'short' || inf.s === 'locked' || inf.s === 'rival' ? 'why' : 'note'} grow" style="margin:0">${esc(inf.why)}</span></div></div>`;
   }
   if (f?.kind === 'law' && LAW[f.id]) {
     const l = LAW[f.id];
@@ -158,10 +158,10 @@ function detailHtml(g: GameScreen, pid: number, editable: boolean, kind: 'tech' 
     if (editable && c.state === 'open') btn = `<button class="primary small" data-enact="${l.id}" ${c.why ? `disabled title="${esc(c.why)}"` : ''}>Enact · ${c.cost}✦ + 1 order</button>`;
     if (editable && c.state === 'on') btn = `<button class="small" data-revoke="${l.id}" title="Free: the slot opens up">Revoke</button>`;
     return `<div class="edetail law"><div class="row"><b class="grow">${l.icon} ${esc(l.name)}</b><span class="faint">${esc(LAW_PAIRS[l.pair])}</span></div><div>${esc(l.desc)}</div>
-      <div class="row" style="margin-top:4px">${btn}<span class="${c.why ? 'why' : 'note'} grow" style="margin:0">${esc(c.why ?? c.note)}</span></div></div>`;
+      <div class="row" style="margin-top:0.25rem">${btn}<span class="${c.why ? 'why' : 'note'} grow" style="margin:0">${esc(c.why ?? c.note)}</span></div></div>`;
   }
   if (kind === 'law') return '';
-  return `<div class="note" style="margin-top:6px">${editable ? `${touchy(g) ? 'Tap' : 'Hover'} a technology to see what it does; ${touchy(g) ? 'tap Research to buy it' : 'click a glowing one to buy it'}. One per ${per}.` : 'Lit nodes are researched. Coloured dots are rivals who have it too.'}</div>`;
+  return `<div class="note" style="margin-top:0.375rem">${editable ? `${touchy(g) ? 'Tap' : 'Hover'} a technology to see what it does; ${touchy(g) ? 'tap Research to buy it' : 'click a glowing one to buy it'}. One per ${per}.` : 'Lit nodes are researched. Coloured dots are rivals who have it too.'}</div>`;
 }
 
 /** Laws you have queued that need a new slot (not switches of an enacted pair). */

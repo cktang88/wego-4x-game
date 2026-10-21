@@ -6,7 +6,7 @@ import type { GameScreen } from '../game.ts';
 import type { FateUse, Fleet, FreeAction, Order, Posture, Region, WorldPosture } from '../../../shared/sim/types.ts';
 import { POSTURES, WORLD_POSTURES, FATE_USES } from '../../../shared/config/content.ts';
 import { sigOn, posturesOn, worldPosturesOn, fateOn, postureBlock, wpostureBlock, fateBlock, fateLeft, regionIdle, isDugIn, isExposed, fateOf, POSTURE_IDS, WORLD_POSTURE_IDS, SG } from '../../../shared/sim/signature.ts';
-import { esc, toast } from '../ui/dom.ts';
+import { esc, toast, uiScale } from '../ui/dom.ts';
 import { tip, shortWhy } from './util.ts';
 import { setFree, dropFree } from './soul.ts';
 
@@ -199,7 +199,7 @@ export function offerCharge(g: GameScreen, fleet: number, region: number) {
   el.className = 'chargeoffer';
   el.innerHTML = `<i>${T(POSTURES.charge.icon)}</i><b>Charge?</b><small>${esc(POSTURES.charge.bet)}</small>`;
   const p = g.map.toScreen(g.st.regions[region].site);
-  el.style.transform = `translate(${Math.round(Math.max(8, Math.min(g.map.w - 220, p.x + 22)))}px, ${Math.round(Math.max(60, p.y - 70))}px)`;
+  el.style.transform = `translate(${Math.round(Math.max(8, Math.min(g.map.w - 220 * uiScale(), p.x + 22)))}px, ${Math.round(Math.max(60 * uiScale(), p.y - 70 * uiScale()))}px)`;
   g.hud.h.res.parentElement!.appendChild(el);
   offerEl = el;
   el.addEventListener('click', () => {

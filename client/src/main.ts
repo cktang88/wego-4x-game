@@ -131,12 +131,12 @@ async function seatFromToken(id: string, token: string): Promise<number> {
 }
 
 function joinDialog(meta: GameMeta) {
-  app.innerHTML = `<div class="lobby"><div class="lobby-inner"><div class="card" style="max-width:520px;margin:40px auto">
+  app.innerHTML = `<div class="lobby"><div class="lobby-inner"><div class="card" style="max-width:32.5rem;margin:2.5rem auto">
     <h2>Join “${esc(meta.name)}”</h2>
     <div class="form"><span>Your name</span><input data-name value="${esc(store.get('tc.name') ?? '')}" placeholder="Commander"></div>
-    <div class="col" style="margin-top:12px">${meta.seats.map(s => `<div class="row"><span class="grow">${esc(s.name)} <span class="faint">${s.kind === 'ai' ? `AI (${esc(s.aiLevel)})` : s.claimed ? 'taken' : 'open'}</span></span>
+    <div class="col" style="margin-top:0.75rem">${meta.seats.map(s => `<div class="row"><span class="grow">${esc(s.name)} <span class="faint">${s.kind === 'ai' ? `AI (${esc(s.aiLevel)})` : s.claimed ? 'taken' : 'open'}</span></span>
       ${s.kind === 'human' && !s.claimed ? `<button class="primary" data-seat="${Number(s.seat)}">Take this seat</button>` : ''}</div>`).join('')}</div>
-    <div class="row" style="margin-top:14px"><button data-spec>Spectate instead</button><a href="#/">Back to lobby</a></div></div></div></div>`;
+    <div class="row" style="margin-top:0.875rem"><button data-spec>Spectate instead</button><a href="#/">Back to lobby</a></div></div></div></div>`;
   app.querySelectorAll<HTMLButtonElement>('[data-seat]').forEach(b => b.addEventListener('click', async () => {
     const name = app.querySelector<HTMLInputElement>('[data-name]')!.value.trim();
     if (name) store.set('tc.name', name);
@@ -177,10 +177,10 @@ function lobby() {
           <span>Mode</span><select data-l="mode"><option value="wego" selected>WEGO: 5 orders a turn, turns resolve together</option><option value="live-normal">Live: real time, an order every 4 h (days)</option><option value="live-fast">Live fast: an order every 4 min (an evening)</option><option value="live-blitz">Live blitz: tick every 5 s (testing)</option></select>
           <span>Seed</span><input data-l="seed" placeholder="random" inputmode="numeric">
         </div>
-        <div class="row" style="margin-top:12px"><button class="primary" data-l="start">Start</button>${hasSave ? '<button data-l="continue">Continue saved game</button>' : ''}<button data-l="load">Load file…</button><button data-l="watch" title="Three AIs play; you watch with the map revealed">Watch AIs</button></div>
+        <div class="row" style="margin-top:0.75rem"><button class="primary" data-l="start">Start</button>${hasSave ? '<button data-l="continue">Continue saved game</button>' : ''}<button data-l="load">Load file…</button><button data-l="watch" title="Three AIs play; you watch with the map revealed">Watch AIs</button></div>
       </div>
       <div class="card"><h2>Online multiplayer</h2>
-        <p class="dim" style="font-size:14px;margin-top:0">Create a game, send the link to your rivals, and play asynchronously. A turn resolves when all three have sealed their orders (or at the optional deadline, when an AI steward plays for anyone who is late).</p>
+        <p class="dim" style="font-size:var(--fs-sm);margin-top:0">Create a game, send the link to your rivals, and play asynchronously. A turn resolves when all three have sealed their orders (or at the optional deadline, when an AI steward plays for anyone who is late).</p>
         <div class="form">
           <span>Game name</span><input data-o="name" placeholder="Friday war">
           <span>Seat 2</span><select data-o="s1"><option value="human" selected>Human</option><option value="novice">AI novice</option><option value="standard">AI standard</option><option value="expert">AI expert</option></select>
@@ -188,13 +188,13 @@ function lobby() {
           <span>Mode</span><select data-o="mode"><option value="wego" selected>WEGO: 5 orders a turn, turns resolve together</option><option value="live-normal">Live: real time, an order every 4 h (days)</option><option value="live-fast">Live fast: an order every 4 min (an evening)</option><option value="live-blitz">Live blitz: tick every 5 s (testing)</option></select>
           <span>Deadline</span><select data-o="deadline"><option value="0">none (wait for everyone)</option><option value="1">1 hour</option><option value="8">8 hours</option><option value="24">24 hours</option><option value="48">48 hours</option></select>
         </div>
-        <div class="row" style="margin-top:12px"><button class="primary" data-o="create">Create & take seat 1</button></div>
+        <div class="row" style="margin-top:0.75rem"><button class="primary" data-o="create">Create & take seat 1</button></div>
         <h3>Games on this server</h3><div class="gamelist" data-o="list"><span class="faint">loading…</span></div>
       </div>
       <div class="card"><h2>Fiddle</h2>
-        <p class="dim" style="font-size:14px;margin-top:0">Everything is a knob. Change any rule (orders per turn, ship stats, VP values, combat odds…) and start a new game to try it.</p>
+        <p class="dim" style="font-size:var(--fs-sm);margin-top:0">Everything is a knob. Change any rule (orders per turn, ship stats, VP values, combat odds…) and start a new game to try it.</p>
         <div class="row"><button data-l="tweaks">⚙ Tweaks${tw ? ` (${tw} groups changed)` : ''}</button><button data-l="help">How to play</button></div>
-        <p class="faint" style="font-size:13px">Dev tips: <code>npm run sim -- --games 50</code> runs headless AI-vs-AI balance tests. The <i>Menu</i> in a local game can reveal the whole map. All rules: <code>shared/config/rules.ts</code>.</p>
+        <p class="faint" style="font-size:var(--fs-xs)">Dev tips: <code>npm run sim -- --games 50</code> runs headless AI-vs-AI balance tests. The <i>Menu</i> in a local game can reveal the whole map. All rules: <code>shared/config/rules.ts</code>.</p>
       </div>
     </div></div></div>`;
   const q = (s: string) => app.querySelector<HTMLInputElement>(s)!;
@@ -271,7 +271,7 @@ function lobby() {
       tokens.set(r.id, j);
       const link = `${location.origin}${location.pathname}#/g/${r.id}`;
       const o = overlay(`<div class="dialog"><h2>Game created</h2><p>Send this link to your rivals:</p><input value="${esc(link)}" readonly style="width:100%" onclick="this.select()">
-        <p class="dim" style="font-size:13px">They pick a seat when they open it. Your own seat is remembered in this browser. To play from another device, use <i>Menu → your private seat link</i> in game.</p>
+        <p class="dim" style="font-size:var(--fs-xs)">They pick a seat when they open it. Your own seat is remembered in this browser. To play from another device, use <i>Menu → your private seat link</i> in game.</p>
         <div class="row"><button data-copy>Copy link</button><button class="primary" data-go>Enter game</button></div></div>`, false);
       o.querySelector('[data-copy]')!.addEventListener('click', () => { navigator.clipboard?.writeText(link); toast('Copied'); });
       o.querySelector('[data-go]')!.addEventListener('click', () => { o.remove(); location.hash = `#/g/${r.id}`; });
