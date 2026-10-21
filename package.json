@@ -16,6 +16,7 @@
     "play": "vite-node scripts/cli.ts --"
   },
   "devDependencies": {
+    "@iconify-json/game-icons": "^1.2.4",
     "@types/node": "^26.6.5",
     "@types/ws": "^8.18.2",
     "playwright-core": "1.56",

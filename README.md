@@ -161,3 +161,7 @@ The design comes from a research pass over WEGO/async games, action economies, 3
 - XCOM / Shadow of Mordor / RimWorld → deed-based traits, nemesis and vengeance, ship titles, memorials, last stands.
 - Into the Breach / Neptune's Pride intel → signals show destination and size band, never exact strength. Feints and scans.
 - Subterfuge / Frozen Synapse → the Preview ghost planner.
+
+## Credits
+
+Icons by Lorc, Delapouite & contributors, [game-icons.net](https://game-icons.net), [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) (the list of icons used and our changes: `client/src/art/ICONS-CREDITS.md`).

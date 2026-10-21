@@ -1,0 +1,41 @@
+/* ============================================================================
+   Icons (client/src/art/icons.ts): inline SVG silhouettes sized from the text
+   they sit in, so "⚙ 34" becomes an icon as heavy as the number beside it.
+   The ink fills its box edge to edge, so 1.15em puts the icon's top a little
+   above the cap height of Rajdhani / Cinzel numerals and its foot just under
+   the baseline: optically level with the digits, never smaller than them.
+   ============================================================================ */
+.ic {
+  display: inline-block;
+  width: 1.15em; height: 1.15em;
+  vertical-align: -0.2em;
+  fill: currentColor;
+  flex: none;
+  overflow: visible;
+  pointer-events: none;
+}
+/* pills and chips (resource bar, stat rows, map-style tags): a touch smaller and tighter */
+.ic-pill { width: 1.05em; height: 1.05em; vertical-align: -0.16em; }
+
+/* inside UPPERCASE / small-caps headings the letters are all cap height: centre on them */
+.ic-caps { width: 1em; height: 1em; vertical-align: -0.12em; }
+
+/* an icon alone in a button or tile: centred, slightly larger than the label text */
+.ic-solo { display: block; width: 1.35em; height: 1.35em; margin: 0 auto; vertical-align: 0; }
+.ic-lg { width: 1.45em; height: 1.45em; vertical-align: -0.3em; }
+.ic-xl { width: 2em; height: 2em; vertical-align: -0.5em; }
+
+/* the second tone: an engraved shadow (ic(name, { emboss: true })) in this colour */
+.ic-emboss { --ic2: rgba(0, 0, 0, 0.55); }
+.herald .ic-emboss { --ic2: rgba(90, 60, 20, 0.28); }
+
+/* metals, matching the chrome (theme.css) */
+.ic-brass { color: var(--brass-hi, #f4dc9c); }
+.ic-gold { color: var(--gold, #ffd86b); }
+.ic-silver { color: var(--silver, #c3c9d6); }
+.ic-good { color: var(--good, #7ee3a2); }
+.ic-bad { color: var(--bad, #ff6b5e); }
+.ic-dim { opacity: 0.7; }
+
+/* on the parchment Herald and Saga the icons are printed in the page's ink */
+.herald .ic, .saga .ic { color: inherit; }
