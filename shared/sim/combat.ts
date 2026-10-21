@@ -30,6 +30,8 @@ export interface FightOutcome {
   winner: Owner | null;
   rounds: number;           // rounds fought in this call
   eng?: Engagement;
+  /** Set when the Warden lost its last ship in this call: the player whose fleet sank it (if any). */
+  wardenSlayer?: PlayerId;
 }
 
 export function hostile(s: GameState, a: Owner, b: Owner): boolean {
@@ -342,7 +344,13 @@ export function fightRounds(
         }
       }
       f.ships = f.ships.filter(x => x.hp > 0);
-      if (!f.ships.length) loseFleet(f);
+      if (!f.ships.length) {
+        if (f.owner === -1 && dead.length) {
+          const k = killedBy.get(dead[dead.length - 1].id) ?? [...dead].reverse().map(d => killedBy.get(d.id)).find(x => x);
+          if (k && k.owner >= 0) out.wardenSlayer = k.owner;
+        }
+        loseFleet(f);
+      }
     }
     active = active.filter(f => f.ships.length);
   };
@@ -389,7 +397,7 @@ export function fightRounds(
         const rem: Fleet = {
           ...structuredClone(f), id: s.nextId++, name: `Remnant of ${f.name}`, ships: left,
           commander: { ...structuredClone(f.commander), name: `${f.commander.name}'s flag captain` },
-          history: [`Left behind at ${region.name} on turn ${s.turn}.`], siege: null,
+          history: [`Left behind at ${region.name} on turn ${s.turn}.`], siege: null, route: null,
         };
         rem.commander.alive = true;
         s.fleets.push(rem);
@@ -560,5 +568,17 @@ export function disengage(s: GameState, rng: Rng, f: Fleet, pulse: number, getRe
   if (rr.shots.length) report.rounds.push(rr);
   if (before !== f.ships.length && !report.highlights.includes(`${f.name} breaks off under fire.`)) report.highlights.push(`${f.name} breaks off under fire.`);
   f.siege = null;
+  if (!f.ships.length && f.owner !== -1) {
+    // destroyed while breaking off: the commander escapes or falls, as in any lost fleet
+    const c = f.commander;
+    if (rng.chance(R.commanderFate.dieChance)) {
+      c.alive = false;
+      s.regions[f.region].memorials.push(`${c.name} fell with ${f.name} breaking off from the ${eng.name}, turn ${s.turn}.`);
+      report.highlights.push(`${c.name} goes down with ${f.name}.`);
+    } else {
+      (s.players[f.owner].reserveCommanders ??= []).push(c);
+      report.highlights.push(`${c.name} escapes the wreck of ${f.name} and will command again.`);
+    }
+  }
   return f.ships.length > 0;
 }

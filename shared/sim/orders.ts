@@ -2,8 +2,8 @@
 // the UI (to grey out impossible orders) and the AI.
 import type { Res } from '../config/rules.ts';
 import { fleetSpeed } from './graph.ts';
-import type { GameState, Order, PlayerId } from './types.ts';
-import { classBlock, gateNeighbors, hasLaw, hasTech, lawBlock, lawCost, maxDevAt, projectBlock, projectCostMod, shipCostMod, blueprintFor } from './empire.ts';
+import type { GameState, Order, PlayerId, Ship } from './types.ts';
+import { classBlock, gateNeighbors, hasLaw, hasTech, lawBlock, lawCost, lookup, maxDevAt, projectBlock, projectCostMod, shipCostMod, blueprintFor } from './empire.ts';
 import { LAW } from '../config/empire.ts';
 
 export const ORDER_INFO: Record<Order['type'], { name: string; icon: string; help: string }> = {
@@ -39,16 +39,22 @@ export function orderCost(s: GameState, o: Order, p: PlayerId): Partial<Res> {
     case 'scan': return hasLaw(s, p, 'open') ? {} : { influence: I.scanCost };
     case 'feint': return hasLaw(s, p, 'open') ? {} : { influence: I.feintCost };
     case 'conceal': return hasLaw(s, p, 'open') ? {} : { influence: I.concealCost };
-    case 'law': return { influence: LAW[o.law] ? lawCost(s, p, o.law) : 0 };
+    case 'law': return { influence: lookup(LAW, o.law) ? lawCost(s, p, o.law) : 0 };
     case 'refit': {
       const f = s.fleets.find(x => x.id === o.fleet);
-      const n = f ? f.ships.filter(sh => sh.mod !== blueprintFor(s, p, sh.cls)).length : 0;
+      const n = f ? f.ships.filter(sh => outdated(s, p, sh)).length : 0;
       return n ? { industry: n * s.rules.empire.refitIndustryPerShip } : {};
     }
     case 'pact': return { influence: I.pactCost };
     default: return {};
   }
 }
+
+/** Joining fleets a combined Seize can take (resolve.ts uses `[...new Set(also)].slice(0, 3)`). */
+export const MAX_JOINERS = 3;
+
+/** A ship whose module isn't its class's current blueprint (a missing `mod` from an old save counts as none). */
+const outdated = (s: GameState, p: PlayerId, sh: Ship) => (sh.mod ?? null) !== blueprintFor(s, p, sh.cls);
 
 /** Credits can cover an industry shortfall at economy.creditsPerIndustry ¢ per ⚙ (a sink for spare cash). */
 export function canAfford(have: Res, cost: Partial<Res>, rules?: { economy: { creditsPerIndustry: number } }): boolean {
@@ -80,8 +86,8 @@ export function describeOrder(s: GameState, o: Order): string {
   switch (o.type) {
     case 'move': return `${fn(o.fleet)} → ${o.path.map(rn).join(' → ')}${o.overdrive ? ' (overdrive)' : ''}`;
     case 'seize': return `${fn(o.fleet)}${o.also?.length ? ` + ${o.also.map(fn).join(' + ')}` : ''} seize${o.also?.length ? '' : 's'} ${rn(o.target)}`;
-    case 'build': return `Build ${s.rules.ships[o.cls]?.name ?? o.cls} at ${rn(o.region)}`;
-    case 'develop': return `${s.rules.projects[o.project]?.name ?? o.project} at ${rn(o.region)}`;
+    case 'build': return `Build ${lookup(s.rules.ships, o.cls)?.name ?? o.cls} at ${rn(o.region)}`;
+    case 'develop': return `${lookup(s.rules.projects, o.project)?.name ?? o.project} at ${rn(o.region)}`;
     case 'fortify': return `${fn(o.fleet)} fortifies`;
     case 'influence': return `Influence ${rn(o.target)}`;
     case 'scan': return `Scan ${rn(o.target)}`;
@@ -89,7 +95,7 @@ export function describeOrder(s: GameState, o: Order): string {
     case 'conceal': return 'Conceal all signals';
     case 'excavate': return `${fn(o.fleet)} excavates`;
     case 'pact': return `Offer pact to ${s.players[o.with]?.name ?? '?'}`;
-    case 'law': return `Enact ${LAW[o.law]?.name ?? o.law}`;
+    case 'law': return `Enact ${lookup(LAW, o.law)?.name ?? o.law}`;
     case 'refit': return `Refit ${fn(o.fleet)}`;
   }
 }
@@ -130,6 +136,8 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       if (t.owner === p) return 'already yours';
       if (fleet!.region !== o.target && !s.regions[fleet!.region].neighbors.includes(o.target)) return 'target must be adjacent';
       if (o.also !== undefined && (!Array.isArray(o.also) || o.also.length > 8)) return 'bad joining fleets';
+      // the resolver takes at most MAX_JOINERS distinct joiners and silently drops the rest: say so up front
+      if (new Set((o.also ?? []).filter(id => id !== o.fleet)).size > MAX_JOINERS) return `at most ${MAX_JOINERS} fleets can join an assault`;
       for (const id of o.also ?? []) {
         const g = s.fleets.find(x => x.id === id);
         if (!g || g.owner !== p || !g.ships.length) return 'a joining fleet is not yours';
@@ -194,7 +202,8 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
     case 'refit': {
       const r = s.regions[fleet!.region];
       if (r.owner !== p || !(r.buildings.shipyard ?? 0)) return 'must be at one of your shipyards';
-      if (!fleet!.ships.some(sh => sh.mod !== blueprintFor(s, p, sh.cls) || sh.hp < sh.maxHp)) return 'already up to date and repaired';
+      if (s.fleets.some(f => f.region === r.id && f.owner !== p && f.ships.length && (f.owner === -1 || !s.pacts.some(x => x.until >= s.turn && ((x.a === p && x.b === f.owner) || (x.b === p && x.a === f.owner)))))) return 'enemies present';
+      if (!fleet!.ships.some(sh => outdated(s, p, sh) || sh.hp < sh.maxHp)) return 'already up to date and repaired';
       return null;
     }
   }

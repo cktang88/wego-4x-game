@@ -6,6 +6,11 @@ import type { Fleet, GameState, PlayerId, RegionId, Ship } from './types.ts';
 
 const on = (s: GameState) => s.rules.empire?.enabled !== false;
 
+/** Own-property lookup: ids may come from untrusted clients, and `TECH['constructor']` etc. must not resolve. */
+export function lookup<T>(table: Record<string, T> | null | undefined, key: unknown): T | undefined {
+  return table && typeof key === 'string' && Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
 export const hasTech = (s: GameState, p: PlayerId | null | undefined, t: string): boolean =>
   on(s) && p !== null && p !== undefined && p >= 0 && !!s.players[p]?.techs?.includes(t);
 export const hasLaw = (s: GameState, p: PlayerId | null | undefined, l: string): boolean =>
@@ -23,18 +28,33 @@ export function academyLevels(s: GameState, p: PlayerId): number {
 }
 
 export function techCost(s: GameState, p: PlayerId, id: string): Partial<Res> {
-  const E = s.rules.empire, t = TECH[id];
+  const E = s.rules.empire, t = lookup(TECH, id);
   if (!t) return {};
   const regions = s.regions.filter(r => r.owner === p).length;
-  const disc = Math.min(E.academyMaxDiscount, academyLevels(s, p) * E.academyDiscount);
-  const total = (E.techBase[t.tier] + E.techPerRegionPerTier * t.tier * regions) * (1 - disc);
-  const credits = Math.round(total * E.techCreditShare);
-  return { industry: Math.round(total) - credits, credits };
+  // a tweaked rule set must never make research free money: clamp the discount, the price and the split
+  const disc = Math.max(0, Math.min(1, E.academyMaxDiscount, academyLevels(s, p) * E.academyDiscount));
+  const total = Math.max(0, ((E.techBase[t.tier] ?? 0) + E.techPerRegionPerTier * t.tier * regions) * (1 - disc)) || 0;
+  const share = Math.max(0, Math.min(1, E.techCreditShare)) || 0;
+  const credits = Math.round(total * share);
+  return { industry: Math.max(0, Math.round(total) - credits), credits };
+}
+
+/**
+ * Technologies `p` has bought this turn (LIVE: this cycle). `Player.researched` is only reset when the
+ * NEXT turn/cycle starts resolving, so between turns it still holds last turn's count: read raw, it
+ * would block planning a purchase every other turn. While a turn/tick is resolving `s.last` is null.
+ */
+export function researchedThisTurn(s: GameState, p: PlayerId): number {
+  const n = s.players[p]?.researched ?? 0;
+  if (s.last == null) return n;                          // resolving (or nothing resolved yet): the counter is live
+  if (!s.live) return 0;                                  // WEGO planning: a fresh turn always starts at 0
+  const per = Math.max(1, s.rules.live?.ticksPerCycle ?? 1);
+  return s.live.tick % per === 0 ? 0 : n;                 // LIVE: the next tick opens a new cycle and resets it
 }
 
 /** Why `p` can't research `id` right now (ignoring cost), or null. */
 export function researchBlock(s: GameState, p: PlayerId, id: string): string | null {
-  const t = TECH[id];
+  const t = lookup(TECH, id);
   if (!on(s)) return 'research is off in these rules';
   if (!t) return 'unknown technology';
   const mine = s.players[p]?.techs ?? [];
@@ -50,7 +70,7 @@ export function researchBlock(s: GameState, p: PlayerId, id: string): string | n
     const o = starOwner(s, id);
     if (o !== null && o !== p) return `${s.players[o].name} already owns it`;
   }
-  if ((s.players[p].researched ?? 0) >= s.rules.empire.researchPerTurn) return `one technology per ${s.live ? 'cycle' : 'turn'}`;
+  if (researchedThisTurn(s, p) >= s.rules.empire.researchPerTurn) return `one technology per ${s.live ? 'cycle' : 'turn'}`;
   return null;
 }
 
@@ -62,17 +82,19 @@ export function researchable(s: GameState, p: PlayerId): TechDef[] {
 // ------------------------------------------------------------------ laws
 export function lawSlots(s: GameState, p: PlayerId): number {
   const E = s.rules.empire;
-  return E.lawSlotsStart + E.lawSlotTurns.filter(t => s.turn >= t).length + (hasTech(s, p, 'bureaucracy') ? 1 : 0);
+  return E.lawSlotsStart + (Array.isArray(E.lawSlotTurns) ? E.lawSlotTurns : []).filter(t => s.turn >= t).length + (hasTech(s, p, 'bureaucracy') ? 1 : 0);
 }
 /** The law on the other side of `id`'s pair. */
-export const opposite = (id: string) => Object.values(LAW).find(l => l.pair === LAW[id]?.pair && l.id !== id)?.id ?? null;
+export const opposite = (id: string) => { const me = lookup(LAW, id); return me ? Object.values(LAW).find(l => l.pair === me.pair && l.id !== id)?.id ?? null : null; };
 export function lawCost(s: GameState, p: PlayerId, id: string): number {
   const opp = opposite(id);
-  return s.rules.empire.lawCost * (opp && hasLaw(s, p, opp) ? 2 : 1);
+  // switching sides costs double, also if you revoked the other side earlier this turn
+  const switching = !!opp && (hasLaw(s, p, opp) || !!s.players[p]?.revokedThisTurn?.includes(opp));
+  return s.rules.empire.lawCost * (switching ? 2 : 1);
 }
 export function lawBlock(s: GameState, p: PlayerId, id: string): string | null {
   if (!on(s)) return 'laws are off in these rules';
-  if (!LAW[id]) return 'unknown law';
+  if (!lookup(LAW, id)) return 'unknown law';
   const laws = s.players[p]?.laws ?? [];
   if (laws.includes(id)) return 'already enacted';
   const opp = opposite(id);
@@ -92,7 +114,10 @@ export function connected(s: GameState, p: PlayerId): Set<RegionId> {
     if (!alt) return out;
     src = alt.id;
   }
-  const blocked = (rid: RegionId) => s.fleets.some(f => f.region === rid && f.owner !== p && f.ships.length && f.ships.some(sh => sh.sys.weapons) && hostileTo(s, f.owner, p));
+  // a blockade needs real warships (not a lone scout), and holds only while none of your own warships contest it
+  const warship = (f: Fleet) => f.ships.some(sh => sh.sys.weapons && sh.cls !== 'scout');
+  const blocked = (rid: RegionId) => s.fleets.some(f => f.region === rid && f.owner !== p && warship(f) && hostileTo(s, f.owner, p))
+    && !s.fleets.some(f => f.region === rid && f.owner === p && warship(f));
   if (blocked(src)) return out;
   const q = [src]; out.add(src);
   while (q.length) {
@@ -144,7 +169,7 @@ export function supplied(s: GameState, p: PlayerId, conn = connected(s, p)): Set
 export interface ShipStats { hp: number; attack: number; shots: number; shields: number; speed: number; siege: number; evasion: number; sensor: number }
 /** A ship's effective stats for its owner: class + module + technologies. */
 export function shipStats(s: GameState, sh: Ship, owner: PlayerId | -1): ShipStats {
-  const d = s.rules.ships[sh.cls] ?? s.rules.ships.frigate;
+  const d = lookup(s.rules.ships, sh.cls) ?? s.rules.ships.frigate;
   const st: ShipStats = { hp: sh.maxHp, attack: d.attack, shots: d.shots, shields: d.shields, speed: d.speed, siege: d.siege, evasion: d.evasion, sensor: d.sensor };
   if (!on(s)) return st;
   if (sh.mod === 'railgun') { st.attack += 1; st.shots += st.shots >= 3 ? 1 : 0; }
@@ -158,18 +183,19 @@ export function shipStats(s: GameState, sh: Ship, owner: PlayerId | -1): ShipSta
   return st;
 }
 export function baseHp(s: GameState, cls: string, mod: string | null | undefined): number {
-  const hp = s.rules.ships[cls]?.hp ?? 10;
+  const hp = lookup(s.rules.ships, cls)?.hp ?? 10;
   return on(s) && mod === 'armor' ? Math.round(hp * s.rules.empire.armorHpMult) : hp;
 }
 /** Which module new ships of this class get. */
 export function blueprintFor(s: GameState, p: PlayerId, cls: string): string | null {
   if (!on(s) || p < 0) return null;
-  const m = s.players[p]?.blueprint?.[cls] ?? 'armor';
-  return MODULE[m] && (MODULE[m].tech === null || hasTech(s, p, MODULE[m].tech!)) ? m : 'armor';
+  const m = lookup(s.players[p]?.blueprint, cls) ?? 'armor';
+  const md = lookup(MODULE, m);
+  return md && (md.tech === null || hasTech(s, p, md.tech)) ? m : 'armor';
 }
 /** Why `p` can't build this class at all (tech / vein), or null. Shipyard & money are checked elsewhere. */
 export function classBlock(s: GameState, p: PlayerId, cls: string, conn?: Set<RegionId>): string | null {
-  const d = s.rules.ships[cls];
+  const d = lookup(s.rules.ships, cls);
   if (!d || !on(s)) return null;
   if (d.tech?.length && !d.tech.some(t => hasTech(s, p, t))) return `needs ${d.tech.map(t => TECH[t]?.name ?? t).join(' or ')}`;
   if (d.vein && !hasVein(s, p, d.vein, conn)) return `needs ${d.vein === 'antimatter' ? '⚛ Antimatter' : '◆ Crystals'} (an Extractor connected to your capital)`;
@@ -177,8 +203,8 @@ export function classBlock(s: GameState, p: PlayerId, cls: string, conn?: Set<Re
 }
 /** Why `p` can't start this project here (tech / vein / trait), or null. */
 export function projectBlock(s: GameState, p: PlayerId, key: string, rid: RegionId): string | null {
-  const pd = s.rules.projects[key];
-  const r = s.regions[rid];
+  const pd = lookup(s.rules.projects, key);
+  const r = Number.isInteger(rid) ? s.regions[rid] : undefined;
   if (!pd || !r) return null;
   if (!on(s) && ['academy', 'extractor', 'battery', 'pshield', 'depot', 'gate'].includes(key)) return 'not in these rules';
   if (pd.tech && !hasTech(s, p, pd.tech)) return `needs ${TECH[pd.tech]?.name ?? pd.tech}`;
@@ -194,6 +220,7 @@ export function maxDevAt(s: GameState, rid: RegionId): number {
 
 // ------------------------------------------------------------------ cost modifiers
 export function shipCostMod(s: GameState, p: PlayerId, cls: string, c: Partial<Res>): Partial<Res> {
+  c = { ...c };   // never write through to the rules' own cost object
   if (!on(s)) return c;
   const E = s.rules.empire;
   if (c.industry && hasLaw(s, p, 'industrial')) c.industry = Math.round(c.industry * (1 - E.industrialShipDiscount));

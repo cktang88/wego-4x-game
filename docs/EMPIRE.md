@@ -18,7 +18,7 @@ can be owned by **one player per game**: whoever buys it first. Purchases are pu
 Price grows with tier and empire size; an **Academy** cuts it. Capturing a rival's
 Academy steals a technology you lack.
 
-- ⚔ **Warfare**: Railguns (module) · Cruiser Yards · *Siege Doctrine* | *Alpha Strike* · ★ Sunhammer
+- ⚔ **Warfare**: Railguns (module) · Cruiser Yards · *Siege Doctrine* | *Alpha Strike* (either unlocks Dreadnoughts) · ★ Sunhammer
 - ⛨ **Bulwark**: Deflectors (module) · Orbital Batteries · *Planetary Shields* | *Regenerators* · ★ Citadel Worlds (bigger garrisons, Crowns pay +1 VP)
 - ➤ **Logistics**: Ion Drives (module) · Supply Depots (−25% upkeep; Depot hubs +3 industry) · *Warp Gates* | *Deep Scanners* · ★ Jump Drive
 - ✦ **Statecraft**: Trade Compacts · Bureaucracy (+1 law slot) · *Subversion* | *Free Markets* · ★ Imperial Mandate
@@ -39,8 +39,8 @@ Map generation gives regions a **trait** (Forge, Garden, Bulwark, Gas Giant) and
 An **Extractor** on a vein you own pays credits and gives access while it stays connected.
 
 ## Supply
-Your regions that link back to your capital through your territory, with no enemy warships
-sitting in them, are **connected**. Cut-off regions yield half and their veins go dark.
+Your regions that link back to your capital through your territory (or your warp gates), with no
+uncontested enemy warships sitting in them (a lone scout doesn't count), are **connected**. Cut-off regions yield half and their veins go dark.
 Fleets in or next to connected territory (2 away from a Depot) are **in supply**; out of
 supply they don't repair, and after a turn they start to wear down.
 

@@ -102,8 +102,8 @@ export const DEFAULT_RULES = {
     extractor:{ name: 'Extractor', cost: { industry: 30 },             turns: 2, max: 1, desc: 'Mines this vein: +3¢ a turn and access to its resource while connected to your capital.', vein: true },
     battery:  { name: 'Battery',  cost: { industry: 25, credits: 5 },  turns: 1, max: 2, desc: 'Orbital guns: the garrison gets +2 shots and +2 damage per level.', tech: 'batteries' },
     pshield:  { name: 'Planetary Shield', cost: { industry: 40, credits: 15 }, turns: 2, max: 1, desc: 'Hits on the garrison do 3 less damage. Only siege damage gets through.', tech: 'pshield', needs: 'crystal' },
-    depot:    { name: 'Depot',    cost: { industry: 20 },              turns: 1, max: 1, desc: 'Logistics hub: +3 industry; supply reaches 2 regions from here; fleets here repair fully.', tech: 'depots' },
-    gate:     { name: 'Warp Gate', cost: { industry: 45, credits: 15 }, turns: 2, max: 1, desc: 'Your fleets jump between any two of your gates as a single step.', tech: 'gates', needs: 'crystal' },
+    depot:    { name: 'Depot',    cost: { industry: 20 },              turns: 1, max: 1, desc: 'Logistics hub: +3 industry; supply reaches 2 regions from here; fleets here repair as fast as at a shipyard.', tech: 'depots' },
+    gate:     { name: 'Warp Gate', cost: { industry: 45, credits: 15 }, turns: 2, max: 1, desc: 'Your fleets jump between any two of your gates as a single step; gates also link your territory for supply.', tech: 'gates', needs: 'crystal' },
   } as Record<string, { name: string; cost: Partial<Res>; turns: number; max: number; desc: string; tech?: string; needs?: string; vein?: boolean }>,
 
   // ---------------------------------------------------------------- garrisons

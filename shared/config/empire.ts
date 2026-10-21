@@ -25,8 +25,8 @@ export const BRANCHES: Record<Branch, { name: string; icon: string; color: strin
 export const TECHS: TechDef[] = [
   { id: 'railguns',   branch: 'war', tier: 1, icon: '⁍', name: 'Railguns', desc: 'Unlocks the Railgun module: +1 attack (and +1 shot for heavy ships that fire 3+ times).' },
   { id: 'cruisers',   branch: 'war', tier: 2, icon: '▬', name: 'Cruiser Yards', desc: 'You can build Cruisers (needs ⚛ Antimatter and a level 2 shipyard).' },
-  { id: 'siege',      branch: 'war', tier: 3, icon: '☄', name: 'Siege Doctrine', desc: 'All your ships deal +3 damage to garrisons. Bombards cost 25% less.' },
-  { id: 'alpha',      branch: 'war', tier: 3, icon: '⚡', name: 'Alpha Strike', desc: 'In the first round of every battle, your ships fire twice.' },
+  { id: 'siege',      branch: 'war', tier: 3, icon: '☄', name: 'Siege Doctrine', desc: 'All your ships deal +3 damage to garrisons. Bombards cost 25% less industry. Unlocks Dreadnoughts (needs ⚛ Antimatter and a level 3 shipyard).' },
+  { id: 'alpha',      branch: 'war', tier: 3, icon: '⚡', name: 'Alpha Strike', desc: 'In the first round of every battle, your ships fire twice. Unlocks Dreadnoughts (needs ⚛ Antimatter and a level 3 shipyard).' },
   { id: 'sunhammer',  branch: 'war', tier: 4, icon: '☀', name: 'The Sunhammer', desc: '★ Only one empire can own it. All your ships +1 attack.' },
 
   { id: 'deflectors', branch: 'bulwark', tier: 1, icon: '◠', name: 'Deflectors', desc: 'Unlocks the Deflector module: +2 shields and a little evasion.' },
@@ -36,8 +36,8 @@ export const TECHS: TechDef[] = [
   { id: 'citadel',    branch: 'bulwark', tier: 4, icon: '♜', name: 'Citadel Worlds', desc: '★ Only one empire can own it. Your garrisons are 50% larger, and every Crown you hold pays +1 VP a turn.' },
 
   { id: 'ion',        branch: 'logistics', tier: 1, icon: '»', name: 'Ion Drives', desc: 'Unlocks the Ion Drive module: +1 speed and much harder to hit.' },
-  { id: 'depots',     branch: 'logistics', tier: 2, icon: '⛽', name: 'Supply Depots', desc: 'Ship upkeep −25%. New project: Depot, a logistics hub: +3 industry, supply reaches 2 regions from it, and fleets there repair fully.' },
-  { id: 'gates',      branch: 'logistics', tier: 3, icon: '⧉', name: 'Warp Gates', desc: 'New project: Warp Gate (needs ◆ Crystals). Your fleets jump between any two of your gates as one step.' },
+  { id: 'depots',     branch: 'logistics', tier: 2, icon: '⛽', name: 'Supply Depots', desc: 'Ship upkeep −25%. New project: Depot, a logistics hub: +3 industry, supply reaches 2 regions from it, and fleets there repair as fast as at a shipyard.' },
+  { id: 'gates',      branch: 'logistics', tier: 3, icon: '⧉', name: 'Warp Gates', desc: 'New project: Warp Gate (needs ◆ Crystals). Your fleets jump between any two of your gates as one step, and gates link your territory for supply.' },
   { id: 'scanners',   branch: 'logistics', tier: 3, icon: '◉', name: 'Deep Scanners', desc: '+1 sensor range everywhere. You see into nebulae.' },
   { id: 'jump',       branch: 'logistics', tier: 4, icon: '↯', name: 'Jump Drive', desc: '★ Only one empire can own it. All your fleets +1 speed.' },
 

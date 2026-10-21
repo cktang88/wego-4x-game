@@ -146,6 +146,7 @@ export interface Player {
   laws?: string[];          // enacted laws (public)
   blueprint?: Record<string, string>; // ship class -> module fitted to new builds (public)
   researched?: number;      // technologies bought this turn/cycle
+  revokedThisTurn?: string[]; // laws revoked this turn/cycle (enacting the opposite still costs the switch price)
 }
 
 export interface Edict {
