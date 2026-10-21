@@ -57,7 +57,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   if (newCycle) {
     s.turnStats = { kills: [0, 0, 0], battlesWon: [0, 0, 0], crownBattlesWon: [0, 0, 0], captures: [0, 0, 0], honors: [0, 0, 0], bounty: [0, 0, 0], influenced: [] };
     for (const f of s.fleets) { f.ordersThisTurn = 0; f.guardUsed = false; }
-    for (const p of s.players) { p.pactOffers = []; p.researched = 0; p.revokedThisTurn = []; }
+    // last turn's pact offers stay answerable for one more turn
+    for (const p of s.players) { p.prevPactOffers = p.pactOffers ?? []; p.pactOffers = []; p.researched = 0; p.revokedThisTurn = []; }
     s.cycleStartOwners = s.regions.map(r => r.owner);
     s.concealed = [];
   }
@@ -653,12 +654,19 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   }
 
   // ---- pacts
+  // a pact forms when both offer this turn, or one answers the other's offer from last turn
+  const signed = new Set<string>();
   for (const p of s.players) for (const q of p.pactOffers) {
-    if (q > p.id && s.players[q].pactOffers.includes(p.id) && !p.eliminated && !s.players[q].eliminated) {
+    const o = s.players[q];
+    const key = `${Math.min(p.id, q)}:${Math.max(p.id, q)}`;
+    if (!o || signed.has(key) || p.eliminated || o.eliminated) continue;
+    if (o.pactOffers.includes(p.id) || (o.prevPactOffers ?? []).includes(p.id)) {
+      signed.add(key);
       s.pacts = s.pacts.filter(x => !((x.a === p.id && x.b === q) || (x.a === q && x.b === p.id)));
-      s.pacts.push({ a: p.id, b: q, until: s.turn + R.influence.pactTurns });
+      s.pacts.push({ a: Math.min(p.id, q), b: Math.max(p.id, q), until: s.turn + R.influence.pactTurns });
       emit({ k: 'pact', pulse: endPulse, a: p.id, b: q, formed: true });
       s.chronicle.push({ turn: s.turn, players: [p.id, q], text: `${p.name} and ${s.players[q].name} sign a pact of non-aggression until turn ${s.turn + R.influence.pactTurns}.` });
+      o.prevPactOffers = (o.prevPactOffers ?? []).filter(x => x !== p.id);
     }
   }
   s.pacts = s.pacts.filter(x => x.until > s.turn);

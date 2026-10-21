@@ -36,6 +36,7 @@ export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
     // rivals' stockpiles are secret; VP is public
     pl.res = { industry: -1, credits: -1, influence: -1 };
     pl.pactOffers = (pl.pactOffers ?? []).filter(x => x === p);
+    pl.prevPactOffers = (pl.prevPactOffers ?? []).filter(x => x === p);
     pl.reserveCommanders = [];
     // VP amounts are public, but an honors line names a battle you may not have seen
     pl.vpLog = (pl.vpLog ?? []).map(e => e.why.startsWith('Battle honors') ? { ...e, why: 'Battle honors' } : e);

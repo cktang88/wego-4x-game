@@ -332,3 +332,22 @@ describe('resolve: purity', () => {
     }
   });
 });
+
+describe('resolve bugs: pact answers', () => {
+  it('answering last turn\'s pact offer forms the pact; both offering in one turn still works', async () => {
+    const { createGame } = await import('../shared/sim/setup.ts');
+    const { resolveTurn, emptySubmission } = await import('../shared/sim/resolve.ts');
+    let s = createGame({ seed: 3, players: [0, 1, 2].map(() => ({ kind: 'human' as const })) });
+    const sub = (orders: any[]) => ({ orders: [...orders, null, null, null, null].slice(0, 5), free: [] });
+    s = resolveTurn(s, { 0: sub([{ type: 'pact', with: 1 }]), 1: emptySubmission(s), 2: emptySubmission(s) });
+    expect(s.pacts.length).toBe(0);
+    s = resolveTurn(s, { 0: emptySubmission(s), 1: sub([{ type: 'pact', with: 0 }]), 2: emptySubmission(s) });
+    expect(s.pacts.some(p => p.a === 0 && p.b === 1)).toBe(true);
+    // an answer two turns late does not
+    let t = createGame({ seed: 3, players: [0, 1, 2].map(() => ({ kind: 'human' as const })) });
+    t = resolveTurn(t, { 0: sub([{ type: 'pact', with: 2 }]), 1: emptySubmission(t), 2: emptySubmission(t) });
+    t = resolveTurn(t, { 0: emptySubmission(t), 1: emptySubmission(t), 2: emptySubmission(t) });
+    t = resolveTurn(t, { 0: emptySubmission(t), 1: emptySubmission(t), 2: sub([{ type: 'pact', with: 0 }]) });
+    expect(t.pacts.length).toBe(0);
+  });
+});

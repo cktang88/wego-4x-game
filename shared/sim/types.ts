@@ -140,6 +140,7 @@ export interface Player {
   capital: RegionId;
   eliminated: boolean;
   pactOffers: PlayerId[];   // players this one offered a pact to this turn
+  prevPactOffers?: PlayerId[]; // offers from last turn (still answerable this turn)
   missedTurns: number;      // consecutive deadlines missed (steward takes over)
   reserveCommanders: Commander[]; // escaped commanders waiting for a new fleet
   techs?: string[];         // researched technologies (public)

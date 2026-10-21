@@ -298,9 +298,14 @@ export function runTick(s0: GameState, isAI: (pid: PlayerId) => boolean): GameSt
     const plan = planTurn(s1, p.id);
     const fleetOf = (o: Order) => ('fleet' in o && o.type !== 'build' ? s1.fleets.find(f => f.id === o.fleet) : undefined);
     // skip orders that would only redo what a fleet is already doing (re-routing to the same place, re-besieging)
+    // (and orders this seat already queued, e.g. by its human before a steward took over)
+    const queued = (L.queue[p.id] ?? []);
+    const busy = new Set(queued.flatMap(q => ('fleet' in q && q.type !== 'build' ? [q.fleet] : [])));
     const opts = plan.orders.filter((o): o is Order => {
       if (!o) return false;
+      if (queued.some(q => JSON.stringify(q) === JSON.stringify(o))) return false;
       const f = fleetOf(o);
+      if (f && busy.has(f.id)) return false;
       if (o.type === 'move') return !f?.route;
       if (o.type === 'seize') return !(f?.route?.seize === o.target || (f?.siege === o.target && f.region === o.target));
       return true;
