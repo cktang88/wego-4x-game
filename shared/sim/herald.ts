@@ -15,7 +15,7 @@ export function makeEdition(s: GameState, cov: Set<RegionId>[]): HeraldEdition |
   const beats = st.beats;
   st.beats = [];
   const seenBy = (h: Headline) => s.players.filter(p => h.players.includes(p.id) || (h.region !== undefined && cov[p.id]?.has(h.region))).map(p => p.id);
-  for (const b of beats) if (!b.public) b.seenBy = seenBy(b);
+  for (const b of beats) if (!b.public && !b.seenBy) b.seenBy = seenBy(b);
   for (const r of st.fallen) if (r.fateTurn === s.turn && !r.seenBy) r.seenBy = s.players.filter(p => p.id === r.owner || cov[p.id]?.has(r.fateRegion)).map(p => p.id);
   // rank by drama (ties: the order they happened); one headline per kind+region
   const seen = new Set<string>();

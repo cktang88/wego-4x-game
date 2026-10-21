@@ -243,3 +243,17 @@ describe('sweep: soul layer', () => {
     expect(t.soul).toBeTruthy();
   });
 });
+
+describe('sweep: a limping fleet with no home left', () => {
+  it('rallies where it is instead of limping forever', () => {
+    const s = createGame({ seed: 41, players: [0, 1, 2].map(() => ({ kind: 'human' as const })) });
+    const f = s.fleets.find(x => x.owner === 0 && x.ships.length)!;
+    for (const r of s.regions) if (r.owner === 0) r.owner = null;
+    f.limping = { since: s.turn, to: f.region } as typeof f.limping;
+    f.route = null;
+    const t = resolveTurn(s, Object.fromEntries(s.players.map(p => [p.id, emptySubmission(s)])));
+    const g = t.fleets.find(x => x.id === f.id);
+    expect(g).toBeTruthy();
+    expect(g!.limping).toBeFalsy();
+  });
+});

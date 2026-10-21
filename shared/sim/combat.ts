@@ -539,6 +539,7 @@ export function fightRounds(
           ...structuredClone(f), id: s.nextId++, name: `Remnant of ${f.name}`, ships: left,
           commander: { ...structuredClone(f.commander), name: `${f.commander.name}'s flag captain` },
           history: [`Left behind at ${region.name} on turn ${s.turn}.`], siege: null, route: null,
+          fate: null,   // Signature: the Fate spent on the fleet stays with it (one token, one Twist / Last Stand)
         };
         rem.commander.alive = true;
         s.fleets.push(rem);
@@ -550,6 +551,7 @@ export function fightRounds(
       }
       f.commander.deeds.retreats++;
       f.siege = null;
+      if (f.posture === 'ambush') f.posture = null;   // Signature: an ambush driven off is over (it no longer hides or lies still)
       out.retreats.push({ fleet: f, to });
       rr.retreats.push({ owner: f.owner, fleet: f.id, to });
       active = active.filter(x => x !== f);
@@ -618,6 +620,7 @@ export function fightRounds(
     if (to === undefined || !f.ships.length || !active.includes(f)) return;
     f.commander.deeds.retreats++;
     f.siege = null;
+    if (f.posture === 'ambush') f.posture = null;
     out.routs.push({ fleet: f, to, by: strongestFoe(f.owner) });
     rr.retreats.push({ owner: f.owner, fleet: f.id, to });
     hl(`${f.name} ROUTS: ${f.ships.length} battered hull${f.ships.length > 1 ? 's' : ''} limp${f.ships.length > 1 ? '' : 's'} away.`);

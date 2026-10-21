@@ -880,6 +880,8 @@ export function soulEndTurn(s: GameState, pulse: number, emit: Emit, fought: Set
       } else if (!f.route || !f.route.path.length) {
         const rt = limpRoute(s, f);
         if (rt) { f.limping.to = rt.to; f.route = rt.path.length ? { path: rt.path, seize: null, mp: 0 } : null; }
+        // a house with no worlds left has nowhere to limp to: the fleet rallies where it is (or it never could act again)
+        else if (!s.regions.some(x => x.owner === f.owner)) { f.limping = null; sagaBeat(f, s.turn, 'home', `With no home left, rallied at ${r.name}.`, r.id); }
       }
     }
     // ---- a choice left unmade defaults to the first option

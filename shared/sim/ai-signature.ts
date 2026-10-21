@@ -70,6 +70,11 @@ export function sigFree(c: SigCtx): FreeAction[] {
   if (!posturesOn(s) && !worldPosturesOn(s) && !fateOn(s)) return out;
   const expert = lvl === 'expert', novice = lvl === 'novice';
   const live = !!s.live;
+  // LIVE: a posture set now lasts only what is left of this cycle, and undecided bets are judged when it ends.
+  // A stationary bet (Guarded, Ambush, the Levies, Scorched Earth) taken late would just backfire (dug in,
+  // exposed, output or development lost), so the AI only makes them in the first half of a cycle.
+  const per = Math.max(1, Math.floor(s.rules.live?.ticksPerCycle ?? 8) || 1);   // as live.ts ticksPerCycle()
+  const lateCycle = live && per - ((s.live!.tick ?? 0) % per) < Math.max(2, Math.ceil(per / 2));
   const S = SG(s);
   const me = s.players[pid];
   const roll = (k: string) => (hashString(`${s.seed}:${s.turn}:${pid}:${k}`) % 1000) / 1000;
@@ -95,7 +100,7 @@ export function sigFree(c: SigCtx): FreeAction[] {
         if (roll(`nov:${f.id}`) < 0.1) {
           if (sz && !live) pick = 'charge';
           else if (mv || travelling) pick = 'running';
-          else if (here.owner === pid) pick = 'guarded';
+          else if (here.owner === pid && !lateCycle) pick = 'guarded';
         }
       } else if (sz) {
         // Charge: only when the defender has no reason to brace
@@ -118,7 +123,7 @@ export function sigFree(c: SigCtx): FreeAction[] {
         // experts also fear anything that could reach the road this turn; standard players only look at the road itself
         const watched = expert ? (read ? leg.some(rid => (read.enters.get(rid) ?? []).length > 0) : leg.some(rid => foesNear(rid, 0).length > 0)) : false;
         if (path.length > sp && clearRoad && !watched && (expert || roll(`run:${f.id}`) < 0.5)) pick = 'running';
-      } else if (!f.limping && !isDugIn(s, f)) {
+      } else if (!f.limping && !isDugIn(s, f) && !lateCycle) {
         // standing still: Guarded where an attack is likely and it means to hold; (expert) Ambush on an enemy's road
         // rival fleets that can strike here this turn
         const foes = s.fleets.filter(x => x.ships.length && x.owner >= 0 && hostileP(s, x.owner, pid) && !x.limping && !isScouts(x) && x.region !== here.id && within(s, x.region, Math.max(1, fleetSpeed(s, x))).has(here.id));
@@ -190,6 +195,7 @@ export function sigFree(c: SigCtx): FreeAction[] {
           else if (threat > 0.6 && odds > 0.35 && odds < 0.9) kind = 'levies';
         } else if (odds > 0.5 && odds < 0.9 && roll(`lev:${r.id}`) < 0.3) kind = 'levies';
       }
+      if (lateCycle) kind = null;   // too late in the cycle for an assault to land (Gates below is harmless)
       if (!kind && expert && !foes.length) {
         // Open the Gates: a battered ally's fleet sits here
         const ally = s.fleets.find(x => x.region === r.id && x.owner >= 0 && x.owner !== pid && !hostileP(s, x.owner, pid) && x.ships.some(sh => sh.hp < sh.maxHp * 0.7));
@@ -301,7 +307,8 @@ export function readRivals(s: GameState, pid: PlayerId, rivals: { p: PlayerId; s
         for (const r of o.path.slice(0, Math.max(1, fleetSpeed(s, f)) + (o.overdrive ? s.rules.overdrive.speedBonus : 0))) add(r, f);
       }
     }
-    // fleets already on a route keep going
+    // fleets the predicted plan leaves alone: a rival's route is secret (the fogged view has none in WEGO, only the
+    // next step in LIVE), so only what is visible counts; otherwise the planner's prediction above is the read
     for (const f of s.fleets) {
       if (f.owner !== p || !f.ships.length || ordered.has(f.id) || !f.route?.path.length) continue;
       for (const r of f.route.path.slice(0, Math.max(1, fleetSpeed(s, f)))) add(r, f);

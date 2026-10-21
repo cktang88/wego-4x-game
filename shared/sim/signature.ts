@@ -32,6 +32,8 @@ import type { Engagement, FateUse, Fleet, GameEvent, GameState, PlayerId, Postur
 export type SigRules = typeof SIGNATURE_DEFAULTS.signature;
 type Emit = (e: GameEvent) => void;
 type Owner = PlayerId | -1;
+/** PostureFx plus `bracedBy` (Charge: the sides that braced; TODO move into types.ts PostureFx). */
+type FxX = PostureFx & { bracedBy?: Owner[] };
 
 export const POSTURE_IDS: Posture[] = ['steady', 'guarded', 'running', 'charge', 'ambush'];
 export const WORLD_POSTURE_IDS: WorldPosture[] = ['levies', 'scorch', 'gates'];
@@ -158,8 +160,14 @@ export function setWorldPosture(s: GameState, p: PlayerId, r: Region, kind: Worl
 export function wpostureOf(s: GameState, r: Region): WorldPosture | null {
   return worldPosturesOn(s) && r.wposture && r.wposture.turn === s.turn && r.owner === r.wposture.by ? r.wposture.kind : null;
 }
-/** Does r yield nothing this turn (Call the Levies, wrong)? */
-export const regionIdle = (s: GameState, r: Region) => worldPosturesOn(s) && r.idleUntil !== undefined && r.idleUntil !== null && r.idleUntil >= s.turn;
+/**
+ * Does r yield nothing this turn (Call the Levies, wrong)? Income is paid at the end of the turn, after every
+ * fight, so Levies still undecided by then were called in vain: this turn's output is already lost (sigEndTurn
+ * then idles it through the next turn as well).
+ */
+export const regionIdle = (s: GameState, r: Region) => worldPosturesOn(s) && (
+  (r.idleUntil !== undefined && r.idleUntil !== null && r.idleUntil >= s.turn)
+  || (wpostureOf(s, r) === 'levies' && !r.wposture!.outcome));
 /** Output multiplier for r this turn (Surge). */
 export const regionSurge = (s: GameState, r: Region) => (fateOn(s) && r.surge === s.turn ? SG(s).surgeMult : 1);
 
@@ -212,19 +220,21 @@ export function spendFate(s: GameState, p: PlayerId, use: FateUse, target: { fle
   } else {
     const f = s.fleets.find(x => x.id === target.fleet)!;
     f.fate = { use, turn: s.turn };
-    fid = f.id; rid = f.region;
+    // Fate is public, but where an unseen fleet stands is not: fleet-targeted uses name the fleet, never its
+    // system (no region on the event, the Herald beat or the chronicle)
+    fid = f.id;
     if (use === 'rally') {
       for (const sh of f.ships) sh.hp = Math.max(sh.hp, Math.min(sh.maxHp, Math.ceil(sh.maxHp * S.rallyHull)));
       f.limping = null;
       f.route = null;
-      text = `${pl.name} spends Fate: ${f.name} RALLIES at ${s.regions[f.region].name} and turns to fight again.`;
-    } else if (use === 'laststand') text = `${pl.name} spends Fate: ${f.name} makes its LAST STAND at ${s.regions[f.region].name}.`;
-    else if (use === 'twist') text = `${pl.name} spends Fate: a Twist of Fate shields ${f.name} at ${s.regions[f.region].name}.`;
-    else text = `${pl.name} spends Fate: ${f.name} HYPERJUMPS from ${s.regions[f.region].name}.`;
+      text = `${pl.name} spends Fate: ${f.name} RALLIES and turns to fight again.`;
+    } else if (use === 'laststand') text = `${pl.name} spends Fate: ${f.name} makes its LAST STAND.`;
+    else if (use === 'twist') text = `${pl.name} spends Fate: a Twist of Fate shields ${f.name}.`;
+    else text = `${pl.name} spends Fate: ${f.name} HYPERJUMPS.`;
   }
   emit({ k: 'fate', pulse, owner: p, use, ...(fid !== undefined ? { fleet: fid } : {}), ...(rid !== undefined ? { region: rid } : {}), text, left: pl.fate });
-  beat(s, { kind: 'fate', text: headline(s, 'fate', { a: pl.name, x: text.replace(/^.*?spends Fate: /, '').replace(/\.$/, '') }), region: rid, players: [p], drama: use === 'laststand' || use === 'rally' ? 6 : 4, public: true });
-  s.chronicle.push({ turn: s.turn, players: [p], region: rid, text });
+  beat(s, { kind: 'fate', text: headline(s, 'fate', { a: pl.name, x: text.replace(/^.*?spends Fate: /, '').replace(/\.$/, '') }), ...(rid !== undefined ? { region: rid } : {}), players: [p], drama: use === 'laststand' || use === 'rally' ? 6 : 4, public: true });
+  s.chronicle.push({ turn: s.turn, players: [p], ...(rid !== undefined ? { region: rid } : {}), text });
 }
 
 // ------------------------------------------------------------------ reveals
@@ -288,8 +298,9 @@ export function sigRound(s: GameState, rng: Rng, region: Region, E: Engagement |
     const u = fateOf(s, f);
     if ((u === 'laststand' || u === 'twist') && f.owner >= 0 && !(E.fate ??= []).includes(f.owner)) E.fate.push(f.owner);
   }
-  // world postures of the system's owner
-  const w = region.owner !== null ? wpostureOf(s, region) : null;
+  // world postures of the system's owner (a border clash, with no engagement, is not an assault on the system)
+  const clash = !E;
+  const w = region.owner !== null && !clash ? wpostureOf(s, region) : null;
   if (w && region.wposture && !region.wposture.outcome) {
     const owner = region.owner!;
     const attackers = active.filter(x => hostileP(s, x.owner, owner));
@@ -312,9 +323,9 @@ export function sigRound(s: GameState, rng: Rng, region: Region, E: Engagement |
     const x = fx(s, f);
     if (x.outcome) continue;
     const foes = foesOf(f);
-    const garFoe = region.garrison > 0 && (region.owner === null ? f.siege === region.id : hostileP(s, region.owner, f.owner));
+    const garFoe = !clash && region.garrison > 0 && (region.owner === null ? f.siege === region.id : hostileP(s, region.owner, f.owner));
     if (!foes.length && !garFoe) continue;
-    const withP = [...foes.map(y => y.owner), ...(region.owner !== null && hostileP(s, region.owner, f.owner) ? [region.owner] : [])].filter((q): q is number => q >= 0);
+    const withP = [...foes.map(y => y.owner), ...(garFoe && region.owner !== null ? [region.owner] : [])].filter((q): q is number => q >= 0);
     if (P === 'running') {
       revealPosture(s, f, 'caught', pulse, emit, { with: withP, text: `${f.name} was caught Running at ${region.name}: strung out, it can't fire its first round and takes heavier damage.`, beat: 'p_caught', drama: 3 });
       hl(`${f.name} is caught strung out on the run.`);
@@ -332,11 +343,13 @@ export function sigRound(s: GameState, rng: Rng, region: Region, E: Engagement |
       } else revealPosture(s, f, 'none', pulse, emit, { private: true });
     } else if (P === 'charge') {
       if (f.siege !== region.id) continue;   // only the assault itself decides a charge
-      const braced = foes.some(y => postureOf(s, y) === 'guarded' && !fxNow(s, y)?.moved)
-        || (w === 'levies' && region.owner !== null && hostileP(s, region.owner, f.owner) && region.garrison > 0)
-        || ((region.owner === null && region.garrison > 0) || foes.some(y => y.owner === -1)) && rng.chance(S.neutralBraceChance);
-      if (braced) {
+      // who braced: they (and only they) get the free first volley of the broken charge
+      const by = new Set<Owner>(foes.filter(y => postureOf(s, y) === 'guarded' && !fxNow(s, y)?.moved).map(y => y.owner));
+      if (w === 'levies' && region.owner !== null && hostileP(s, region.owner, f.owner) && region.garrison > 0) by.add(region.owner);
+      if (!by.size && ((region.owner === null && region.garrison > 0) || foes.some(y => y.owner === -1)) && rng.chance(S.neutralBraceChance)) by.add(-1);
+      if (by.size) {
         x.broken = true;
+        (x as FxX).bracedBy = [...by];
         revealPosture(s, f, 'caught', pulse, emit, { with: withP, text: `${f.name}'s CHARGE broke on braced defences at ${region.name}: the defenders fire first and it loses its first round.`, beat: 'p_broken', drama: 5 });
         hl(`BROKEN CHARGE: ${f.name} runs onto braced guns.`);
       } else {
@@ -348,6 +361,11 @@ export function sigRound(s: GameState, rng: Rng, region: Region, E: Engagement |
 }
 const roundsOf = (s: GameState, f: Fleet) => fxNow(s, f)?.rounds ?? 0;
 const brokenChargeNow = (s: GameState, f: Fleet) => postureOf(s, f) === 'charge' && !!fxNow(s, f)?.broken && roundsOf(s, f) === 0;
+/** Did `owner` brace against this broken charge (a Guarded fleet, the Levies, a neutral garrison / the Warden)? */
+const bracedAgainst = (s: GameState, c: Fleet, owner: Owner) => {
+  const by = (fxNow(s, c) as FxX | null)?.bracedBy;
+  return by ? by.includes(owner) : hostileP(s, c.owner, owner);   // (saves from before bracedBy: any foe)
+};
 /** Can this unit (fleet ship, or the garrison when f is null) fire this round? */
 export function sigCanFire(s: GameState, f: Fleet | null, region: Region): boolean {
   if (!sigOn(s)) return true;
@@ -365,7 +383,7 @@ export function sigCanFire(s: GameState, f: Fleet | null, region: Region): boole
 export function sigFirst(s: GameState, f: Fleet | null, owner: Owner, active: Fleet[]): boolean {
   if (!sigOn(s)) return false;
   // the defenders of a broken charge get a free first volley
-  if (active.some(c => hostileP(s, c.owner, owner) && brokenChargeNow(s, c))) return true;
+  if (active.some(c => hostileP(s, c.owner, owner) && brokenChargeNow(s, c) && bracedAgainst(s, c, owner))) return true;
   if (!f || roundsOf(s, f) > 0) return false;
   const P = postureOf(s, f), x = fxNow(s, f);
   if (x?.outcome !== 'called') return false;

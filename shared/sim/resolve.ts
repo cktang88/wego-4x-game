@@ -77,6 +77,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     // sworn words only stay attached to offers that can still be answered
     for (const p of s.players) if (p.pactWords) for (const k of Object.keys(p.pactWords)) if (!(p.prevPactOffers ?? []).includes(Number(k))) delete p.pactWords[Number(k)];
     s.cycleStartOwners = s.regions.map(r => r.owner);
+    if (live) s.cycleFought = []; else delete s.cycleFought;
     s.concealed = [];
   }
   const ts = s.turnStats;
@@ -578,7 +579,10 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         // Signature: Guarded −1 / Running +2 steps; a Hyperjump adds its steps
         const steps = Math.max(1, fleetSpeed(s, f)) + (rt.overdrive ? R.overdrive.speedBonus : 0) + (sig ? postureSpeed(s, f) + (hasHyperjump(s, f) ? SG(s).hyperjumpSteps : 0) : 0);
         if (steps <= 0) continue;
-        const path = rt.path.slice(0, steps);
+        // Signature: a Guarded fleet can't attack, so a standing Seize halts one step short of its target
+        const guardStop = sig && rt.seize !== null && postureOf(s, f) === 'guarded' ? rt.path.length - 1 : rt.path.length;
+        const path = rt.path.slice(0, Math.min(steps, guardStop));
+        if (!path.length) continue;
         movers.push({ f, path, idx: 0, seize: path.length === rt.path.length ? rt.seize : null, p: f.owner, o: synth, dest: rt.path[rt.path.length - 1] });
         f.fortified = false;
       }
@@ -592,10 +596,11 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         // a route always continues from where the fleet is; if something moved it off its course, it stops
         if (!moveNeighbors(s, f.owner, f.region).includes(rt.path[0])) { f.route = null; continue; }
         if (sig && isDugIn(s, f)) continue;
+        if (sig && rt.seize !== null && rt.path.length === 1 && postureOf(s, f) === 'guarded') continue;   // Guarded: no assault this cycle
         // Signature: a Hyperjump takes its extra steps at once, on the first tick it can
         if (sig && hasHyperjump(s, f) && !fx(s, f).jumped) {
           fx(s, f).jumped = true;
-          const path = rt.path.slice(0, 1 + SG(s).hyperjumpSteps);
+          const path = rt.path.slice(0, Math.min(1 + SG(s).hyperjumpSteps, rt.seize !== null && postureOf(s, f) === 'guarded' ? rt.path.length - 1 : rt.path.length));
           rt.mp = 0;
           movers.push({ f, path, idx: 0, seize: path.length === rt.path.length ? rt.seize : null, p: f.owner, o: synth, dest: rt.path[rt.path.length - 1] });
           f.fortified = false;
@@ -1017,7 +1022,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   maybeWakeWarden(s, rng, endPulse, emit);
   if (soul) {
     soulReigns(s, endPulse, emit);
-    soulEndTurn(s, endPulse, emit, fought);
+    // LIVE: everyone who fought in any tick of the cycle (not just this last one)
+    soulEndTurn(s, endPulse, emit, live ? new Set([...(s.cycleFought ?? []), ...fought]) : fought);
   }
   // Signature: undecided bets resolve (dug in, exposed, idle levies...), postures clear, comeback Fate
   if (sig) sigEndTurn(s, endPulse, emit);
@@ -1057,9 +1063,30 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   // ---- victory (LIVE: the turn limit only expires when the cycle ends, not on its first tick)
   checkVictory(s, endCycle);
 
+  // LIVE: fleets that fought this tick count for the whole cycle (Grudge sulks, honours... at its end)
+  if (live && soul && !endCycle) { const cf = (s.cycleFought ??= []); for (const id of fought) if (!cf.includes(id)) cf.push(id); }
+  if (live && endCycle) delete s.cycleFought;
+  // fog for the Herald: what each house's sensors covered during this step
+  const stepCov = soul && (live || endCycle) ? s.players.map(p => { const c = coverage(s, p.id); for (const x of covStart[p.id]) c.add(x); return c; }) : null;
+  if (live && stepCov && s.soul) {
+    // LIVE: a beat is witnessed by whoever covered its region on the tick it happened, not on the cycle's last tick
+    const sb = (players: PlayerId[], region: RegionId | undefined) => s.players.filter(p => players.includes(p.id) || (region !== undefined && stepCov[p.id].has(region))).map(p => p.id);
+    for (const b of s.soul.beats) if (!b.public && !b.seenBy) b.seenBy = sb(b.players, b.region);
+    for (const r of s.soul.fallen) if (r.fateTurn === s.turn && !r.seenBy) r.seenBy = sb([r.owner], r.fateRegion);
+  }
   if (endCycle) {
     // the Herald goes to press (fog: each headline remembers who could see it)
-    if (soul) makeEdition(s, s.players.map(p => { const c = coverage(s, p.id); for (const x of covStart[p.id]) c.add(x); return c; }));
+    if (stepCov) {
+      const pending = live ? (s.soul?.beats ?? []).slice() : [];
+      const marks = pending.map(b => b.seenBy);
+      makeEdition(s, stepCov);
+      // LIVE: keep the per-tick witnesses stamped above (makeEdition recomputes them from this tick alone)
+      pending.forEach((b, i) => { if (!b.public) b.seenBy = marks[i]; });
+      if (pending.length && s.soul) for (const m of s.soul.moments) {
+        const b = pending.find(x => !x.public && `T${s.turn}: ${x.text}` === m.text && x.kind === m.kind && x.region === m.region);
+        if (b) m.seenBy = b.seenBy;
+      }
+    }
     s.scans = s.scans.filter(x => x.until > s.turn);
     // per-turn counters start fresh for the next turn's planning (research limit, revoke/enact switching cost)
     for (const p of s.players) { p.researched = 0; p.revokedThisTurn = []; }
@@ -1179,7 +1206,7 @@ export function cleanFree(fa: unknown): FreeAction | null {
     }
     case 'honour': return typeof fa.pick === 'string' && fa.pick.length < 32 || isId(fa.pick) ? { type: 'honour', fleet: fa.fleet, pick: fa.pick as string | number } : null;
     case 'merge': return isId(fa.into) ? { type: 'merge', fleet: fa.fleet, into: fa.into } : null;
-    case 'rename': return typeof fa.name === 'string' ? { type: 'rename', fleet: fa.fleet, name: fa.name.slice(0, 40) } : null;
+    case 'rename': { const name = cleanText(fa.name, 40); return name ? { type: 'rename', fleet: fa.fleet, name } : null; }
   }
   return null;
 }
@@ -1295,7 +1322,7 @@ function applyFree(s: GameState, rng: Rng, p: PlayerId, fa: Submission['free'][n
       if (f.doctrine.stance === 'evasive' && hasBane(s, f, 'reckless')) f.doctrine.stance = 'defensive';   // a Reckless fleet never runs
       return null;
     }
-    case 'rename': f.name = String(fa.name).slice(0, 40) || f.name; return null;
+    case 'rename': f.name = cleanText(fa.name, 40) || f.name; return null;   // no control characters or markup in names (they reach the Saga)
     case 'split': {
       const ids = new Set(fa.ships);
       const moving = f.ships.filter(x => ids.has(x.id));
@@ -1338,6 +1365,8 @@ function applyFree(s: GameState, rng: Rng, p: PlayerId, fa: Submission['free'][n
       const into = s.fleets.find(x => x.id === fa.into && x.owner === p);
       if (!into || into === f) return 'no such target fleet';
       if (into.region !== f.region) return 'fleets must be in the same region';
+      // a limping fleet can't hide in a healthy one (or take one with it): no dodging the catch or the next rout
+      if (soulOn(s) && (f.limping || into.limping)) return 'a limping fleet cannot merge';
       if (into.ships.length + f.ships.length > s.rules.maxShipsPerFleet) return `fleet would exceed ${s.rules.maxShipsPerFleet} ships`;
       if (soulOn(s) && !into.banner && f.ships.some(x => x.cls !== 'scout')) return 'a picket carries only scouts: merge it into a bannered fleet instead';
       into.ships.push(...f.ships);

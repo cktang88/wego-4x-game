@@ -27,7 +27,7 @@ import { LAW, LAWS } from '../config/empire.ts';
 import { soulFree, soulCands, aiFoundSpec } from './ai-soul.ts';
 import { hasBane } from './soul.ts';
 import { sigFree, readRivals, braceChance } from './ai-signature.ts';
-import { isDugIn, sigOn, posturesOn, isExposed, SG } from './signature.ts';
+import { isDugIn, sigOn, posturesOn, isExposed, SG, postureOf } from './signature.ts';
 import { soulOn, soulHit, hasBoon } from './soul.ts';
 import { traitFx } from './shiptraits.ts';
 
@@ -255,8 +255,16 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
   }
   function isFleetOrder(o: Order): o is Extract<Order, { fleet: number }> { return 'fleet' in o && o.type !== 'build'; }
   /** What the resolver will charge for this order in its pulse: its cost, plus the repeat-fleet fee. */
+  // one-step WEGO runs the economy (build / develop / excavate) BEFORE laws are enacted: a law slotted
+  // earlier this turn (Industrial's ship discount) must not cheapen this turn's builds in the projection
+  function costOf(o: Order) {
+    if (!oneStep || live || (o.type !== 'build' && o.type !== 'develop' && o.type !== 'excavate')) return orderCost(s, o, pid);
+    const m = me0(), now = m.laws;
+    m.laws = me.laws ?? [];   // the caller's state: laws as the turn starts
+    try { return orderCost(s, o, pid); } finally { m.laws = now; }
+  }
   function slotCost(o: Order) {
-    const c = { ...orderCost(s, o, pid) };
+    const c = { ...costOf(o) };
     const fees = (isFleetOrder(o) && (fleetUses.get(o.fleet) ?? 0) > 0 ? 1 : 0) +
       (o.type === 'seize' ? (o.also ?? []).filter(id => (fleetUses.get(id) ?? 0) > 0).length : 0);
     if (fees) c.credits = (c.credits ?? 0) + fees * R.orders.repeatFleetCredits;
@@ -268,7 +276,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
     if (o.type === 'move' || o.type === 'seize') return true;
     const fee = isFleetOrder(o) && (fleetUses.get(o.fleet) ?? 0) > 0 ? R.orders.repeatFleetCredits : 0;
     const res = { ...me0().res, credits: me0().res.credits - fee };
-    return canAfford(res, orderCost(s, o, pid), creditRate(s, pid));
+    return canAfford(res, costOf(o), creditRate(s, pid));
   }
   function project(o: Order) {
     pay(me0().res, slotCost(o), creditRate(s, pid));
@@ -328,7 +336,12 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
       else {
         // a new fleet: it can't act this turn (negative id keeps it out of myFleets) but it counts toward maxFleets
         const base = myFleets()[0] ?? s.fleets.find(x => x.owner === pid);
-        if (base) s.fleets.push({ ...structuredClone(base), id: -1 - slot(), region: o.region, ships: [sh], bornTurn: s.turn, siege: null, route: null, fortified: false, ordersThisTurn: 0 });
+        // it flies a banner exactly when the resolver would raise one (so a second founding sees the slot taken),
+        // and none of the template fleet's soul state (a picket template has no banner; a limping one would mislead)
+        const banner = soulOn(s) && (o.cls !== 'scout' || o.found)
+          ? { sigil: '', boons: o.found?.boons ?? [], banes: o.found?.banes ?? [], home: o.region, foundedTurn: s.turn } : null;
+        if (base) s.fleets.push({ ...structuredClone(base), id: -1 - slot(), region: o.region, ships: [sh], bornTurn: s.turn, siege: null, route: null, fortified: false, ordersThisTurn: 0,
+          banner, limping: null, vow: null, scars: [], posture: null });
       }
     }
   }
@@ -708,7 +721,9 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
       const hidden = cap.neighbors.find(n => s.regions[n].feature === 'nebula' && s.regions[n].owner !== pid);
       if (hidden !== undefined && threatened.size) out.push({ o: { type: 'scan', target: hidden }, v: 1.5, tag: 'scan' });
     }
-    return out;
+    // Signature (LIVE mid-cycle): a fleet already Guarded this cycle holds its ground; the resolver refuses its seizes
+    const guarded = (id: number) => { const g = s.fleets.find(x => x.id === id); return !!g && postureOf(s, g) === 'guarded'; };
+    return out.filter(c => c.o.type !== 'seize' || (!guarded(c.o.fleet) && !(c.o.also ?? []).some(guarded)));
   }
 
   // ---------------------------------------------------------------- moves (standard: opportunity + battle check; expert: everything)
@@ -828,7 +843,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
   function expertBuild(r: Region, need: number, joinable: Fleet | undefined, mainArmy: Fleet | undefined): { cls: string; v: number } | null {
     const yard = r.buildings.shipyard ?? 0;
     const res = me0().res;
-    const ok = (c: string) => R.ships[c] && R.ships[c].needsShipyard <= yard && canField(s, pid, c) && canAfford(res, orderCost(s, { type: 'build', region: r.id, cls: c, fleet: null }, pid), creditRate(s, pid));
+    const ok = (c: string) => R.ships[c] && R.ships[c].needsShipyard <= yard && canField(s, pid, c) && canAfford(res, costOf({ type: 'build', region: r.id, cls: c, fleet: null }), creditRate(s, pid));
     const army = mainArmy ? mainArmy.ships : [];
     const bombards = army.filter(x => (R.ships[x.cls]?.siege ?? 0) >= 5).length;
     // a hard nut within reach of the army (fortified capitals, crowns, the Throne) wants siege hulls

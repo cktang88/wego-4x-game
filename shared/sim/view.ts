@@ -107,6 +107,7 @@ export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
     return cov.has(c.region) || (!!lastSeen && c.turn === s.last?.turn && lastSeen.has(c.region));
   });
   v.edictDeck = [];
+  delete v.cycleFought;   // internal LIVE bookkeeping: who fought where you may not have seen
   if (v.soul) {
     // the Herald respects fog: public headlines, ones about you, and ones your sensors covered; dispatches are public once printed
     v.soul.beats = [];
@@ -221,7 +222,9 @@ function filterResult(s: GameState, r: TurnResult, p: PlayerId, endCov: Set<Regi
   const battleIds = new Set(events.filter(e => e.k === 'battle').map(e => (e as { battle: number }).battle));
   // Ghosts stay hidden in replays too (Conspicuous and limping fleets are seen anyway)
   const ghostOk = (f: Fleet) => !f.banner?.boons.includes('ghosts') || seesFleet(startState, p, f);
-  const startFleets = structuredClone((r.startFleets ?? []).filter(f => f.owner === p || (seesAtStart(f.region) && ghostOk(f))));
+  // ambushers stay hidden too, unless p shares their system or scans it
+  const ambushOk = (f: Fleet) => f.posture !== 'ambush' || postureSeenBy({ ...startState, scans: s.scans }, p, f);
+  const startFleets = structuredClone((r.startFleets ?? []).filter(f => f.owner === p || (seesAtStart(f.region) && ghostOk(f) && ambushOk(f))));
   for (const f of startFleets) if (f.owner !== p) maskRivalFleet(f, !!s.live);
   const seen = new Set<RegionId>();
   for (const rid of cov) if (sees(rid)) seen.add(rid);

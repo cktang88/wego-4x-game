@@ -3,7 +3,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
-import { createGame, resolveTurn, planTurn, viewFor, emptySubmission, defaultRules, isObj, mergeRules, makeLive, advanceTo, queueOrder, cancelQueued, queueFree, haltOrder, nextTickAt, tickMs, orderMs, LIVE_SPEEDS, cleanOrder, cleanFree } from '../shared/index.ts';
+import { createGame, resolveTurn, planTurn, viewFor, emptySubmission, defaultRules, isObj, upgradeRules, makeLive, advanceTo, queueOrder, cancelQueued, queueFree, haltOrder, nextTickAt, tickMs, orderMs, LIVE_SPEEDS, cleanOrder, cleanFree } from '../shared/index.ts';
 import type { GameState, Submission, TurnResult, PlayerView } from '../shared/index.ts';
 import type { ChatMsg, CreateGameReq, GameMeta, SeatInfo } from '../shared/protocol.ts';
 import { spectatorView } from './history.ts';
@@ -128,6 +128,33 @@ export function validateSubmission(sub: unknown, perTurn: number): Submission {
   return clean as Submission;
 }
 
+/**
+ * Private details spectatorView (history.ts) leaves in: everything viewFor hides from a rival seat must be
+ * hidden from a token-less tab too, or any player could open one and read it.
+ * Mutates the (already private) spectator copy.
+ */
+function scrubSpectator(v: PlayerView): PlayerView {
+  const s = v.state;
+  for (const pl of s.players) {
+    pl.prevPactOffers = [];                  // who courted whom is for the addressee
+    delete pl.pactWords;                     // sworn words: addressee only
+    if (pl.tributeOffers) pl.tributeOffers = [];       // Tribute terms: the besieged owner only
+    if (pl.prevTributeOffers) pl.prevTributeOffers = [];
+  }
+  for (const r of s.regions) {
+    if (r.story) r.story.pendingCalling = null;        // a pending choice is its owner's
+    delete r.wposture; delete r.idleUntil;              // world postures are secret
+  }
+  if (s.soul) {
+    s.soul.beats = [];                                  // internal material for the next edition
+    s.soul.dispatches = [];                             // unprinted dispatches (printed ones are in the Herald)
+    s.soul.herald = s.soul.herald.map(ed => ({ ...ed, headlines: ed.headlines.filter(h => h.public) }));
+    s.soul.moments = s.soul.moments.filter(h => h.public);
+    s.soul.fallen = s.soul.fallen.filter(r => r.public);
+  }
+  return v;
+}
+
 function looksLikeGame(g: any, file: string): g is StoredGame {
   return isObj(g) && typeof g.id === 'string' && ID_RE.test(g.id) && `${g.id}.json` === file
     && Array.isArray(g.seats) && g.seats.length === 3 && isObj(g.state) && Array.isArray((g.state as any).players);
@@ -146,8 +173,8 @@ export class Store {
         const g = JSON.parse(readFileSync(join(dir, f), 'utf8'));
         if (!looksLikeGame(g, f)) throw new Error('not a valid game file');
         g.chat ??= []; g.history ??= []; g.pending ??= {};
-        // games saved before newer rule groups existed: fill missing knobs from defaults
-        g.state.rules = mergeRules(defaultRules(), g.state.rules);
+        // games saved before newer rule groups existed: fill missing knobs from defaults (opt-in layers stay off)
+        g.state.rules = upgradeRules(g.state.rules);
         // ...and state fields added later
         g.state.engagements ??= [];
         g.state.chronicle ??= [];
@@ -326,7 +353,7 @@ export class Store {
     if (g.state.winner !== null) return { ...viewFor(g.state, null), you: seat };
     // spectators of a running game get only public information, never the omniscient view
     // (otherwise any player could open a token-less tab and see through the fog)
-    if (seat === null) return spectatorView(g.state);
+    if (seat === null) return scrubSpectator(spectatorView(g.state));
     return viewFor(g.state, seat);
   }
 

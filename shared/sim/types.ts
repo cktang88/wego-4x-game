@@ -493,6 +493,7 @@ export interface GameState {
   mode?: 'wego' | 'live';
   live?: LiveState;
   cycleStartOwners?: (PlayerId | null)[];  // LIVE: owners when the current cycle began (for "held all turn" scoring)
+  cycleFought?: FleetId[];                 // LIVE (Soul): fleets that fought in an earlier tick of this cycle (internal; not in views)
   concealed?: PlayerId[];                  // players concealing this turn/cycle
   throne: { owner: PlayerId | null; streak: number };
   crownHold: { owner: PlayerId | null; turns: number };

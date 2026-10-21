@@ -343,3 +343,70 @@ describe('systems interplay (reported by the systems sweep)', () => {
     expect(n.fleets.find(x => x.owner === -1)!.region).toBe(best![0]);
   });
 });
+
+describe('soul interplay (reported by the soul sweep)', () => {
+  it('rename: control characters and markup never reach a fleet name', () => {
+    const s = game();
+    const f = s.fleets.find(x => x.owner === 0)!;
+    const n = turn(s, 0, [], [{ type: 'rename', fleet: f.id, name: 'Iron\u0007 <b>Wolves</b>‮' }]);
+    const name = n.fleets.find(x => x.id === f.id)!.name;
+    expect(name).not.toMatch(/[<>\u0000-\u001f‮]/);
+    expect(name).toContain('Iron');
+    // a name that cleans to nothing is ignored
+    const m = turn(s, 0, [], [{ type: 'rename', fleet: f.id, name: '\u0001\u0002' }]);
+    expect(m.fleets.find(x => x.id === f.id)!.name).toBe(f.name);
+  });
+
+  it('merge: a limping fleet can neither merge into a healthy one nor be joined by one', () => {
+    const s = game();
+    const cap = s.players[0].capital;
+    const a = fleetAt(s, 0, cap, ['frigate']), b = fleetAt(s, 0, cap, ['frigate']);
+    for (const g of [a, b]) g.banner = { sigil: 'x', boons: [], banes: [], home: cap, foundedTurn: 1 };
+    a.limping = { since: 1, to: cap, by: 1 };
+    for (const [f, into] of [[a, b], [b, a]]) {
+      const n = turn(s, 0, [], [{ type: 'merge', fleet: f.id, into: into.id }]);
+      expect(n.fleets.some(x => x.id === f.id)).toBe(true);
+      expect(n.last!.events.some(e => e.k === 'fail' && e.text.includes('limping fleet cannot merge'))).toBe(true);
+    }
+  });
+
+  it('LIVE: a Grudge-bound fleet that fought earlier in the cycle does not sulk at its end', () => {
+    let s = makeLive(game(), 0, 360);
+    s.rules.live.ticksPerCycle = 2;
+    const R = s.regions.find(r => r.kind === 'colony' && r.owner === null && (r.links ?? r.neighbors).some(n => s.regions[n].kind === 'colony' && s.regions[n].homeOf === null))!;
+    const N = (R.links ?? R.neighbors).find(n => s.regions[n].kind === 'colony' && s.regions[n].homeOf === null)!;
+    R.garrison = 0; R.baseGarrison = 0;
+    s.regions[N].owner = 1;
+    const f = fleetAt(s, 0, R.id, ['cruiser', 'cruiser', 'cruiser']);
+    f.banner = { sigil: 'x', boons: [], banes: ['grudgebound'], grudgeVs: 1, home: s.players[0].capital, foundedTurn: 1 };
+    const e = fleetAt(s, 2, R.id, ['scout']);
+    e.ships[0].hp = 1; e.doctrine.retreatAt = 0; f.doctrine.stance = 'aggressive';
+    s = runTick(s, () => false);                       // tick 1 of 2: the fight
+    expect(s.fleets.some(x => x.id === e.id)).toBe(false);
+    expect(s.cycleFought).toContain(f.id);
+    expect(viewFor(s, 1).state.cycleFought).toBeUndefined();
+    s = runTick(s, () => false);                       // tick 2: the cycle ends, no fight this tick
+    expect(s.fleets.find(x => x.id === f.id)!.sulkUntil ?? null).toBeNull();
+    expect(s.cycleFought).toBeUndefined();
+  });
+
+  it('LIVE Herald: a beat is witnessed by whoever covered it on its own tick, not on the last tick of the cycle', () => {
+    let s = makeLive(game(), 0, 360);
+    s.rules.live.ticksPerCycle = 2;
+    const R = s.regions.find(r => r.kind === 'colony' && r.owner === null && !coverage(s, 1).has(r.id) && !coverage(s, 2).has(r.id))!;
+    R.garrison = 0; R.baseGarrison = 0;
+    const p2 = fleetAt(s, 2, R.id, ['scout']);
+    s.soul!.beats.push({ kind: 'battle', text: 'Something happened out there.', region: R.id, players: [0], drama: 9, public: false });
+    s = runTick(s, () => false);                       // the beat's tick: house 2 is watching
+    s.fleets.find(x => x.id === p2.id)!.region = s.players[2].capital;   // ...then leaves
+    fleetAt(s, 1, R.id, ['scout']);                    // house 1 only arrives afterwards
+    s = runTick(s, () => false);                       // the cycle ends: the Herald prints
+    const h = s.soul!.herald.at(-1)!.headlines.find(x => x.text === 'Something happened out there.')!;
+    expect(h).toBeTruthy();
+    expect(h.seenBy).toContain(2);
+    expect(h.seenBy).not.toContain(1);
+    const seen = (p: number) => viewFor(s, p).state.soul!.herald.at(-1)!.headlines.some(x => x.text === 'Something happened out there.');
+    expect(seen(2)).toBe(true);
+    expect(seen(1)).toBe(false);
+  });
+});
