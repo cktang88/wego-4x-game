@@ -1,0 +1,59 @@
+THREE CROWNS: THIRD-PARTY ASSETS
+================================
+
+Every third-party asset in this game is released under Creative Commons Zero
+(CC0 1.0 Universal, public domain dedication):
+https://creativecommons.org/publicdomain/zero/1.0/
+No attribution is required, but these authors deserve the thanks. Nothing
+under CC-BY, CC-BY-SA, OGA-BY, GPL or any other licence is included, and
+neither are dual-licensed entries.
+
+Full table (original filenames and conversions): docs/ASSETS.md
+
+
+SOUND EFFECTS: Kenney (Kenney Vleugels, www.kenney.nl), CC0
+-----------------------------------------------------------
+Interface Sounds  https://kenney.nl/assets/interface-sounds
+  click_002, tick_002, error_006, confirmation_002, confirmation_003, glass_002
+RPG Audio         https://kenney.nl/assets/rpg-audio
+  metalLatch, metalClick, handleCoins2, cloth1, bookFlip2
+Impact Sounds     https://kenney.nl/assets/impact-sounds
+  impactPlate_heavy_001, impactBell_heavy_000/001/002/003,
+  impactMetal_heavy_000, impactPunch_heavy_000
+Casino Audio      https://kenney.nl/assets/casino-audio
+  chip-lay-1
+Sci-Fi Sounds     https://kenney.nl/assets/sci-fi-sounds
+  thrusterFire_001, laserSmall_000, laserLarge_000, forceField_000,
+  explosionCrunch_000, explosionCrunch_002,
+  lowFrequency_explosion_000, lowFrequency_explosion_001
+
+
+MUSIC AND STINGS: OpenGameArt.org, each entry licensed CC0 only
+---------------------------------------------------------------
+"Epic Endgame Cinematic" by cynicmusic
+  https://opengameart.org/content/epic-endgame-cinematic
+"Victory Fanfare Short" by cynicmusic
+  https://opengameart.org/content/victory-fanfare-short
+"Dark Sci-Fi Audio Pack" (Sector, Airy) by SRG774
+  https://opengameart.org/content/dark-sci-fi-audio-pack
+"String and piano horror stings" (piano sting) by congusbongus
+  https://opengameart.org/content/string-and-piano-horror-stings
+"Medieval: Defeat Theme" by RandomMind
+  https://opengameart.org/content/medieval-defeat-theme
+
+
+TEXTURES: ambientCG (Lennart Demes, ambientcg.com), CC0
+-------------------------------------------------------
+Wood 051     https://ambientcg.com/view?id=Wood051
+Fabric 034   https://ambientcg.com/view?id=Fabric034
+Metal 009    https://ambientcg.com/view?id=Metal009
+Metal 011    https://ambientcg.com/view?id=Metal011
+Paper 003    https://ambientcg.com/view?id=Paper003
+Leather 030  https://ambientcg.com/view?id=Leather030
+
+
+FONTS
+-----
+Cinzel, IM Fell English, UnifrakturMaguntia, Orbitron and Rajdhani are
+served by Google Fonts under the SIL Open Font License 1.1. They are not
+bundled here.
