@@ -311,13 +311,43 @@ export function drawStar(g: CanvasRenderingContext2D, x: number, y: number, r: n
   g.drawImage(s.img, x - (s.size * k) / 2, y - (s.size * k) / 2, s.size * k, s.size * k);
 }
 
-// ------------------------------------------------------------------ region → body (until shared/ has star + bodies)
-export interface RegionLike { id: number; kind: string; name: string; trait?: string | null; dev: number; feature?: string; star?: string; bodies?: { type?: string }[] }
-/** What to paint for a region today: a primary body, or a star for the Throne and relic sites. Deterministic. */
+// ------------------------------------------------------------------ region → body
+export interface BodyLike { kind: string; q?: string; adj?: string; name?: string }
+export interface RegionLike { id: number; kind: string; name: string; trait?: string | null; dev: number; feature?: string; star?: string; bodies?: BodyLike[] }
+const HAB_ART: Record<string, WorldType> = {
+  garden: 'garden', jungle: 'garden', temperate: 'terran', ocean: 'ocean', archipelago: 'ocean', steppe: 'terran', savanna: 'desert',
+  desert: 'desert', tundra: 'ice', arid: 'desert', ice: 'ice', toxic: 'toxic', dust: 'barren', cinder: 'ash',
+};
+/** The world type a system body is painted as (null: not a sphere, e.g. a belt or a ruin). */
+export function bodyWorldType(b: BodyLike, regionKind = '', regionName = ''): WorldType | null {
+  switch (b.kind) {
+    case 'habitable':
+      if (regionKind === 'crown') return /ash/i.test(regionName) ? 'ash' : /glass/i.test(regionName) ? 'crystal' : /thorn/i.test(regionName) ? 'thorn' : 'garden';
+      if (regionKind === 'home') return 'terran';
+      return HAB_ART[b.adj ?? ''] ?? 'terran';
+    case 'barren': return b.q === 'rich' ? 'lava' : 'barren';
+    case 'gas': return 'gas';
+    case 'moon': return 'ice';
+    default: return null;
+  }
+}
+/** What to paint for a region: its star (Throne, relic sites, systems with no world) or its primary world and a moon. Deterministic. */
 export function regionArt(r: RegionLike, seed = 0): { star?: StarType; body?: Body; moon?: Body } {
   const s = (strHash(r.name) ^ (r.id * 2654435761) ^ seed) >>> 0;
-  if (r.kind === 'void' || r.kind === 'lane') return {};
+  if (r.kind === 'lane') return {};
   if (r.kind === 'throne') return { star: 'throne' };
+  if (r.bodies && r.star) {
+    // star systems: the first paintable body (habitable first) is the primary; a second sphere is its moon
+    const order = r.bodies.slice().sort((a, b) => (a.kind === 'habitable' ? 0 : 1) - (b.kind === 'habitable' ? 0 : 1));
+    const prim = r.kind === 'relic' ? undefined : order.find(b => bodyWorldType(b, r.kind, r.name));
+    if (!prim) return r.kind === 'void' && !r.bodies.length ? {} : { star: (r.star === 'yellow' ? 'yellow' : r.star) as StarType };
+    const type = bodyWorldType(prim, r.kind, r.name)!;
+    const body: Body = { type, seed: s % 100000, dev: Math.max(0, Math.min(5, r.dev)), ring: type === 'gas' || (type === 'ice' && s % 5 === 0), hue: s % 4 };
+    const m = order.find(b => b !== prim && bodyWorldType(b, r.kind, r.name));
+    const moon: Body | undefined = m ? { type: bodyWorldType(m, r.kind, r.name)!, seed: (s >> 3) % 100000, hue: (s >> 5) % 4 } : undefined;
+    return { body, moon };
+  }
+  if (r.kind === 'void') return {};
   if (r.kind === 'relic') return { star: s % 2 ? 'blackhole' : 'pulsar', body: { type: 'barren', seed: s, dev: 0 } };
   let type: WorldType;
   if (r.kind === 'crown') type = /ash/i.test(r.name) ? 'ash' : /glass/i.test(r.name) ? 'crystal' : /thorn/i.test(r.name) ? 'thorn' : 'garden';

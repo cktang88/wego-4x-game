@@ -4,8 +4,9 @@ import type { Rules } from '../config/rules.ts';
 import { REGION_NAMES, CROWN_NAMES, THRONE_NAME } from '../config/content.ts';
 import { Rng, hashString } from './rng.ts';
 import type { Pt, Region, RegionKind, Feature } from './types.ts';
+import { planSystem, nameBodies, type SystemPlan } from './systems.ts';
 
-interface Site { p: Pt; kind: RegionKind; feature: Feature; garrisonRoll: number; wedge: number; relic: boolean; trait?: string | null; vein?: string | null }
+interface Site { p: Pt; kind: RegionKind; feature: Feature; garrisonRoll: number; wedge: number; relic: boolean; trait?: string | null; vein?: string | null; sys?: SystemPlan }
 
 const rot = (p: Pt, a: number): Pt => ({ x: p.x * Math.cos(a) - p.y * Math.sin(a), y: p.x * Math.sin(a) + p.y * Math.cos(a) });
 const polar = (r: number, a: number): Pt => ({ x: r * Math.cos(a), y: r * Math.sin(a) });
@@ -80,8 +81,15 @@ function tryGenerate(rules: Rules, seed: number, strict: boolean): GeneratedMap 
     }
   }
 
+  // ---- star systems: a star and up to 3 bodies per site (own RNG stream, so geometry and every old field are unchanged)
+  {
+    const srng = new Rng((seed ^ 0x5157e115) >>> 0);
+    let relicIdx = 0;
+    for (const t of tmpl) t.sys = planSystem(srng, t, t.kind === 'relic' ? relicIdx++ : 0);
+  }
+
   // ---- realise all sites (throne + 3 rotated wedges)
-  const sites: Site[] = [{ p: { x: 0, y: 0 }, kind: 'throne', feature: 'none', garrisonRoll: 1, wedge: -1, relic: false }];
+  const sites: Site[] = [{ p: { x: 0, y: 0 }, kind: 'throne', feature: 'none', garrisonRoll: 1, wedge: -1, relic: false, sys: planSystem(new Rng(0), { kind: 'throne', feature: 'none' }, 0) }];
   // interleave wedges (ids 1,2,3 = same template slot in wedges 0,1,2) so id-order tie-breaks don't favour a wedge
   for (const t of tmpl) for (let w = 0; w < 3; w++) sites.push({ ...t, p: rot(rot(t.p, base), w * W), wedge: w });
 
@@ -170,6 +178,7 @@ function tryGenerate(rules: Rules, seed: number, strict: boolean): GeneratedMap 
       owner: null, homeOf: null, dev: s.kind === 'void' ? 0 : 1, buildings: {}, project: null, garrison,
       loyalty: [0, 0, 0], relic: s.relic ? 'unclaimed' : null, wreckage: 0, battles: 0, heldSince: 0,
       memorials: [], baseGarrison: garrison, trait: s.trait ?? null, vein: s.vein ?? null,
+      ...(s.sys ? { star: s.sys.star, bodies: nameBodies(s.sys, name, s.kind, seed, i) } : {}),
     } as Region;
   });
   const homes = [0, 1, 2].map(w => sites.findIndex(s => s.kind === 'home' && s.wedge === w));

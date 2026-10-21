@@ -8,6 +8,7 @@ import { creditRate } from './resolve.ts';
 import { within } from './graph.ts';
 import type { Rng } from './rng.ts';
 import type { FreeAction, GameState, Order, PlayerId, Region } from './types.ts';
+import { stationUnblocks, aiSiteBonus } from './systems.ts';
 
 export type Style = 'warlord' | 'turtle' | 'trader' | 'raider';
 export const STYLES: Style[] = ['warlord', 'turtle', 'trader', 'raider'];
@@ -121,7 +122,10 @@ export function empireCands(c: Ctx, myRegions: Region[], mainArmyRegion: number 
   const left = s.rules.victory.turnLimit - s.turn;
   for (const r of myRegions) {
     if (r.project) continue;
-    const add = (key: string, v: number) => out.push({ o: { type: 'develop', region: r.id, project: key }, v, tag: `dev:${r.id}` });
+    const add = (key: string, v: number) => {
+      out.push({ o: { type: 'develop', region: r.id, project: key }, v: v + aiSiteBonus(s, r, key), tag: `dev:${r.id}` });
+      if (stationUnblocks(s, key, r)) out.push({ o: { type: 'develop', region: r.id, project: 'station' }, v: v * 0.8, tag: `dev:${r.id}` });
+    };
     const threat = threatened.get(r.id) ?? 0;
     if (r.vein && !(r.buildings.extractor ?? 0) && conn.has(r.id)) add('extractor', 4 + (hasVein(s, pid, r.vein, conn) ? -1.5 : 1.5) + (left > 10 ? 0.5 : -2));
     if (r.id === me.capital && left > 8) {

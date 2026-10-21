@@ -43,6 +43,8 @@ const fleetAt = (s: GameState, owner: number, region: number, classes: string[])
   return f;
 };
 const clearMap = (s: GameState) => { s.fleets = s.fleets.filter(f => f.owner < 0); };
+/** Star systems: black holes stop entering fleets (docs/SYSTEMS.md); movement-range tests take them off the map. */
+const noWells = (s: GameState) => { for (const r of s.regions) if (r.star === 'blackhole') r.star = 'pulsar'; };
 const pev = (t: GameState, fleet?: number) => (t.last?.events ?? []).filter((e): e is Extract<GameEvent, { k: 'posture' }> => e.k === 'posture' && (fleet === undefined || e.fleet === fleet));
 const fails = (t: GameState, p: number) => (t.last?.events ?? []).filter(e => e.k === 'fail' && e.owner === p).map(e => (e as { text: string }).text);
 const shipsOf = (f: Fleet) => new Set(f.ships.map(x => x.id));
@@ -103,6 +105,7 @@ describe('postures: Guarded', () => {
 
   it('Guarded moves one step slower', () => {
     const s = game(); clearMap(s);
+    noWells(s);
     const cap = s.players[0].capital;
     const d = bfs(s, cap);
     const far = s.regions.find(r => (d.get(r.id) ?? 0) === 4)!;
@@ -464,6 +467,7 @@ describe('Fate', () => {
   });
   it('Hyperjump: +3 steps, and it slips through a blockade', () => {
     const s = game(); clearMap(s);
+    noWells(s);
     const cap = s.players[0].capital;
     const d = bfs(s, cap);
     const far = s.regions.find(r => (d.get(r.id) ?? 0) === 6)!;

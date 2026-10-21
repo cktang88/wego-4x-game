@@ -4,6 +4,7 @@ import type { Res } from '../config/rules.ts';
 import { TECH, TECHS, LAW, MODULE, type TechDef } from '../config/empire.ts';
 import type { Fleet, GameState, PlayerId, RegionId, Ship } from './types.ts';
 import { traitFx } from './shiptraits.ts';
+import { citizenCap, systemCostMult, systemsBlock, sysOn, worldFx } from './systems.ts';
 
 const on = (s: GameState) => s.rules.empire?.enabled !== false;
 
@@ -230,12 +231,18 @@ export function projectBlock(s: GameState, p: PlayerId, key: string, rid: Region
   if (pd.tech && !hasTech(s, p, pd.tech)) return `needs ${TECH[pd.tech]?.name ?? pd.tech}`;
   if (pd.vein && !r.vein) return 'no vein here';
   if (pd.needs && !hasVein(s, p, pd.needs)) return `needs ${pd.needs === 'crystal' ? '◆ Crystals' : '⚛ Antimatter'} (an Extractor connected to your capital)`;
-  if (key === 'mine' && r.trait === 'gas') return 'gas giants have no surface to mine';
+  // star systems: the citizens cap, body sites, citizen gates and slots (docs/SYSTEMS.md)
+  const sb = systemsBlock(s, key, r);
+  if (sb) return sb;
+  if (key === 'mine' && !sysOn(s) && r.trait === 'gas') return 'gas giants have no surface to mine';
   return null;
 }
+/** The most citizens (development) a system can reach: its citizens cap with star systems, else maxDev (+1 on a Garden). */
 export function maxDevAt(s: GameState, rid: RegionId): number {
   const r = s.regions[rid];
-  return s.rules.economy.maxDev + (on(s) && r?.trait === 'garden' ? s.rules.empire.gardenDevBonus : 0);
+  const cap = r ? citizenCap(s, r) : null;
+  if (cap !== null) return cap;
+  return s.rules.economy.maxDev + (on(s) && r && worldFx(s, r).garden ? s.rules.empire.gardenDevBonus : 0);
 }
 
 // ------------------------------------------------------------------ cost modifiers
@@ -248,11 +255,14 @@ export function shipCostMod(s: GameState, p: PlayerId, cls: string, c: Partial<R
   return c;
 }
 export function projectCostMod(s: GameState, p: PlayerId, key: string, rid: RegionId, c: Partial<Res>): Partial<Res> {
-  if (!on(s) || key !== 'develop') return c;
   const E = s.rules.empire;
-  let m = 1;
-  if (hasLaw(s, p, 'federal')) m *= 1 - E.federalDevelopDiscount;
-  if (s.regions[rid]?.trait === 'garden') m *= 1 - E.gardenDevelopDiscount;
+  const r = s.regions[rid];
+  // star systems: the waystation discount (military/logistics where citizens <= 1) and pulsar gates
+  let m = systemCostMult(s, r, key);
+  if (on(s) && key === 'develop') {
+    if (hasLaw(s, p, 'federal')) m *= 1 - E.federalDevelopDiscount;
+    if (r && worldFx(s, r).garden) m *= 1 - E.gardenDevelopDiscount;
+  }
   if (m === 1) return c;
   const out: Partial<Res> = {};
   for (const [k, v] of Object.entries(c)) out[k as keyof Res] = Math.round((v ?? 0) * m);

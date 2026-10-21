@@ -22,6 +22,7 @@
 //  VP is only ever scored on the final end-of-turn state.
 // ============================================================================
 import { TECH, LAW, MODULES } from '../config/empire.ts';
+import { growSystem, gravityWell, starIndustry, worldFx } from './systems.ts';
 import { techCost, researchBlock, opposite, blueprintFor, baseHp, hasTech, hasLaw, connected, supplied, maxDevAt, moveNeighbors } from './empire.ts';
 import { RELICS, LORE } from '../config/content.ts';
 import { fightRounds, hostile, wouldFight, engagementAt, newReport, disengage, type FightOutcome } from './combat.ts';
@@ -679,6 +680,12 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
           m.idx = m.path.length;
           m.stopped = true;
           emit({ k: 'blocked', pulse, fleet: m.f.id, owner: m.f.owner, at: r.id, reason: enemyFleet ? 'enemy fleet' : 'enemy garrison' });
+        } else if (gravityWell(s, r.id)) {
+          // star systems: a black hole's gravity well stops every fleet entering it (even a Hyperjump). Its route
+          // (and a Seize beyond) carries on next turn: the path it took this turn ends here.
+          m.path = m.path.slice(0, m.idx);
+          m.seize = null;
+          emit({ k: 'blocked', pulse, fleet: m.f.id, owner: m.f.owner, at: r.id, reason: 'gravity well' });
         }
       }
       // --- guard reactions (free standing order)
@@ -730,6 +737,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         else { f.route.path = f.route.path.slice(m.path.length); if (!f.route.path.length) f.route = null; }
       } else if (f.region === m.path[0]) { f.route.path.shift(); if (!f.route.path.length) f.route = null; }
       else f.route = null;
+      // star systems: a black hole's gravity well holds a fleet passing through for a step's worth of movement
+      if (f.route && gravityWell(s, f.region)) f.route.mp -= R.live.stepCost;
     }
 
     // ---------------------------------------------------------- 4. sieges
@@ -737,7 +746,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     // The siege then continues on its own, pulse after pulse and turn after turn, until the
     // garrison and defenders are beaten (capture) or the besiegers leave or are driven off.
     for (const m of seizers) {
-      const p = m.p, target = m.seize!;
+      if (m.seize === null) continue;   // held by a gravity well short of the target: the route carries on
+      const p = m.p, target = m.seize;
       if (!s.fleets.includes(m.f)) continue;
       if (m.f.region !== target) { fail(pulse, p, m.o, `never reached ${s.regions[target].name}`); continue; }
       const r = s.regions[target];
@@ -885,12 +895,15 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       if (r.owner !== r.project.owner || !pd) r.project = null;   // lost the region, or a project these rules no longer have (old save)
       else if (r.project.progress >= pd.turns) {
         const key = r.project.key;
-        if (key === 'develop') r.dev = Math.min(maxDevAt(s, r.id), r.dev + 1);
+        // (a system already above its cap, e.g. an old save, keeps its citizens: grandfathered)
+        if (key === 'develop') r.dev = Math.max(r.dev, Math.min(maxDevAt(s, r.id), r.dev + 1));
         else r.buildings[key] = (r.buildings[key] ?? 0) + 1;
         emit({ k: 'project', pulse: endPulse, region: r.id, owner: r.owner!, key, done: true });
         r.project = null;
       }
     }
+    // star systems: an uncontested Core grows a citizen every few turns (docs/SYSTEMS.md)
+    if (r.owner !== null) growSystem(s, r, !!underAttack || s.fleets.some(f => f.region === r.id && f.ships.length && hostile(s, f.owner, r.owner!) && f.ships.some(sh => sh.cls !== 'scout')), endPulse, emit);
     for (let i = 0; i < 3; i++) if (r.loyalty[i] > 0) r.loyalty[i] = Math.max(0, r.loyalty[i] - R.influence.decayPerTurn);
   }
 
@@ -1332,8 +1345,10 @@ export function incomeDetail(s: GameState, p: PlayerId) {
     let cr = y.credits * mult + (r.buildings.tradehub ?? 0) * (R.economy.tradeHubBonus + (on && hasTech(s, p, 'trade') ? E.tradeHubBonus : 0) + (on && hasLaw(s, p, 'mercantile') ? E.mercantileHubBonus : 0));
     let inf = y.influence * (r.kind === 'void' ? 0 : 1) + (r.kind === 'home' ? Math.floor(r.dev / 2) : 0);
     if (on) {
-      if (r.trait === 'forge') ind += E.forgePerDev * mult;
-      if (r.trait === 'gas') cr += E.gasCredits;
+      const wf = worldFx(s, r);   // the old traits (star systems: carried by bodies)
+      if (wf.forge) ind += E.forgePerDev * mult;
+      if (wf.gas) cr += E.gasCredits;
+      ind += starIndustry(s, r);  // blue giant: +1 per Mine / Extractor
       if (r.buildings.depot) ind += E.depotIndustry;
       if (r.vein && (r.buildings.extractor ?? 0) > 0 && conn!.has(r.id)) cr += E.extractorCredits;
       if (hasLaw(s, p, 'federal') && r.kind === 'colony') { ind += 1; if (r.dev >= 3) inf += 1; }

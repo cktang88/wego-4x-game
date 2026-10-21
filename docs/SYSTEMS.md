@@ -103,3 +103,75 @@ Bodies are **Orbital** (gas giant, belt, station) or **Surface** (habitable, moo
   2. Citizens cap and growth, slots, the waystation discount.
   3. Contested, Occupied and Tribute.
   4. Body-tagged ledger and Calling gates.
+
+## As built (steps 1 and 2)
+Code: `shared/sim/systems.ts` (helpers, generation, growth), `shared/config/systems.ts` (names, icons, one-liners),
+numbers in `rules.systems`. Client: `client/src/hud/systems.ts` (card rows), `drawSystemMarks` in
+`client/src/render/map.ts`, `regionArt` in `client/src/art/planets.ts` (paints the real star and bodies).
+
+**Switch.** `sysOn(s)` = `rules.systems` present with `enabled !== false` **and** a map generated with stars
+(`regions[0].star`). The server backfills missing rule groups on old saves, so the map check is what keeps old
+games on their old behaviour: no cap (maxDev, Garden +1), no growth, no slots or gates, no discount, no gravity
+well, and trait effects from `Region.trait`.
+
+**Data.** `Region.star?: 'yellow'|'red'|'blue'|'binary'|'pulsar'|'blackhole'`, `Region.bodies?: Body[]` (≤ 3),
+`Region.growth?: number` (turns banked). `Body = { kind: 'habitable'|'gas'|'belt'|'moon'|'barren'|'ruin', name, q?: 'poor'|'fair'|'rich', adj?, vein? }`.
+Lane waypoints get neither. Both are public map knowledge (views send them for every system). A **Station** is a
+project (`buildings.station`, max 1), not an entry in `bodies`.
+
+**Generation.** `planSystem` runs on its own RNG stream (`seed ^ 0x5157e115`) per wedge-template site, so the three
+wedges get identical systems and geometry, names, traits, veins and garrisons are byte-identical to before (tests
+pin the hashes). `nameBodies` names them deterministically ("Ninefold I", "the Ashen Belt", "Tyr", "the Ring").
+Anchors from the old fields: forge → rich barren, garden → rich habitable, bulwark → lone moon, gas → gas giant,
+asteroids → belt, antimatter → gas giant, crystals → belt (the vein sits on that body). Home: yellow, rich world +
+moon + belt. Crown: yellow/binary, rich world + ruin + moon/belt. Throne: rich "Throneworld" + "the Ring" + moon.
+Relic sites: ruin under a pulsar (first per wedge) or a black hole (second). Plain colony: a fair world (border
+Core). Flavour bodies never add an old trait's effect (no extra gas giants, rich worlds or lone moons).
+
+**Traits from bodies** (`worldFx`): Forge = rich barren; Garden = rich habitable **colony**; Bulwark = moon with no
+habitable world; Gas = gas giant. Yields, garrisons and develop discounts read these.
+
+**Citizens** (`dev`). `citizenCap`: habitable poor/fair/rich 1/3/4 (yellow +1, red −1, blue ≤ 2), +1 per moon beside
+a habitable world, +1 per barren world, +1 Station, clamped to 0..5. `maxDevAt` returns the cap. A system above its
+cap keeps its citizens (grandfathered). Growth (`growSystem`, end of turn/cycle): an owned Core below its cap,
+not under siege or battle and with no hostile warship present, gains 1 every 3 turns (Garden: 2); contested
+turns pause the count.
+
+**Gates, sites, slots** (`systemsBlock`, checked by `projectBlock`/`validateOrder`, new projects only):
+Shipyard needs 2 citizens or a Station; Academy 3. Mine needs a belt, barren world or vein; Trade Hub a habitable
+world or gas giant. Civil slots (Mine, Trade Hub, Extractor, Academy, Shipyard) = bodies + 1 with a Station;
+military/logistics slots (Fortress, Battery, Shield, Sensor, Depot, Gate) = 2, +1 at a chokepoint
+(`isChokepoint`: ≥ `chokeDegree` borders or a cut vertex). A slot is used per building *type*; level-ups keep it.
+`slotsOf(s, r)` → `{ civil, civilUsed, mil, milUsed }`.
+
+**Discounts** (`systemCostMult`, applied in `projectCostMod`): military/logistics projects −30% where citizens ≤ 1
+(a Waystation); Warp Gate −30% at a pulsar (they stack).
+
+**Stars.** Built: cap modifiers; binary owned garrison +`binaryGarrison` (3); pulsar sensor +1 for its owner and gate
+discount; blue giant +1 industry per Mine/Extractor level; black hole gravity well: a fleet entering it stops for
+the turn (even a Hyperjump), its route and Seize carry on next turn (`blocked` event, reason `gravity well`); LIVE:
+it loses a step's worth of movement. Leaving is free.
+
+**AI.** Plans only valid projects (`validateOrder`), develops up to the cap, offers a Station when one would unblock
+a wanted project (`stationUnblocks`), and values military/logistics projects higher where they are discounted
+(`aiSiteBonus`). It does not route around black holes.
+
+**Deviations from the design above.**
+- Chokepoint is `chokeDegree: 6`, not 4: about 80% of systems have 4+ borders, so 4 would make the bonus universal.
+- Binary garrison is +3 (one development step), not +1: garrisons run 12–60, so +1 would be invisible.
+- Garden (growth every 2, Develop −30%) is a rich habitable *colony*; homes, Crowns and the Throne are rich without
+  it, so their Develop costs are unchanged.
+- The antimatter vein's gas giant pays the gas giant's +4¢ (a small new income on that contested border system).
+- Not built (deliberately): red dwarf "dim" (fog change), black hole relic magnet, gas giant fuel/Depot/repair,
+  belt hiding evasive fleets, Ruin/Oracle gates, per-pip role yields (yield is still the old per-development
+  multiplier), fleet crews, capture refugees / raze cap −1 (step 3), Contested/Occupied/Tribute (step 3), body-tagged
+  ledger and Calling gates (step 4). Role badges are on the card, not on the map.
+
+**Balance** (`scripts/simulate.ts`, 45 games per run; before → after).
+- expert/standard/novice (seed 1000): expert wins 29 → 36 of 45; game length 23.0 → 21.5 turns; styles turtle 25% → 41%,
+  trader 22% → 19%, raider 35% → 38%, warlord 55% → 38%.
+- expert×3, seeds 1000 and 7000 pooled (90 games): warlord 50% → 35%, turtle 23% → 28%, trader 32% → 36%, raider 29% → 35%;
+  game length 23.9 → 21.6 turns.
+- Projects per game (expert×3): Develop 9 → 4 plus ~21 free growth citizens; Stations ~1; Depots 1.4 → 3.4–4.1 (the
+  waystation discount); Mines and Trade Hubs about the same.
+- `scripts/ai-audit.ts`: wasted orders 0.2% expert / 0.5% standard / 0.3% novice (fogged view the same).

@@ -19,6 +19,8 @@ import { Rng, hashString } from '../../../shared/sim/rng.ts';
 import { pointInPoly } from '../../../shared/sim/mapgen.ts';
 import { TRAITS as WORLD_TRAITS, VEINS } from '../../../shared/config/empire.ts';
 import { connected, supplied, maxDevAt } from '../../../shared/sim/empire.ts';
+import { citizenCap, sysOn } from '../../../shared/sim/systems.ts';
+import { STARS } from '../../../shared/config/systems.ts';
 import { battleViewerOpen } from './battle.ts';
 import {
   type Tier, type Lens, coarsePointer, medianRegionRadius, tierFor, slotFor, slotScale, anchorOf, powerOf, garrisonPower,
@@ -859,6 +861,7 @@ export class MapRenderer {
     const lens = I.lens ?? 'political';
     if (r.kind === 'void') {
       ctx.fillStyle = 'rgba(200,200,255,0.35)'; ctx.beginPath(); ctx.arc(p.x, p.y, 2 * S, 0, TAU); ctx.fill();
+      if (bt !== 'strategic') this.drawSystemMarks(r, I, bt, p.x, p.y, 3 * S);
       return;
     }
     const { txt, fog } = this.garrisonText(r, I);
@@ -898,6 +901,7 @@ export class MapRenderer {
       }
       this.labelBoxes.push({ x: p.x - hw * S, y: p.y - hh * S, w: hw * 2 * S, h: hh * 2 * S });
       this.bannerHits.push({ rid: r.id, x: p.x, y: p.y, l: -hw, t: -hh, r: hw, b: hh });
+      this.drawSystemMarks(r, I, bt, p.x, p.y, Math.max(hw, hh) * S);
       return;
     }
     // ---- the world: a painted body floating over the mat (or the Throne's star, a relic site's dark star)
@@ -948,6 +952,7 @@ export class MapRenderer {
         ctx.restore();
       }
     }
+    this.drawSystemMarks(r, I, bt, p.x, p.y, pr * (art.star ? (r.kind === 'throne' ? 1.2 : 0.8) : 1));
     // ---- detail tier: the system's orbital pieces as little modelled structures
     if (bt === 'detail' && !fog) {
       const b = r.buildings;
@@ -1004,6 +1009,78 @@ export class MapRenderer {
     const hw = g.w / 2, top = g.cy - g.h / 2;
     this.labelBoxes.push({ x: cx - hw * S, y: p.y + top * S, w: hw * 2 * S, h: (g.cy + g.h / 2 - top) * S });
     this.bannerHits.push({ rid: r.id, x: p.x, y: p.y, l: -hw - 4, t: top, r: hw + 4, b: bot });
+  }
+
+  /**
+   * Star systems (docs/SYSTEMS.md) around a system's node: a star glyph by type (upper left), up to 3 body dots
+   * and a built Station on an arc on the left, and citizen pips (filled) up to the cap (hollow) on an arc upper
+   * right. Stars and bodies are public map knowledge, so fog never hides them.
+   */
+  private drawSystemMarks(r: Region, I: DrawInput, bt: Tier, x: number, y: number, rad: number) {
+    if (!r.star || r.kind === 'lane') return;
+    const { ctx } = this;
+    const S = this.px(1);
+    const st = I.state;
+    const strat = bt === 'strategic';
+    const k = strat ? 1.05 : bt === 'detail' ? 1.8 : 1.45;
+    const ring = rad + (strat ? 5 : 7) * S * k;
+    const at = (deg: number, rr = ring) => ({ x: x + Math.cos((deg * Math.PI) / 180) * rr, y: y + Math.sin((deg * Math.PI) / 180) * rr });
+    ctx.save();
+    // ---- the star (art stars already draw the Throne's, a relic site's and an empty system's own)
+    const art = r.kind === 'throne' || r.kind === 'relic';
+    if (!art) {
+      const sp = at(232, ring + 2 * S * k);
+      const sr = 2.6 * S * k;
+      const col = STARS[r.star]?.color ?? '#ffd76a';
+      if (r.star === 'blackhole') {
+        ctx.beginPath(); ctx.arc(sp.x, sp.y, sr * 1.1, 0, TAU); ctx.fillStyle = '#000'; ctx.fill();
+        ctx.strokeStyle = '#ffb46a'; ctx.lineWidth = 1.1 * S * k; ctx.beginPath(); ctx.ellipse(sp.x, sp.y, sr * 2, sr * 0.7, -0.35, 0, TAU); ctx.stroke();
+      } else {
+        drawGlow(ctx, sp.x, sp.y, sr * 3.2, col, 0.55);
+        ctx.fillStyle = col; ctx.beginPath(); ctx.arc(sp.x, sp.y, sr, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#fffaf0'; ctx.beginPath(); ctx.arc(sp.x - sr * 0.25, sp.y - sr * 0.25, sr * 0.45, 0, TAU); ctx.fill();
+        if (r.star === 'binary') { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(sp.x + sr * 1.8, sp.y + sr * 0.9, sr * 0.6, 0, TAU); ctx.fill(); }
+        if (r.star === 'pulsar') { ctx.strokeStyle = col; ctx.lineWidth = 0.9 * S * k; ctx.beginPath(); ctx.moveTo(sp.x - sr * 3, sp.y + sr * 1.2); ctx.lineTo(sp.x + sr * 3, sp.y - sr * 1.2); ctx.stroke(); }
+      }
+    }
+    // ---- bodies: dots on an arc on the left (a built Station last)
+    const bodies: { kind: string; q?: string }[] = [...(r.bodies ?? [])];
+    if ((r.buildings.station ?? 0) > 0) bodies.push({ kind: 'station' });
+    const angs = [158, 182, 206, 230];
+    bodies.slice(0, 4).forEach((b, i) => {
+      const bp = at(angs[i]);
+      const br = (b.kind === 'gas' ? 2.6 : b.kind === 'habitable' ? 2.3 : 1.8) * S * k;
+      ctx.lineWidth = 0.9 * S * k; ctx.strokeStyle = 'rgba(5,3,12,0.9)';
+      if (b.kind === 'belt') {
+        ctx.fillStyle = '#b5ab98';
+        for (const [dx, dy] of [[-1.6, 0.6], [0, -0.6], [1.6, 0.4]]) { ctx.beginPath(); ctx.arc(bp.x + dx * S * k, bp.y + dy * S * k, 0.95 * S * k, 0, TAU); ctx.fill(); }
+        return;
+      }
+      if (b.kind === 'ruin') { diamondPath(ctx, bp.x, bp.y, br, br * 1.2); ctx.fillStyle = '#e6c35c'; ctx.fill(); ctx.stroke(); return; }
+      if (b.kind === 'station') {
+        ctx.beginPath();
+        for (let j = 0; j < 6; j++) { const a = (j / 6) * TAU; const px = bp.x + Math.cos(a) * br * 1.2, py = bp.y + Math.sin(a) * br * 1.2; if (j) ctx.lineTo(px, py); else ctx.moveTo(px, py); }
+        ctx.closePath(); ctx.fillStyle = '#dfe4f2'; ctx.fill(); ctx.stroke(); return;
+      }
+      const col = b.kind === 'habitable' ? (b.q === 'rich' ? '#7fe0a0' : b.q === 'fair' ? '#6fb7e8' : '#c9a77a')
+        : b.kind === 'gas' ? '#e0b47a' : b.kind === 'moon' ? '#cfd6e2' : b.kind === 'barren' ? (b.q === 'rich' ? '#ff8a4a' : '#8c8580') : '#aaa';
+      ctx.beginPath(); ctx.arc(bp.x, bp.y, br, 0, TAU); ctx.fillStyle = col; ctx.fill(); ctx.stroke();
+      if (b.kind === 'gas') { ctx.strokeStyle = 'rgba(255,230,190,0.8)'; ctx.lineWidth = 0.7 * S * k; ctx.beginPath(); ctx.ellipse(bp.x, bp.y, br * 1.7, br * 0.45, -0.35, 0, TAU); ctx.stroke(); }
+    });
+    // ---- citizens: filled pips up to the cap (hollow) on an arc, upper right
+    if (sysOn(st) && r.kind !== 'void') {
+      const cap = citizenCap(st, r) ?? 0;
+      const n = Math.min(6, Math.max(cap, r.dev));
+      const step = strat ? 15 : 13;
+      for (let i = 0; i < n; i++) {
+        const pp = at(-78 + i * step, ring - 1 * S * k);
+        const pr = 1.55 * S * k;
+        ctx.beginPath(); ctx.arc(pp.x, pp.y, pr, 0, TAU);
+        if (i < r.dev) { ctx.fillStyle = i < cap ? '#f4dc9c' : '#ffb0a0'; ctx.fill(); ctx.strokeStyle = 'rgba(40,24,4,0.9)'; ctx.lineWidth = 0.7 * S * k; ctx.stroke(); }
+        else { ctx.strokeStyle = 'rgba(244,220,156,0.6)'; ctx.lineWidth = 0.8 * S * k; ctx.stroke(); }
+      }
+    }
+    ctx.restore();
   }
 
   /** Soul layer on a world's banner: the calling medallion on the cap's left shoulder, ringed by tenure segments

@@ -4,11 +4,12 @@ import { generateMap } from './mapgen.ts';
 import { Rng } from './rng.ts';
 import type { Commander, Fleet, GameState, Player, PlayerId, RegionId, Ship } from './types.ts';
 import { EDICTS } from './edicts.ts';
-import { baseHp, blueprintFor, maxDevAt } from './empire.ts';
+import { baseHp, blueprintFor } from './empire.ts';
 import { rollShipTraits, traitHpMult } from './shiptraits.ts';
 import { ensureSoul, soulOn, soulGarrison } from './soul.ts';
 import { SIGILS } from '../config/content.ts';
 import { ensureSig } from './signature.ts';
+import { starGarrison, worldFx } from './systems.ts';
 
 export interface PlayerSetup { name?: string; kind: 'human' | 'ai'; aiLevel?: Player['aiLevel'] }
 export interface GameSetup {
@@ -145,11 +146,11 @@ export function maxGarrison(s: GameState, rid: RegionId): number {
   const E = s.rules.empire;
   if (E?.enabled !== false && E) {
     const pl = s.players[r.owner];
-    if (r.trait === 'bulwark') m *= E.bulwarkGarrisonMult;
+    if (worldFx(s, r).bulwark) m *= E.bulwarkGarrisonMult;   // a Bulwark moon (star systems: a moon with no habitable world)
     if (pl?.laws?.includes('bastion')) m *= E.bastionGarrisonMult;
     if (pl?.techs?.includes('citadel')) m *= E.citadelGarrisonMult;
   }
-  return Math.round(m) + soulGarrison(s, r);
+  return Math.round(m) + soulGarrison(s, r) + starGarrison(s, r);
 }
 
 export function ordinal(n: number): string {

@@ -19,8 +19,10 @@ import { shipSvg, shortWhy, tip, fmtDur } from './util.ts';
 import { fleetBadge, fleetSubline, fleetSoulRows, honourChoice, sagaChips, fleetSoulActs, vowPicker, shipTraitBits, worldEpi, worldSoulRows, soulAction, openFounding, bannersLeft } from './soul.ts';
 import { bannerSvg } from '../art/sigils.ts';
 import { postureRow, fateRow, postureStatus, worldSigRows, sigAction } from './signature.ts';
+import { systemRows } from './systems.ts';
+import { starIndustry, sysOn, systemCostMult, worldFx } from '../../../shared/sim/systems.ts';
 
-const PROJ_ICON: Record<string, string> = { develop: '▲', shipyard: '⚒', fortress: '⛨', mine: '⚙', tradehub: '¢', sensor: '◎', academy: '✺', extractor: '⚛', battery: '⚔', pshield: '⛨', depot: '➤', gate: '◎' };
+const PROJ_ICON: Record<string, string> = { station: '⬡', develop: '▲', shipyard: '⚒', fortress: '⛨', mine: '⚙', tradehub: '¢', sensor: '◎', academy: '✺', extractor: '⚛', battery: '⚔', pshield: '⛨', depot: '➤', gate: '◎' };
 const MOD_COLOR: Record<string, string> = { armor: '#c9c3e6', railgun: '#ff9b6b', deflector: '#6fd0ff', ion: '#9dff8a' };
 const STANCES: { id: Doctrine['stance']; icon: string; label: string; retreat: number; guard: boolean; tip: string }[] = [
   { id: 'aggressive', icon: '⚔', label: 'Attack', retreat: 0.15, guard: false, tip: 'Engages anything hostile; retreats late' },
@@ -157,14 +159,16 @@ function regionStats(g: GameScreen, r: Region): string {
   const cut = !!conn && !conn.has(r.id);
   const half = cut ? R.empire.cutOffYield : 1;
   const mult = Math.max(1, r.dev);
-  const yi = y ? Math.round((y.industry * mult + (r.buildings.mine ?? 0) * R.economy.mineBonus + (r.trait === 'forge' ? R.empire.forgePerDev * mult : 0)) * half) : 0;
-  const yc = y ? Math.round((y.credits * mult + (r.buildings.tradehub ?? 0) * R.economy.tradeHubBonus + (r.trait === 'gas' ? R.empire.gasCredits : 0)) * half) : 0;
+  const wf = worldFx(st, r);   // the old traits (star systems: carried by bodies)
+  const yi = y ? Math.round((y.industry * mult + (r.buildings.mine ?? 0) * R.economy.mineBonus + (wf.forge ? R.empire.forgePerDev * mult : 0) + starIndustry(st, r)) * half) : 0;
+  const yc = y ? Math.round((y.credits * mult + (r.buildings.tradehub ?? 0) * R.economy.tradeHubBonus + (wf.gas ? R.empire.gasCredits : 0)) * half) : 0;
   const yf = y ? Math.round(((r.kind === 'void' ? 0 : y.influence) + (r.kind === 'home' ? Math.floor(r.dev / 2) : 0)) * half) : 0;
   const T = r.trait ? WORLD_TRAITS[r.trait] : null, V = r.vein ? VEINS[r.vein] : null;
   let s = stat('⛨', r.garrison < 0 ? '?' : gmax !== null ? `${r.garrison}/${gmax}` : String(r.garrison), 'Garrison');
   if (r.kind !== 'void' && y) s += `<span class="st yld"${tip('Yield per turn')}><i>⚙</i><b>${yi}</b><i>¢</i><b>${yc}</b><i>✦</i><b>${yf}</b></span>`;
-  if (r.kind !== 'void') s += `<span class="st"${tip(`Development ${r.dev}/${maxDevAt(st, r.id)}`)}>${pips(r.dev, maxDevAt(st, r.id))}</span>`;
-  if (T) s += `<span class="st"${tip(`${T.name}: ${T.desc}`)}><i>${T.icon}</i></span>`;
+  const sys = sysOn(st) && !!r.bodies;
+  if (r.kind !== 'void' && !sys) s += `<span class="st"${tip(`Development ${r.dev}/${maxDevAt(st, r.id)}`)}>${pips(r.dev, maxDevAt(st, r.id))}</span>`;
+  if (T && !sys) s += `<span class="st"${tip(`${T.name}: ${T.desc}`)}><i>${T.icon}</i></span>`;
   if (V) s += `<span class="st"${tip(`${V.name}: ${V.desc}`)}><i style="color:${V.color}">${V.icon}</i></span>`;
   if (cut) s += `<span class="st bad"${tip('Cut off: half yield')}><i>⚠</i><b>½</b></span>`;
   return s;
@@ -202,25 +206,30 @@ function ownPlanet(g: GameScreen, r: Region): string {
       }).join('');
       trays += `<div class="tray" data-tray="build"><div class="trh">⚒ Build</div>${intoRow(g, r)}<div class="tiles">${tiles}</div></div>`;
     }
-    const projects = Object.entries(R.projects).filter(([, p]) => !(p.vein && !r.vein)).map(([k, p]) => {
+    const projects = Object.entries(R.projects).filter(([k, p]) => !(p.vein && !r.vein) && (k !== 'station' || (sysOn(st) && r.kind !== 'lane'))).map(([k, p]) => {
       const lvl = k === 'develop' ? r.dev : (r.buildings[k] ?? 0);
       const max = k === 'develop' ? maxDevAt(st, r.id) : p.max;
       const o: Order = { type: 'develop', region: r.id, project: k };
       const techLock = p.tech && !hasTech(ps, you, p.tech) ? `needs ${TECH[p.tech]?.name ?? p.tech}` : null;
-      const err = techLock ?? (lvl >= max ? 'maxed' : null) ?? g.orderWhy(o);
+      const err = techLock ?? (lvl >= max ? (k === 'develop' && sysOn(st) ? g.orderWhy(o) ?? 'maxed' : 'maxed') : null) ?? g.orderWhy(o);
       if (lvl >= max && k !== 'develop' && max > 0 && !err?.startsWith('needs')) {
         return `<button class="tile done" data-a="develop" data-proj="${k}" aria-disabled="true"${tip(`${p.name}: ${p.desc}`)}><i class="pi">${PROJ_ICON[k] ?? '▲'}</i><span class="tname">${esc(p.name.split(' ')[0])}</span>${pips(lvl, max)}</button>`;
       }
       const cost = orderCost(st, o, you);
       const short = !canAfford(left, cost, creditRate(st, you));
-      return `<button class="tile ${err ? 'locked' : ''} ${short ? 'short' : ''}" data-a="develop" data-proj="${k}"${err ? ` aria-disabled="true"${tip(`⊘ ${techLock ?? shortWhy(err)}`)}` : tip(`${p.name}: ${p.desc}`)}><i class="pi">${PROJ_ICON[k] ?? '▲'}</i><span class="tname">${esc(p.name.split(' ')[0])}</span>${max > 1 ? pips(lvl, max) : ''}<span class="tcost">${costText(cost)}</span></button>`;
+      // star systems: a blocked tile says why (the cap, a gate, no site, no slot) instead of its price; a discounted one says so
+      const sysWhy = err && !techLock && sysOn(st) && /citizens|slot|station|site|surface|trade hub/i.test(err) ? shortWhy(err) : null;
+      const disc = !err && systemCostMult(st, r, k) < 1 ? `<em class="tdisc">−${Math.round((1 - systemCostMult(st, r, k)) * 100)}%</em>` : '';
+      const label = k === 'develop' && sysOn(st) && r.bodies ? 'Citizen' : p.name.split(' ')[0];
+      return `<button class="tile ${err ? 'locked' : ''} ${short ? 'short' : ''} ${sysWhy ? 'why' : ''}" data-a="develop" data-proj="${k}"${err ? ` aria-disabled="true"${tip(`⊘ ${techLock ?? shortWhy(err)}`)}` : tip(`${p.name}: ${p.desc}`)}><i class="pi">${PROJ_ICON[k] ?? '▲'}</i><span class="tname">${esc(label)}</span>${max > 1 ? pips(lvl, max) : ''}${sysWhy ? `<span class="twhy">${esc(sysWhy)}</span>` : `<span class="tcost">${costText(cost)}${disc}</span>`}</button>`;
     }).join('');
-    trays += `<div class="tray" data-tray="develop"><div class="trh">▲ Develop</div><div class="tiles">${projects}</div></div>`;
+    const way = sysOn(st) && r.bodies && systemCostMult(st, r, 'fortress') < 1 ? ` <span class="trway"${tip('Waystation: few citizens, so military and logistics projects are cheaper here')}>⛯ military −${Math.round((1 - systemCostMult(st, r, 'fortress')) * 100)}%</span>` : '';
+    trays += `<div class="tray" data-tray="develop"><div class="trh">▲ Develop${way}</div><div class="tiles">${projects}</div></div>`;
     const agents = st.players.some(p => p.id !== you && (r.loyalty[p.id] ?? 0) > 0);
     trays += `<div class="acts">${agents ? ib('influence', '✦', 'Purge', g.orderWhy({ type: 'influence', target: r.id }), '', 'Remove rival agents') : ''}${ib('scan', '◎', 'Scan', g.orderWhy({ type: 'scan', target: r.id }), '', 'Reveal this area')}</div>`;
   }
   const cap = st.players[you]?.capital === r.id ? ' <small class="tag">capital</small>' : '';
-  return `${head(g, r.name, g.color(r.owner), regionStats(g, r), cap, '', worldEpi(g, r))}${regionStatus(g, r)}${worldSoulRows(g, r)}${worldSigRows(g, r)}${trays}`;
+  return `${head(g, r.name, g.color(r.owner), regionStats(g, r), cap, '', worldEpi(g, r))}${regionStatus(g, r)}${systemRows(g, r)}${worldSoulRows(g, r)}${worldSigRows(g, r)}${trays}`;
 }
 
 /** Which fleet a build at r goes into: a fleet already here, or a new banner (the founding sheet). Per region. */
@@ -275,7 +284,7 @@ function foreignPlanet(g: GameScreen, r: Region): string {
   }
   const foes = st.fleets.filter(f => f.region === r.id && f.owner !== g.you && f.ships.length);
   const fl = foes.length ? `<div class="fan foe">${foes.map(f => `<button class="cls" data-a="fleet" data-id="${f.id}"${tip(f.name)}>${shipSvg(f.ships[0]?.cls ?? 'frigate', g.color(f.owner), 26)}<b>⚔${fleetPower(st, f)}</b></button>`).join('')}</div>` : '';
-  return `${head(g, r.name, g.color(owner), regionStats(g, r), extra, '', worldEpi(g, r))}${regionStatus(g, r)}${worldSoulRows(g, r)}${fl}${body}`;
+  return `${head(g, r.name, g.color(owner), regionStats(g, r), extra, '', worldEpi(g, r))}${regionStatus(g, r)}${systemRows(g, r)}${worldSoulRows(g, r)}${fl}${body}`;
 }
 
 // ---------------------------------------------------------------- events (bound once)

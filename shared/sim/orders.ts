@@ -208,9 +208,9 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       if (!pd) return 'unknown project';
       if (!own(o.region)) return 'not your region';
       if (r.project) return 'a project is already underway here';
-      if (r.kind === 'void' && !['sensor', 'fortress', 'extractor', 'depot', 'gate', 'battery'].includes(o.project)) return 'nothing to build on in the void';
+      if (r.kind === 'void' && !['sensor', 'fortress', 'extractor', 'depot', 'gate', 'battery', 'station'].includes(o.project)) return 'nothing to build on in the void';
       const lvl = o.project === 'develop' ? r.dev : (r.buildings[o.project] ?? 0);
-      if (lvl >= (o.project === 'develop' ? maxDevAt(s, r.id) : pd.max)) return 'already at max level';
+      if (lvl >= (o.project === 'develop' ? maxDevAt(s, r.id) : pd.max)) return projectBlock(s, p, o.project, r.id) ?? 'already at max level';
       return projectBlock(s, p, o.project, r.id);
     }
     case 'fortify': return null;

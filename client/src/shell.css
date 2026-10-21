@@ -374,3 +374,28 @@
 .dragging .callout { display: none; }
 .dragcard.no { border-left-color: var(--bad); }
 .dragcard.no i { color: var(--bad); }
+
+/* ---- star systems on the world card (docs/SYSTEMS.md): star line, body rows, role / citizens / slots */
+.card .sys { margin: 6px 0 2px; padding: 5px 7px; border-radius: 8px; background: rgba(0, 0, 0, 0.22); border: 1px solid rgba(214, 173, 98, 0.18); }
+.card .sysrow { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: var(--t1); line-height: 1.5; white-space: nowrap; }
+.card .sysrow > i { font-style: normal; width: 1.1em; text-align: center; color: var(--brass, var(--accent)); flex: none; }
+.card .sysrow b { font-weight: 700; flex: none; }
+.card .sysrow small { color: var(--dim); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.card .sysrow.body { padding-left: 10px; }
+.card .sysrow .vein { font-style: normal; flex: none; }
+.card .sysrow .v-antimatter { color: #ff7ad9; } .card .sysrow .v-crystal { color: #6ff3ff; }
+.card .sysfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 10px; margin-top: 4px; font-size: var(--t1); }
+.card .sysrole { padding: 1px 7px; border-radius: 9px; font-weight: 700; letter-spacing: 0.04em; background: rgba(214, 173, 98, 0.16); color: #f1d9a0; border: 1px solid rgba(214, 173, 98, 0.4); }
+.card .sysrole.role-forge { background: rgba(255, 140, 80, 0.14); color: #ffbe94; border-color: rgba(255, 140, 80, 0.4); }
+.card .sysrole.role-harbor { background: rgba(110, 190, 255, 0.14); color: #b3dcff; border-color: rgba(110, 190, 255, 0.4); }
+.card .sysrole.role-waystation { background: rgba(190, 190, 210, 0.12); color: #d8d6e8; border-color: rgba(190, 190, 210, 0.35); }
+.card .syscit, .card .sysslot { display: inline-flex; align-items: center; gap: 4px; }
+.card .syscit small { color: var(--good); }
+.card .sysdisc { color: var(--good); font-weight: 700; }
+.cpips { display: inline-flex; gap: 2px; }
+.cpips i { width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.16); }
+.cpips i.on { background: linear-gradient(180deg, #f4dc9c, #b8883e); }
+.tile .twhy { font-size: var(--t1); color: #ffcf8a; line-height: 1.1; text-align: center; padding: 0 2px; }
+.tile.locked.why { opacity: 0.6; }
+.tile .tdisc { font-style: normal; color: var(--good); margin-left: 3px; font-weight: 700; }
+.trh .trway { text-transform: none; letter-spacing: 0; color: var(--good); font-family: inherit; margin-left: 6px; }

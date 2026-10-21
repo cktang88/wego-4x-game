@@ -105,6 +105,8 @@ export const DEFAULT_RULES = {
     pshield:  { name: 'Planetary Shield', cost: { industry: 40, credits: 15 }, turns: 2, max: 1, desc: 'Hits on the garrison do 3 less damage. Only siege damage gets through.', tech: 'pshield', needs: 'crystal' },
     depot:    { name: 'Depot',    cost: { industry: 20 },              turns: 1, max: 1, desc: 'Logistics hub: +3 industry; supply reaches 2 regions from here; fleets here repair as fast as at a shipyard.', tech: 'depots' },
     gate:     { name: 'Warp Gate', cost: { industry: 45, credits: 15 }, turns: 2, max: 1, desc: 'Your fleets jump between any two of your gates as a single step; gates also link your territory for supply.', tech: 'gates', needs: 'crystal' },
+    // --- star systems (docs/SYSTEMS.md): the only buildable body
+    station:  { name: 'Station',  cost: { industry: 35, credits: 15 }, turns: 2, max: 1, desc: 'An orbital station: citizens cap +1 and +1 civil slot. One per system.' },
   } as Record<string, { name: string; cost: Partial<Res>; turns: number; max: number; desc: string; tech?: string; needs?: string; vein?: boolean }>,
 
   // ---------------------------------------------------------------- garrisons
@@ -232,8 +234,8 @@ export const DEFAULT_RULES = {
   },
 };
 
-export type Rules = typeof DEFAULT_RULES & typeof EXTRA_DEFAULTS & typeof PLAYTEST_DEFAULTS & typeof SOUL_DEFAULTS & typeof SIGNATURE_DEFAULTS;
-export function defaultRules(): Rules { return structuredClone({ ...DEFAULT_RULES, ...EXTRA_DEFAULTS, ...PLAYTEST_DEFAULTS, ...SOUL_DEFAULTS, ...SIGNATURE_DEFAULTS }); }
+export type Rules = typeof DEFAULT_RULES & typeof EXTRA_DEFAULTS & typeof PLAYTEST_DEFAULTS & typeof SOUL_DEFAULTS & typeof SIGNATURE_DEFAULTS & typeof SYSTEMS_DEFAULTS;
+export function defaultRules(): Rules { return structuredClone({ ...DEFAULT_RULES, ...EXTRA_DEFAULTS, ...PLAYTEST_DEFAULTS, ...SOUL_DEFAULTS, ...SIGNATURE_DEFAULTS, ...SYSTEMS_DEFAULTS }); }
 
 export function isObj(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -545,5 +547,44 @@ export const SIGNATURE_DEFAULTS = {
     hyperjumpSteps: 3,           // Hyperjump: extra movement steps this turn, through blockades
     lastStandHit: 0.15,          // Last Stand: extra hit chance (and it never retreats, routs or is forced out this turn)
     rallyHull: 0.6,              // Rally: a Limping fleet's hulls repair to this share and it stops limping
+  },
+};
+
+// ---------------------------------------------------------------- star systems (docs/SYSTEMS.md, steps 1-2)
+// Stars and up to 3 bodies per system; citizens (the old `dev`) with a cap from the bodies, growth at Cores,
+// civil/military slots, build gates, the waystation discount. Rules without this group (older games) and maps
+// generated without bodies play exactly as before (see shared/sim/systems.ts sysOn).
+export const SYSTEMS_DEFAULTS = {
+  systems: {
+    enabled: true,
+    // ---- citizens cap: the sum of body caps plus the star, clamped to 0..maxCitizens
+    maxCitizens: 5,
+    capHabitable: { poor: 1, fair: 3, rich: 4 } as Record<string, number>,
+    capMoon: 1,                  // a moon beside a habitable world (alone, it is a Bulwark site instead)
+    capBarren: 1,
+    capStation: 1,
+    capYellow: 1,                // yellow dwarf: habitable cap +1
+    capRed: -1,                  // red dwarf: habitable cap -1
+    blueHabitableMax: 2,         // blue giant: habitable cap at most this
+    // ---- growth: +1 citizen every N turns at an uncontested Core below its cap (Develop still buys +1)
+    growthEvery: 3,
+    gardenGrowthEvery: 2,        // a Garden (a rich habitable colony)
+    // ---- build gates
+    shipyardCitizens: 2,         // a Shipyard needs this many citizens (or a Station)
+    academyCitizens: 3,
+    // ---- slots: civil from bodies (each body 1, a Station +1); military/logistics everywhere
+    stationCivilSlots: 1,
+    milSlots: 2,
+    chokeSlots: 1,               // +this at a chokepoint...
+    chokeDegree: 6,              // ...a system with this many borders or more, or a cut vertex
+    // ---- waystation discount: military/logistics projects cost less where citizens <= this
+    waystationCitizens: 1,
+    waystationDiscount: 0.3,
+    // ---- stars
+    binaryGarrison: 3,           // binary: owned garrison +this (one development step's worth)
+    pulsarSensor: 1,             // pulsar: sensor range +1 from a system you own
+    pulsarGateDiscount: 0.3,     // pulsar: Warp Gate -30%
+    blueMineIndustry: 1,         // blue giant: +industry per Mine / Extractor level
+    gravityWell: true,           // black hole: fleets entering stop there
   },
 };

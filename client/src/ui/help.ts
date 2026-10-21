@@ -29,6 +29,12 @@ export function helpHtml(st: GameState): string {
     <li><b>Ranks and honours.</b> Commanders rank up by fighting (chevrons on the pennant). Each rank-up offers two honours: choose one on the fleet card. Storied and Legend fleets can <b>retire</b> at one of your worlds, which becomes their Haven.</li>
     <li><b>Defeat routs.</b> A beaten banner usually survives: it takes a <b>scar</b> and limps home (smoke, a drooping pennant, an ETA). A limping fleet cannot attack and dies if caught; a third scar breaks it.</li>
   </ul>
+  <h2>Star systems</h2>
+  <ul>
+    <li>Every world is a <b>star system</b>: a star and up to three bodies (habitable worlds, gas giants, belts, moons, barren worlds, ruins). Its <b>role</b> (Core, Forge, Harbor, Waystation) is read from its bodies, never chosen.</li>
+    <li><b>Citizens</b> (development) have a cap from the bodies and the star. An uncontested Core grows a citizen every few turns; Develop still buys one. A Shipyard needs 2 citizens (or a Station), an Academy 3.</li>
+    <li>Civil buildings take a slot from a body (a Mine needs a belt, barren world or vein; a Trade Hub a habitable world or gas giant); a <b>Station</b> adds a slot and a citizen. Military buildings have 2 slots (3 at chokepoints) and cost 30% less at a Waystation. Black holes stop fleets passing through; pulsars see further and make Warp Gates cheaper.</li>
+  </ul>
   <h2>Worlds with a story</h2>
   <ul>
     <li>Every world keeps a ledger (toil, blood, siege, relics, loss) that gives it an <b>epithet</b>. At development ${S?.callingAtDev ?? 3} it takes a <b>Calling</b> (one of two: from its nature or its history), which grows at ${(S?.tenureTiers ?? [3, 6, 10]).join(', ')} turns of continuous ownership: the ring around its medallion.</li>

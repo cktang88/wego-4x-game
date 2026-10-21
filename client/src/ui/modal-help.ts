@@ -47,6 +47,10 @@ function cards(st: GameState, tab: string): Card[] {
       { ic: '✺', t: 'Research', b: [`<b>One technology per turn</b>: a free action, costs ⚙ ¢.`, 'Tier III is a fork: one of two, forever.', '★ belongs to whoever buys it first.', 'An <b>Academy</b> cuts prices; capturing one steals a tech.'] },
       { ic: '⚑', t: 'Laws', b: [`Enact: 1 order + ${E.lawCost}✦. Switching sides costs double.`, `${E.lawSlotsStart} slot, +1 at turn ${E.lawSlotTurns.join(', ')}, +1 with Bureaucracy.`, 'Revoking is free.'] },
       { ic: '➤', t: 'Ships', b: ['Each class carries one <b>module</b>; new ships get it.', `<b>Refit</b> at a shipyard upgrades a fleet: ⚙${E.refitIndustryPerShip} per ship.`] },
+      ...(R.systems?.enabled !== false && st.regions[0]?.star ? [
+        { ic: '☉', t: 'Star systems', b: ['Each world is a system: a star and up to 3 bodies.', `<b>Citizens</b> cap comes from bodies + star (max ${R.systems.maxCitizens}).`, `A quiet <b>Core</b> grows a citizen every ${R.systems.growthEvery} turns.`, 'Civil slots come from bodies; a <b>Station</b> adds one.'] },
+        { ic: '⛯', t: 'Gates & slots', b: [`Shipyard: ${R.systems.shipyardCitizens} citizens or a Station. Academy: ${R.systems.academyCitizens}.`, `Military slots: ${R.systems.milSlots}, +${R.systems.chokeSlots} at chokepoints.`, `Waystations (≤${R.systems.waystationCitizens} citizen): forts and depots −${Math.round(R.systems.waystationDiscount * 100)}%.`, 'A black hole stops every fleet entering it.'] },
+      ] : []),
       { ic: '⚛', t: 'Veins & supply', b: ['⚛ Antimatter: Cruisers, Dreadnoughts. ◆ Crystals: Shields, Gates.', 'An <b>Extractor</b> on a connected vein gives access.', '<b>Cut off</b> from your capital: half yield, veins dark.', 'Out of supply, fleets stop repairing and wear down.'] },
     ];
     case 'live': return [

@@ -61,6 +61,10 @@ export function shortWhy(t: string | null | undefined): string {
   if (!t) return '';
   const s = t.toLowerCase();
   const map: [RegExp, string][] = [
+    // star systems (docs/SYSTEMS.md): the cap, gates, sites and slots
+    [/citizens at the cap/, 'at cap'], [/shipyard needs (\d+) citizens/, '$1 citizens or Station'], [/academy needs (\d+) citizens/, '$1 citizens'],
+    [/no free civil slot/, 'no civil slot'], [/no free military slot/, 'no military slot'], [/no belt, barren world or vein/, 'no mine site'],
+    [/trade hub needs/, 'no trade site'], [/no surface to mine/, 'no surface'], [/already has a station/, 'has Station'],
     [/too far \(speed (\d+)\)/, 'too far'], [/adjacent/, 'not adjacent'], [/already yours/, 'already yours'],
     [/at most \d+ orders|already has \d+ orders/, '2 orders max'], [/only just formed/, 'new: next turn'],
     [/fatigued/, 'fatigued'], [/not connected/, 'no route'], [/spectating/, 'spectating'], [/sealed/, 'sealed'],
@@ -71,7 +75,7 @@ export function shortWhy(t: string | null | undefined): string {
     [/up to date/, 'up to date'], [/relic/, 'no relic'], [/must own/, 'not yours'], [/nobody lives/, 'empty void'],
     [/research|requires|needs/, 'locked'], [/all \d+ orders are used/, 'no slot free'],
   ];
-  for (const [re, out] of map) if (re.test(s)) return out;
+  for (const [re, out] of map) { const m = re.exec(s); if (m) return out.replace(/\$(\d)/g, (_, k) => m[Number(k)] ?? ''); }
   return s.replace(/[.!]$/, '').split(/\s+/).slice(0, 3).join(' ');
 }
 

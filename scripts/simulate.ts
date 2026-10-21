@@ -97,8 +97,9 @@ for (const lvStr of suite) {
         if (e.k === 'betrayal') betrayals++;
         if (e.k === 'tech') { (techTurn[e.tech] ??= []).push(s.turn - 1); if (e.stolen) stolen++; }
         if (e.k === 'law') lawCount[e.law] = (lawCount[e.law] ?? 0) + 1;
-        if (e.k === 'project' && e.done && ['academy', 'extractor', 'battery', 'pshield', 'depot', 'gate'].includes(e.key)) empireBuilds[e.key] = (empireBuilds[e.key] ?? 0) + 1;
+        if (e.k === 'project' && e.done && ['academy', 'extractor', 'battery', 'pshield', 'depot', 'gate', 'station', 'shipyard', 'mine', 'tradehub', 'develop', 'fortress'].includes(e.key)) empireBuilds[e.key] = (empireBuilds[e.key] ?? 0) + 1;
         if (e.k === 'note' && e.text.includes('out of supply')) oosNotes++;
+        if (e.k === 'note' && e.text.includes(' grows: citizens')) empireBuilds.growth = (empireBuilds.growth ?? 0) + 1;   // star systems: Core growth
         if (e.k === 'build') { const l = s.players[e.owner].aiLevel; (builds[l] ??= {})[e.cls] = (builds[l][e.cls] ?? 0) + 1; }
       }
       for (const b of s.last!.battles) shipsLost += Object.values(b.losses).reduce((a, x) => a + x, 0);

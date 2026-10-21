@@ -5,6 +5,7 @@ import type { Fleet, GameState, PlayerId, RegionId } from './types.ts';
 import { soulSensor, soulOn, SR, hasBane, hasBoon } from './soul.ts';
 import { traitFx } from './shiptraits.ts';
 import { sigOn, isExposed } from './signature.ts';
+import { starSensor } from './systems.ts';
 
 export function coverage(s: GameState, p: PlayerId): Set<RegionId> {
   const R = s.rules.sensors;
@@ -12,7 +13,7 @@ export function coverage(s: GameState, p: PlayerId): Set<RegionId> {
   const bonus = (s.players[p]?.relics.includes('chorus') ? 1 : 0) + (s.players[p]?.techs?.includes('scanners') && s.rules.empire?.enabled !== false ? 1 : 0);
   for (const r of s.regions) {
     if (r.owner !== p) continue;
-    for (const x of withinArea(s, r.id, R.ownedRange + (r.buildings.sensor ?? 0) + bonus + soulSensor(s, r))) out.add(x);
+    for (const x of withinArea(s, r.id, R.ownedRange + (r.buildings.sensor ?? 0) + bonus + soulSensor(s, r) + starSensor(s, r))) out.add(x);
   }
   for (const f of s.fleets) {
     if (f.owner !== p || !f.ships.length) continue;

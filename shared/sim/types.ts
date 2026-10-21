@@ -1,4 +1,6 @@
 import type { Res, Rules } from '../config/rules.ts';
+import type { StarKind, BodyKind, BodyQuality } from '../config/systems.ts';
+export type { StarKind, BodyKind, BodyQuality, SystemRole } from '../config/systems.ts';
 
 export type PlayerId = number;   // 0..2
 export type RegionId = number;
@@ -46,6 +48,22 @@ export interface Region {
   idleUntil?: number | null;
   /** Fate (Surge): the turn this system produces double (public). */
   surge?: number | null;
+  // ---- Star systems (docs/SYSTEMS.md). Public map knowledge, like terrain. Absent = an old map (no systems).
+  /** The system's star (lane waypoints have none). */
+  star?: StarKind;
+  /** Up to 3 natural bodies (a built Station lives in `buildings.station`). */
+  bodies?: Body[];
+  /** Turns of uncontested growth banked toward the next citizen (public). */
+  growth?: number;
+}
+
+/** A body in a star system: economy and story, never a movement target. */
+export interface Body {
+  kind: BodyKind;
+  name: string;                // deterministic, e.g. "Vel II", "the Ashen Belt"
+  q?: BodyQuality;             // habitable: poor/fair/rich; barren: poor/rich
+  adj?: string;                // flavour: "ocean", "ice"... (habitable worlds)
+  vein?: string | null;        // the vein (Region.vein) sits on this body
 }
 
 /** A world posture in force this turn: what it bet on and how the bet is going. */

@@ -20,7 +20,8 @@ import type { Fleet, FreeAction, GameState, Order, PlayerId, Region, RegionId, S
 import { coverage } from './visibility.ts';
 import { viewFor } from './view.ts';
 import { empireFree, empireCands, empireRegionValue, canField } from './ai-empire.ts';
-import { shipStats, hasTech, hasLaw, baseHp, blueprintFor } from './empire.ts';
+import { shipStats, hasTech, hasLaw, baseHp, blueprintFor, maxDevAt } from './empire.ts';
+import { stationUnblocks, aiSiteBonus } from './systems.ts';
 import { LAW, LAWS } from '../config/empire.ts';
 import { soulFree, soulCands, aiFoundSpec } from './ai-soul.ts';
 import { hasBane } from './soul.ts';
@@ -587,13 +588,18 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
         }
       }
       if (!r.project) {
-        const add = (key: string, v: number) => out.push({ o: { type: 'develop', region: r.id, project: key }, v, tag: `dev:${r.id}` });
+        // star systems: a project blocked by a full civil slot, the Shipyard gate or the citizens cap offers a Station instead;
+        // military/logistics projects are worth a little more where they are cheaper (waystations, pulsar gates)
+        const add = (key: string, v: number) => {
+          out.push({ o: { type: 'develop', region: r.id, project: key }, v: v + aiSiteBonus(s, r, key), tag: `dev:${r.id}` });
+          if (stationUnblocks(s, key, r)) out.push({ o: { type: 'develop', region: r.id, project: 'station' }, v: v * 0.8, tag: `dev:${r.id}` });
+        };
         if (expert) expertProjects(r, add);
         else {
           const threat = enemyPowerNear(s, pid, r.id, 2);
           if (r.kind === 'home' && yard < 2) add('shipyard', s.turn < 10 ? 6 : 3);
           if (r.kind === 'home' && yard === 2 && s.turn > 8) add('shipyard', 3);
-          if (r.dev < R.economy.maxDev && r.kind !== 'void') add('develop', 2.2 + r.dev * 0.4 + (s.turn < 12 ? 1.5 : 0));
+          if (r.dev < maxDevAt(s, r.id) && r.kind !== 'void') add('develop', 2.2 + r.dev * 0.4 + (s.turn < 12 ? 1.5 : 0));
           if ((r.buildings.mine ?? 0) < 2 && r.kind !== 'void') add('mine', 2.5 + (s.turn < 10 ? 1 : 0));
           if ((r.buildings.tradehub ?? 0) < 1 && me0().res.credits < 30) add('tradehub', 3);
           if ((r.buildings.fortress ?? 0) < 2 && (r.kind === 'crown' || r.kind === 'throne' || r.kind === 'home') && !novice) add('fortress', 2 + Math.min(4, threat / 15));
@@ -805,7 +811,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
       if ((r.buildings.fortress ?? 0) < 3 && threat > 0.2) add('fortress', 3 + threat * 8);
     }
     if (left < 4) return;
-    if (r.dev < R.economy.maxDev && r.kind !== 'void') {
+    if (r.dev < maxDevAt(s, r.id) && r.kind !== 'void') {
       const y = R.economy.yields[r.kind] ?? R.economy.yields.colony;
       add('develop', 1.5 + (y.industry + y.credits) * 0.3 + early * 2);
     }

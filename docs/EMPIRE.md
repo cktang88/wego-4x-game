@@ -36,7 +36,7 @@ Bastion|Vanguard · Mercantile|Industrial · Centralism|Federation · Martial La
 ## Worlds
 Map generation gives regions a **trait** (Forge, Garden, Bulwark, Gas Giant) and places a few
 **veins** of Antimatter ⚛ (cruisers, dreadnoughts) and Crystals ◆ (planetary shields, warp gates).
-An **Extractor** on a vein you own pays credits and gives access while it stays connected.
+An **Extractor** on a vein you own pays credits and gives access while it stays connected. With star systems (docs/SYSTEMS.md) the traits are carried by bodies, and Develop is capped by each system's citizens cap.
 
 ## Supply
 Your regions that link back to your capital through your territory (or your warp gates), with no
