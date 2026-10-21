@@ -16,18 +16,31 @@ There is no prediction menu and nothing to type. Every posture:
 The replay reveals every posture with a **CALLED IT** flash when a read pays off, and a **CAUGHT OUT** stamp when it backfires.
 
 ### Fleet postures
-| Posture | You're betting that… | Right: payoff | Wrong: penalty |
-|---|---|---|---|
-| **Brace** | they attack you *here* | fortified, first strike, +defence for the whole battle | *Dug in*: can't move next turn |
-| **Charge** (on a seize/attack) | the defender is *not* braced | first strike and +damage for the opening rounds | if they Braced: the charge breaks, you eat their first volley and lose a round |
-| **Ambush** (in a system or lane waypoint next to their path) | they come *through here* | the enemy is stopped where they enter, and you strike first | *Exposed*: revealed to everyone, and fatigued (−attack) next turn |
-| **Shadow ⟨enemy fleet⟩** (adjacent) | that fleet *moves* | you follow it and engage wherever it ends its move, with first strike | if it stays put, your fleet wastes the turn (no move or attack, no order refund) |
-| **Run Silent** | they *scan or hunt* for you | hidden from sensors even when adjacent; a hunter that misses you is itself revealed | if they don't scan, you lose the turn's supply and repairs (lights off) |
+There are five, and each is a single, non-overlapping bet. **Steady** is the default and the right choice
+most turns. The other four are worth taking only when you are actually reading your friend, because
+each one costs something when the read is wrong.
 
-**The triangle that makes it a mind game:**
-- Charge beats a normal defender. Brace beats Charge. A non-attack beats Brace, because the bracer gets dug in.
-- Ambush and Shadow punish the mover. Staying put punishes them.
-- Your own feints and scans tilt every read.
+| Posture | The bet | Right: payoff | Wrong / cost |
+|---|---|---|---|
+| **Steady** (default) | none | none | none |
+| **Guarded** | "they attack me *here*" | fortified, first strike, +defence for the whole battle | −1 speed and can't attack this turn; if no one comes, *dug in*: can't move next turn |
+| **Running** | "my path is *clear*" | +2 speed this turn (long routes arrive early) | if anyone intercepts or engages you this turn: caught strung out, you can't fire in round 1 and take +50% damage |
+| **Charge** (only with a Seize) | "the defender is *not* guarded" | first strike and +damage for the opening rounds | if they were Guarded: the charge breaks, you eat their first volley and lose a round |
+| **Ambush** (stationary, in a system or on a lane waypoint) | "they come *through here*" | hidden; any hostile fleet entering is stopped there and you strike first | if no one comes: *exposed*, revealed to everyone and fatigued (−attack) next turn |
+
+**No overlap:**
+- Guarded protects *a place you hold* against an attack.
+- Ambush *catches movers* (it works in empty space and on lanes).
+- Charge is the attacker's bet against Guarded.
+- Running is the mover's bet against Ambush.
+- Steady never wins a read and never loses one.
+
+**The mind game:**
+- Charge beats Steady. Guarded beats Charge. Not attacking beats Guarded (the defender gets dug in).
+- Ambush beats Running. Not coming beats Ambush.
+- Feints and scans tilt every read.
+
+**Shadow and Run Silent** were cut to keep the set small and distinct (see TODO.md).
 
 ### World postures (systems you own)
 | Posture | Betting that… | Right | Wrong |

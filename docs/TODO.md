@@ -45,6 +45,12 @@ attacks me, our pact activates"). They sit beside non-binding chat.
 ## Secret Ambitions
 A hidden objective aimed at a named rival, worth VP and revealed at the end. It blunts dog-piling.
 
+## More postures
+- **Shadow ⟨enemy fleet⟩:** follow a fleet if it moves, and engage where it stops.
+- **Run Silent:** hidden from scans; a hunter that misses you is revealed.
+
+These were cut from the first set to keep postures few and non-overlapping.
+
 ## Other
 - Ship-trait and fleet-boon balance dashboards in `scripts/simulate.ts`.
 - A shareable Saga page (image export).
