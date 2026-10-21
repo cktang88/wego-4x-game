@@ -1,110 +1,57 @@
-# Signature mechanics: the things people will describe the game by
+# Signature mechanics
 
-A signature mechanic must (1) solve a problem only *this* game has, (2) be explainable in one
-sentence, and (3) create moments people retell. Old World's Orders solve "4X micromanagement". Azul's
-draft solves "what you take is what you deny". Ours must solve the problems of a **3-friend,
-simultaneous-secret-turn, story** game:
+A signature mechanic solves a problem only *this* game has, fits in one sentence, and creates
+moments people retell. Ours serve a **3-friend, simultaneous-secret-turn, story** game.
 
-| Problem | Why it hurts |
-|---|---|
-| WEGO's core skill (reading your friends) is invisible and unrewarded | the best play leaves no trace; defence is passive |
-| Luck can decide a battle and feel like the "RNG god" | losses feel unearned, and unearned losses don't make stories |
-| Three players → dog-piling and kingmaking | the trailer decides the winner, arbitrarily |
-| Friends play many games together, but each game is forgotten | no running feuds, no legends |
-| Betrayal needs teeth *and* plausibility, asynchronously | pacts are either toothless or rigid |
+## 1. ⭐ Postures: "Call It" through commitment, not menus
+**One sentence:** you predict your friend's move by *committing your forces* to a posture. Right, and
+you win the moment; wrong, and you pay for it.
 
-## 1. ⭐ Call It (Gambits): the headline mechanic
-**One sentence:** each turn, besides your 5 orders, you seal one secret prediction of a rival's move;
-if you called it, your trap springs.
+There is no prediction menu and nothing to type. Every posture:
+- is a real tactical stance with a **payoff if the read was right** and a **penalty if it was wrong**;
+- is secret (rivals see it only by scanning or adjacency);
+- shows on your own map as a literal icon on the fleet;
+- costs no order: you set it on the fleet each turn, one posture per fleet, and it lasts that turn (in LIVE, one cycle).
 
-**What you call:** pick from a structured menu of *player* + *verb* + *place*:
-- "Sam attacks Vel"
-- "Tom's fleet passes the Veil lane"
-- "Jess takes the Throne"
-- "someone excavates Ilos"
+The replay reveals every posture with a **CALLED IT** flash when a read pays off, and a **CAUGHT OUT** stamp when it backfires.
 
-**If it comes true, the gambit fires on that action during the same resolution step:**
+### Fleet postures
+| Posture | You're betting that… | Right: payoff | Wrong: penalty |
+|---|---|---|---|
+| **Brace** | they attack you *here* | fortified, first strike, +defence for the whole battle | *Dug in*: can't move next turn |
+| **Charge** (on a seize/attack) | the defender is *not* braced | first strike and +damage for the opening rounds | if they Braced: the charge breaks, you eat their first volley and lose a round |
+| **Ambush** (in a system or lane waypoint next to their path) | they come *through here* | the enemy is stopped where they enter, and you strike first | *Exposed*: revealed to everyone, and fatigued (−attack) next turn |
+| **Shadow ⟨enemy fleet⟩** (adjacent) | that fleet *moves* | you follow it and engage wherever it ends its move, with first strike | if it stays put, your fleet wastes the turn (no move or attack, no order refund) |
+| **Run Silent** | they *scan or hunt* for you | hidden from sensors even when adjacent; a hunter that misses you is itself revealed | if they don't scan, you lose the turn's supply and repairs (lights off) |
 
-| Gambit | Effect |
-|---|---|
-| Ambush (attack/seize called) | your forces there and next door fortify and strike first; idle fleets next door join |
-| Snare (movement through a lane called) | the mover stops on the waypoint, and your nearest fleet in range intercepts it |
-| Counter-intel (an intel action called) | their scan or feint fails and shows them false picture |
-| Foresight (anything else called) | +1 VP and a Herald headline: "Kith called it" |
+**The triangle that makes it a mind game:**
+- Charge beats a normal defender. Brace beats Charge. A non-attack beats Brace, because the bracer gets dug in.
+- Ambush and Shadow punish the mover. Staying put punishes them.
+- Your own feints and scans tilt every read.
 
-**If it misses:** nothing is lost but the opportunity. Only you see that it missed.
+### World postures (systems you own)
+| Posture | Betting that… | Right | Wrong |
+|---|---|---|---|
+| **Call the Levies** | a siege lands here *this turn* | garrison ×1.5 at once | that system's output is lost this turn and next |
+| **Scorched Earth** | you *lose* it this turn | the conqueror gets nothing (no plunder, no capture loot) and the Calling is razed by *you* | if you hold it: development −1 for nothing |
+| **Open the Gates** | an *ally* (pact) needs refuge | their fleet repairs here as if it were their own yard | if a non-ally arrives, the garrison doesn't fire in round 1 |
 
-**Why it's needed:**
-- It turns the one skill that matters in WEGO, knowing your friends, into a visible move with payoff.
-- Defence becomes active play: "I think he goes for Vel; I'll set the ambush and keep my fleet free".
-- It gives the existing feints and scans a purpose. A feint now *baits* a wrong call, and a scan *confirms* one: bluffing becomes real.
-
-**The replay moment:** the arrow reaches Vel, the screen flashes **"CALLED IT — Kith saw this coming"**, and the ambush fires. Your friend is shouting.
-
-**Live mode:** a gambit stands for a whole cycle as a trap.
-
-**Guardrails:**
-- One gambit per turn, so it costs no orders, but you can only guard one guess.
-- Ambush only works where you have forces next door.
-- Predictions are menu-structured, so they are unambiguous and the AI can play them too.
+**The AI** plays postures from its threat map and battle predictor. It reads your patterns (where you attacked before, which postures you favour) as human friends will.
 
 ## 2. ⭐ Fate: luck you spend, not luck that happens to you
-**One sentence:** each player holds three Fate tokens per game; spend one to bend a battle, and everyone sees it.
+**One sentence:** three Fate tokens per game turn a dice roll into a decision everyone saw you make.
 
-**Uses (one per battle per side):**
-- **Reroll** this round's worst volley.
-- **Hold the line:** ignore a forced retreat this turn.
-- **Seize the initiative:** strike first next round.
+**Uses** (one Fate per battle per side; each one public, with a Herald headline):
+- **Last Stand:** this fleet will not rout or be forced out this battle, and gets +hit.
+- **Surge:** one system produces double this turn, or a build there completes instantly.
+- **Hyperjump:** a fleet moves +3 steps this turn, through a blockade.
+- **Twist of Fate:** reroll this round's worst volley against you.
+- **Rally:** a Limping fleet repairs to 60% where it stands.
 
-**Rules:**
-- A trailing player gets a fourth token. It's a comeback mechanism, but it feels heroic, not like pity.
-- Every spend is public, makes a Herald headline, and is a peak moment: "He burned his last Fate at the Throne."
+**Supply:** 3 tokens per game, and a player 10+ VP behind gets a 4th, once. It is a comeback that feels heroic, not like pity.
 
-**Why it's needed:** it answers "RNG god decides the game". The big swings are *chosen*, scarce and
-visible, so they make stories, not resentment.
+## 3. Build order
+1. **Postures**, the headline. They need a sim hook in movement and combat, AI support, and in the UI a posture selector on the fleet card, an icon on the fleet token, and the replay stamps.
+2. **Fate**: sim, AI, UI.
 
-## 3. ⭐ The Legacy Galaxy: your friend group's galaxy remembers
-**One sentence:** a group plays the same galaxy again and again, and it keeps the scars.
-
-**What carries over between games:**
-- System epithets and memorials.
-- The winner renames one system forever ("Tom's Folly").
-- Wreck fields and monuments of famous battles.
-- The King's List of every Throne holder across games.
-- A legendary fleet of the last game can be founded again as a returning banner, with the same name and one honour.
-- Commanders' nemesis records.
-- The league table: feuds, oaths kept and broken.
-
-**Why it's needed:** friends replay with friends. No 4X lets your group's history *become the map*.
-"This is where I beat you last spring" is the strongest emotional anchor available, and only a
-friend-group game can have it.
-
-## 4. Turncoats: social deduction inside the 4X (later)
-**One sentence:** influence can secretly plant an agent in a rival's fleet or world; activate it once, at the worst possible moment.
-
-**How it works:**
-- Commanders with grievances (ignored vows, scars, broken by Oathbreaker orders) are easier to turn.
-- Counterplay: Scan exposes agents; Martial Law and honoured commanders resist.
-
-**Why it's needed:** it gives betrayal mechanical teeth beyond pacts. "My flagship turned on me in the
-Battle of the Throne" is a story people tell for years.
-
-## 5. Contracts: deals that execute themselves (later)
-**One sentence:** write a deal as conditions and the engine keeps it, e.g. "while you don't enter Vel,
-I pay you 5¢ a turn", or "if Sam attacks me, our pact activates".
-
-**Why it's needed:** async diplomacy breaks when partners aren't online to honour deals. Contracts sit
-beside non-binding talk, so binding and lying both have a place.
-
-## 6. Secret Ambitions (later)
-**One sentence:** each player draws a hidden ambition aimed at a named rival ("Sam never holds the
-Throne three turns running"), worth VP and revealed at the end.
-
-**Why it's needed:** hidden victory information blunts dog-piling the leader, and the end reveal
-rewrites the replay: "you were after *me* the whole time?"
-
-## Build order
-1. **Call It.** It is the signature; it needs a sim hook in resolution, AI predictions and a small UI (a sealed card plus the replay flash).
-2. **Fate.** It is small and fixes the luck complaint.
-3. **Legacy Galaxy.** It merges with the League ledger (Soul phase C).
-4. **Turncoats, Contracts, Ambitions.**
+Later ideas are kept in [TODO.md](TODO.md).

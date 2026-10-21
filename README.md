@@ -12,6 +12,15 @@ A **3-player competitive WEGO space 4X** you can play with friends asynchronousl
 
 Underneath the five orders sits a small 4X spine: invest now, pay off later, without micromanagement. In the **Empire** tab you research one technology per turn across four branches (with an exclusive fork and a one-per-game ★ at the top of each), enact laws from a Charter of opposed pairs, and pick the module each ship class carries. On the map, world traits and Antimatter / Crystal veins make some planets worth fighting for, and supply lines matter: regions cut off from your capital yield half, and fleets beyond supply wear down. Design and numbers: [docs/EMPIRE.md](docs/EMPIRE.md).
 
+## Design docs
+
+- [docs/EMPIRE.md](docs/EMPIRE.md): research, laws, ship modules, worlds, supply
+- [docs/UX-V2.md](docs/UX-V2.md): the game UI (semantic-zoom map, drag-to-order, HUD, modals)
+- [docs/SOUL.md](docs/SOUL.md): fleets as characters, worlds with a story, friends as antagonists
+- [docs/SYSTEMS.md](docs/SYSTEMS.md): star systems (stars, bodies, roles, citizens, contested systems)
+- [docs/SIGNATURE.md](docs/SIGNATURE.md): signature mechanics (Postures, Fate)
+- [docs/TODO.md](docs/TODO.md): ideas we like but haven't built yet (Legacy Galaxy, League, Exile, Turncoats…)
+
 ## Quick start
 
 ```bash
