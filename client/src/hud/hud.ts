@@ -14,7 +14,7 @@ import { renderStrip, renderPrimary, bindStrip } from './strip.ts';
 import { renderCard, bindCard } from './card.ts';
 import { renderNotes, bindNotes } from './notify.ts';
 import * as M from '../ui/modals.ts';
-import { fmtClock, plus, shortName, tip } from './util.ts';
+import { fmtClock, plus, shortName, tip, safeInsets } from './util.ts';
 import { fatePill, fatePop } from './signature.ts';
 import { ic, icFor } from '../art/icons.ts';
 import { audio } from '../audio/audio.ts';
@@ -208,9 +208,10 @@ export class Hud {
     this.g.keepInputs(p, () => this.g.setHtml(p, html));
     if (!anchor) return;
     const r = anchor.getBoundingClientRect(), w = p.offsetWidth, hh = p.offsetHeight;
+    const si = safeInsets(this.g.root);
     const top = r.top < window.innerHeight / 2 ? r.bottom + 8 : r.top - hh - 8;
-    p.style.left = `${Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2)))}px`;
-    p.style.top = `${Math.round(Math.max(8, top))}px`;
+    p.style.left = `${Math.round(Math.max(8 + si.l, Math.min(window.innerWidth - w - 8 - si.r, r.left + r.width / 2 - w / 2)))}px`;
+    p.style.top = `${Math.round(Math.max(8 + si.t, top))}px`;
   }
   private popHtml(kind: string): string {
     const g = this.g, st = g.st;

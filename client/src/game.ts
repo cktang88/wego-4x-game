@@ -20,13 +20,13 @@ import { h, esc, toast, overlay, roman, resetUiFx } from './ui/dom.ts';
 import { ic, icFor, glyphHtml, iconizeHtml } from './art/icons.ts';
 import { nextTickAt, tickMs, etaTicks, tickInCycle } from '../../shared/sim/live.ts';
 import type { FreeAction } from '../../shared/sim/types.ts';
-import { TECH, LAW, BRANCHES } from '../../shared/config/empire.ts';
+import { TECH, LAW, BRANCHES, MODULE } from '../../shared/config/empire.ts';
 import { connected, supplied, techCost, researchBlock, opposite, researchedThisTurn, gateNeighbors } from '../../shared/sim/empire.ts';
 import { empireFreeText, pendingResearch, type EmpFocus } from './ui/empire.ts';
 import { Hud } from './hud/hud.ts';
 import { Gestures } from './hud/gestures.ts';
 import { Teach } from './hud/onboarding.ts';
-import { fmtDur, shortWhy, typing } from './hud/util.ts';
+import { fmtDur, shortWhy, typing, safeInsets } from './hud/util.ts';
 import { intentFor, commitIntent, type Intent } from './hud/verbs.ts';
 import { applyFoundingVows } from './hud/soul.ts';
 import { postureMap } from './hud/signature.ts';
@@ -198,10 +198,12 @@ export class GameScreen {
       t.innerHTML = glyphHtml(esc(el.dataset.tip ?? ''));
       t.classList.remove('hidden');
       const r = el.getBoundingClientRect(), w = t.offsetWidth, hh = t.offsetHeight;
+      // keep clear of the notch / home bar (a tip above a top-bar pill went under the Dynamic Island)
+      const si = safeInsets(this.root);
       let y = r.top - hh - 8;
-      if (y < 8) y = r.bottom + 8;
-      t.style.left = `${Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2)))}px`;
-      t.style.top = `${Math.round(Math.max(8, y))}px`;
+      if (y < 8 + si.t) y = r.bottom + 8;
+      t.style.left = `${Math.round(Math.max(8 + si.l, Math.min(window.innerWidth - w - 8 - si.r, r.left + r.width / 2 - w / 2)))}px`;
+      t.style.top = `${Math.round(Math.max(8 + si.t, y))}px`;
     };
     const hide = () => { shownFor = null; t.classList.add('hidden'); };
     this.hideTip = hide;
@@ -215,15 +217,17 @@ export class GameScreen {
     this.root.addEventListener('pointerleave', hide);
     this.root.addEventListener('pointerdown', () => hide());
     // touch: long-press anything with a tip (buttons included) to read it
-    let lp = 0;
+    let lp = 0, held = false;
     this.root.addEventListener('pointerdown', e => {
+      held = false;
       if (e.pointerType === 'mouse') return;
       const el = (e.target as HTMLElement).closest<HTMLElement>('[data-tip]');
       clearTimeout(lp);
-      if (el) lp = window.setTimeout(() => { show(el); this.tipHeldUntil = performance.now() + 400; }, 420);
+      if (el) lp = window.setTimeout(() => { show(el); held = true; this.tipHeldUntil = performance.now() + 400; }, 420);
     });
     const clear = () => clearTimeout(lp);
-    this.root.addEventListener('pointerup', clear);
+    // the click comes with the release, however long the finger stayed down: swallow it from there
+    this.root.addEventListener('pointerup', () => { clear(); if (held) { held = false; this.tipHeldUntil = performance.now() + 400; } });
     this.root.addEventListener('pointercancel', clear);
     this.root.addEventListener('pointermove', e => { if (e.pointerType !== 'mouse' && Math.abs(e.movementX) + Math.abs(e.movementY) > 6) clear(); });
     // a long-press that showed a tip must not also click
@@ -271,7 +275,7 @@ export class GameScreen {
   pushFree(fa: FreeAction, noSnap = false) {
     if (this.live) { this.src.liveFree?.(fa); return; }
     if (!noSnap) this.snapshot();
-    if (fa.type === 'merge' || fa.type === 'doctrine' || fa.type === 'rename') this.plan.free = this.plan.free.filter(x => !(x.type === fa.type && x.fleet === fa.fleet));
+    if (fa.type === 'merge' || fa.type === 'doctrine' || fa.type === 'rename' || fa.type === 'halt') this.plan.free = this.plan.free.filter(x => !(x.type === fa.type && x.fleet === fa.fleet));
     this.plan.free.push(fa);
     this.savePlan();
   }
@@ -541,7 +545,12 @@ export class GameScreen {
   removeFree(i: number) {
     if (!this.canPlan || this.live || !this.plan.free[i]) return;
     this.snapshot();
-    this.plan.free.splice(i, 1);
+    const [gone] = this.plan.free.splice(i, 1);
+    // a ship design whose module needed the research just taken out would fail at resolution: it goes too
+    if (gone.type === 'research' && this.you !== null) {
+      const techs = this.st.players[this.you].techs ?? [], pend = pendingResearch(this);
+      this.plan.free = this.plan.free.filter(x => !(x.type === 'blueprint' && !!MODULE[x.mod]?.tech && !techs.includes(MODULE[x.mod].tech!) && MODULE[x.mod].tech !== pend));
+    }
     this.savePlan();
     this.renderAll();
   }
@@ -622,9 +631,12 @@ export class GameScreen {
     if (this.mode && (!this.canPlan || ('fleet' in this.mode && !this.fleet(this.mode.fleet)))) this.mode = null;
     const last = this.st.last;
     const news = this.empireNews();
-    if (last && last.turn > this.lastSeenTurn && this.st.turn > 1 && this.src.kind === 'remote' && document.hidden) {
-      document.title = `(!) Turn ${this.st.turn} · Three Crowns`;
-      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Three Crowns', { body: `Turn ${last.turn} resolved. Your move, commander.` }); } catch { /* */ }
+    // once per turn / cycle: a LIVE game never advances lastSeenTurn, so a hidden tab notified again on every tick
+    // (keyed on the current turn: a cycle's last tick and the next cycle's ticks carry different result turns)
+    if (last && last.turn > this.lastSeenTurn && this.st.turn > Math.max(1, this.notifiedTurn) && this.src.kind === 'remote' && document.hidden) {
+      this.notifiedTurn = this.st.turn;
+      document.title = `(!) ${this.live ? 'Cycle' : 'Turn'} ${this.st.turn} · Three Crowns`;
+      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Three Crowns', { body: this.live ? `Cycle ${this.st.turn - 1} ended.` : `Turn ${last.turn} resolved. Your move, commander.` }); } catch { /* */ }
       document.removeEventListener('visibilitychange', this.onVisible);
       document.addEventListener('visibilitychange', this.onVisible);
     }
@@ -663,6 +675,8 @@ export class GameScreen {
     if (this.st.winner === null) this.later(() => this.heraldCheck(), 60);
   }
   lastSeenKey = '';
+  /** the turn / cycle a background notification was last shown in */
+  notifiedTurn = 0;
   /** Your seat even once the game is over (its view is then the revealed, seatless one). */
   mySeat(): number | null {
     if (this.you !== null) return this.you;
@@ -711,7 +725,8 @@ export class GameScreen {
     if (this.replay?.preview) { this.replay = null; this.fx = []; this.previewing = false; this.map.resetAnim(); }
     // numbers that count between values would flash the previous player's resources
     resetUiFx();
-    document.querySelectorAll('.overlay:not(.curtain), .bv-overlay').forEach(x => x.remove());
+    // (and the Charge? offer floating over the region the previous player just chose to seize)
+    document.querySelectorAll('.overlay:not(.curtain), .bv-overlay, .chargeoffer').forEach(x => x.remove());
     closeHerald(); closeSaga();
     this.curtain?.remove();
     const o = overlay(`<div class="dialog" style="text-align:center"><h1 style="color:${this.color(seat)}">${esc(name)}</h1>

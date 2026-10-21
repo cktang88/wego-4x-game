@@ -98,7 +98,7 @@ function ownFleet(g: GameScreen, f: Fleet): string {
     const dest = f.route.seize ?? f.route.path[f.route.path.length - 1] ?? f.region;
     const left = Math.max(1, f.route.path.length);
     const eta = g.live ? fmtDur((etaTicks(st, f.id) ?? 0) * tickMs(st)) : `${Math.max(1, Math.ceil(left / Math.max(1, speed)))}t`;
-    status.push(`<span${tip('Travelling: keeps going each turn')}>${f.route.seize !== null ? '⚔' : '➤'} ${esc(st.regions[dest]?.name ?? '?')} · ${eta}</span>${g.canPlan ? '<button class="mini" data-a="halt">■ Halt</button>' : ''}`);
+    status.push(`<span${tip('Travelling: keeps going each turn')}>${f.route.seize !== null ? '⚔' : '➤'} ${esc(st.regions[dest]?.name ?? '?')} · ${eta}</span>${!g.canPlan ? '' : !g.live && g.plan.free.some(x => x.type === 'halt' && x.fleet === f.id) ? `<span class="warn"${tip('Stops where it is when the turn resolves')}>■ Halting</span>` : '<button class="mini" data-a="halt">■ Halt</button>'}`);
   }
   // ship fan
   const lifted = g.lifted;
@@ -122,7 +122,7 @@ function ownFleet(g: GameScreen, f: Fleet): string {
     acts += ib('scan', '◎', 'Scan', why({ type: 'scan', target: f.region }), '', 'Reveal this area');
     if (here.owner === g.you && (here.buildings.shipyard ?? 0) > 0 && f.ships.some(s => s.mod !== blueprintFor(bpState, g.you!, s.cls) || s.hp < s.maxHp)) acts += ib('refit', '⚒', 'Refit', why({ type: 'refit', fleet: f.id }), '', 'Repair and upgrade');
     if (here.relic === 'unclaimed') acts += ib('excavate', '✧', 'Excavate', here.owner === g.you ? why({ type: 'excavate', fleet: f.id }) : 'you must own the region', '', 'Dig up the relic');
-    if (f.ships.length > 1) acts += ib('split', '✂', nLift ? `Split ${nLift}` : 'Split ½', g.fleetUses(f.id) > 0 ? 'has orders' : null, '', 'Free: forms a new fleet');
+    if (f.ships.length > 1) acts += ib('split', '✂', nLift ? `Split ${nLift}` : 'Split ½', g.fleetUses(f.id) > 0 ? 'has orders' : splitIds(g, f) ? null : 'its other ships are already splitting off', '', 'Free: forms a new fleet');
     acts += fleetSoulActs(g, f, ib);
     const d = g.doctrineOf(f);
     acts += `<span class="seg" role="group" aria-label="Doctrine">${STANCES.map(x => `<button class="${d.stance === x.id ? 'on' : ''}" data-a="stance" data-s="${x.id}"${tip(x.tip)}><i>${x.icon}</i><span>${x.label}</span></button>`).join('')}</span>`;
@@ -323,7 +323,12 @@ export function bindCard(g: GameScreen, el: HTMLElement) {
     if (v && v !== g.fleet(g.sel.id)?.name) g.pushFree({ type: 'rename', fleet: g.sel.id, name: v });
     g.renderAll();
   });
-  el.addEventListener('keydown', e => e.stopPropagation());
+  el.addEventListener('keydown', e => {
+    e.stopPropagation();
+    // Enter / Esc leave the name field: re-renders put the focus back into it, so the board's shortcuts stayed dead
+    const t = e.target as HTMLElement;
+    if ((e.key === 'Enter' || e.key === 'Escape') && t.matches('input')) (t as HTMLInputElement).blur();
+  });
   // ship fan: tap lifts a chip; dragging chips out onto the map splits them off
   el.addEventListener('pointerdown', e => {
     const chip = (e.target as HTMLElement).closest<HTMLElement>('[data-ship]');
@@ -361,6 +366,19 @@ export function bindCard(g: GameScreen, el: HTMLElement) {
   el.addEventListener('pointercancel', swEnd);
 }
 
+/**
+ * The ships a Split takes off this fleet: the lifted ones, else half. WEGO splits wait for the turn, so ships already
+ * in a planned split are left out (splitting the same half twice failed at resolution); null when nothing can go.
+ */
+export function splitIds(g: GameScreen, f: Fleet): number[] | null {
+  const gone = new Set(g.live ? [] : g.plan.free.flatMap(x => (x.type === 'split' && x.fleet === f.id ? x.ships : [])));
+  const left = f.ships.filter(s => !gone.has(s.id));
+  if (left.length < 2) return null;
+  const lifted = left.filter(s => g.lifted.has(s.id)).map(s => s.id);
+  const ids = lifted.length && lifted.length < left.length ? lifted : left.slice(Math.ceil(left.length / 2)).map(s => s.id);
+  return ids.length ? ids : null;
+}
+
 /** Card / ring / keyboard actions on the current selection. */
 export function cardAction(g: GameScreen, a: string, data: DOMStringMap, shift = false) {
   const sel = g.sel;
@@ -392,9 +410,8 @@ export function cardAction(g: GameScreen, a: string, data: DOMStringMap, shift =
       case 'refit': g.addOrder({ type: 'refit', fleet: f.id }); break;
       case 'halt': if (g.live) g.src.liveHalt?.(f.id); else { g.pushFree({ type: 'halt', fleet: f.id }); g.renderAll(); } break;
       case 'split': {
-        const lifted = f.ships.filter(s => g.lifted.has(s.id)).map(s => s.id);
-        const ids = lifted.length && lifted.length < f.ships.length ? lifted : f.ships.slice(Math.ceil(f.ships.length / 2)).map(s => s.id);
-        if (!ids.length) return;
+        const ids = splitIds(g, f);
+        if (!ids) return;
         g.pushFree({ type: 'split', fleet: f.id, ships: ids });
         g.lifted.clear();
         g.renderAll();

@@ -10,6 +10,7 @@ import { tickMs } from '../../../shared/sim/live.ts';
 import type { GameScreen } from '../game.ts';
 import { fmtDur, shortWhy } from './util.ts';
 import { toast } from '../ui/dom.ts';
+import { audio } from '../audio/audio.ts';
 
 export type Verb = 'move' | 'overdrive' | 'seize' | 'join' | 'merge' | 'split' | 'invalid';
 export interface DragSrc { fleet: number; ships?: number[] }
@@ -260,7 +261,17 @@ export function commitIntent(g: GameScreen, it: Intent): boolean {
     return true;
   }
   if (it.order && it.replace !== undefined) {
-    if (g.live) { g.src.liveCancel?.(it.replace); return g.addOrder(it.order, true); }
+    if (g.live) {
+      // take the old order back and queue the new one in one go: the cancel's refund only reaches an online client
+      // with the next view, so addOrder's bank check said "No orders banked" and the fleet lost its order
+      if (!g.canPlan) return false;
+      g.src.liveCancel?.(it.replace);
+      g.src.liveOrder?.(it.order);
+      audio.ui('order');
+      g.flashSlot(it.replace);
+      g.afterAction();
+      return true;
+    }
     g.plan.orders[it.replace] = it.order;
     g.savePlan();
     g.flashSlot(it.replace);

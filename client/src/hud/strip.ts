@@ -70,10 +70,13 @@ export function renderStrip(g: GameScreen, el: HTMLElement) {
   }
   g.root.classList.toggle('no-strip', !html);
   if (!g.setHtml(el, html)) g.tickClocks();
-  // the open free-changes list follows the plan
+  // the open free-changes list follows the plan (a replaced doctrine / posture keeps the chip's html the same, so
+  // the list kept showing the old text; a rebuilt strip used to drop it)
   const list = el.querySelector('.freelist');
-  if (list && !g.plan.free.length) list.remove();
+  if (!freeOpen || g.live || !g.plan.free.length || !el.querySelector('[data-act=free]')) { list?.remove(); freeOpen = false; }
+  else fillFreeList(g, el, list as HTMLElement | null);
 }
+let freeOpen = false;
 
 export function renderPrimary(g: GameScreen, el: HTMLElement) {
   const st = g.st;
@@ -204,9 +207,12 @@ function focusOrder(g: GameScreen, o: Order) {
 
 function toggleFreeList(g: GameScreen, strip: HTMLElement) {
   const old = strip.querySelector('.freelist');
+  freeOpen = !old;
   if (old) { old.remove(); return; }
-  const box = document.createElement('div');
-  box.className = 'freelist';
-  box.innerHTML = g.plan.free.map((f, i) => `<div class="fr"><i>${freeIcon(f.type)}</i><span>${esc(g.freeText(f))}</span>${g.canPlan ? `<button data-delfree="${i}" aria-label="Remove">${X}</button>` : ''}</div>`).join('');
-  strip.appendChild(box);
+  fillFreeList(g, strip, null);
+}
+function fillFreeList(g: GameScreen, strip: HTMLElement, box: HTMLElement | null) {
+  const html = g.plan.free.map((f, i) => `<div class="fr"><i>${freeIcon(f.type)}</i><span>${esc(g.freeText(f))}</span>${g.canPlan ? `<button data-delfree="${i}" aria-label="Remove">${X}</button>` : ''}</div>`).join('');
+  if (!box) { box = document.createElement('div'); box.className = 'freelist'; strip.appendChild(box); }
+  if (box.dataset.html !== html) { box.dataset.html = html; box.innerHTML = html; }
 }

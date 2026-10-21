@@ -76,3 +76,19 @@ export function typing(t: EventTarget | null): boolean {
   const e = t as HTMLElement | null;
   return !!e && (e.tagName === 'INPUT' || e.tagName === 'TEXTAREA' || e.tagName === 'SELECT' || e.isContentEditable);
 }
+
+/** The device's safe-area insets in CSS px (iPhone notch / Dynamic Island / home bar), read through the shell's
+ *  --safe-* variables so JS-placed popovers keep clear of the same areas the CSS does. */
+const probes = new WeakMap<HTMLElement, HTMLElement>();
+export function safeInsets(root: HTMLElement): { t: number; r: number; b: number; l: number } {
+  let p = probes.get(root);
+  if (!p || !p.isConnected) {
+    p = document.createElement('div');
+    p.setAttribute('aria-hidden', 'true');
+    p.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;padding:var(--safe-t,0px) var(--safe-r,0px) var(--safe-b,0px) var(--safe-l,0px)';
+    root.appendChild(p);
+    probes.set(root, p);
+  }
+  const cs = getComputedStyle(p);
+  return { t: parseFloat(cs.paddingTop) || 0, r: parseFloat(cs.paddingRight) || 0, b: parseFloat(cs.paddingBottom) || 0, l: parseFloat(cs.paddingLeft) || 0 };
+}

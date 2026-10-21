@@ -6,6 +6,7 @@
 import type { GameScreen } from '../game.ts';
 import { esc } from '../ui/dom.ts';
 import { intentFor } from './verbs.ts';
+import { safeInsets } from './util.ts';
 import { ic } from '../art/icons.ts';
 
 type Step = 'drag' | 'seal' | 'build' | 'enemy' | 'research' | 'laws' | 'posture';
@@ -123,7 +124,7 @@ export class Teach {
     el.style.visibility = '';
     const w = el.offsetWidth, h = el.offsetHeight;
     let top = y - h - 12;
-    if (top < 56) { top = y + 40; below = true; }
+    if (top < 56 + safeInsets(g.root).t) { top = y + 40; below = true; }
     el.classList.toggle('below', below);
     el.style.transform = `translate(${Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, x - w / 2)))}px, ${Math.round(top)}px)`;
   }

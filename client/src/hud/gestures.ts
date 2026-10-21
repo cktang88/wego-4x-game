@@ -8,9 +8,9 @@ import { MAX_JOINERS, orderCost, costText } from '../../../shared/sim/orders.ts'
 import { blueprintFor } from '../../../shared/sim/empire.ts';
 import { esc, uiScale } from '../ui/dom.ts';
 import { intentFor, targetMap, commitIntent, isLane, VERB_COLOR, type DragSrc, type Intent } from './verbs.ts';
-import { cardAction } from './card.ts';
+import { cardAction, splitIds } from './card.ts';
 import { offerCharge } from './signature.ts';
-import { shortWhy } from './util.ts';
+import { shortWhy, safeInsets } from './util.ts';
 import { glyphHtml, ic } from '../art/icons.ts';
 
 interface Press { id: number; x: number; y: number; touch: boolean; fleet: number | null; moved: boolean; pan: { cx: number; cy: number } | null; lp: number; longed: boolean }
@@ -200,7 +200,7 @@ export class Gestures {
     const tok = g.tokenHit(x, y);
     if (s === null || rid === null || (tok && tok.fleetIds.includes(s))) { this.hover = null; this.hidePreview(); this.c.style.cursor = tok ? 'grab' : ''; return; }
     const force = g.mode && g.mode.fleet === s ? g.mode.type : null;
-    const key = `${rid}|${g.planVersion}|${force}|${liftedOf(g)?.join(',') ?? ''}`;
+    const key = `${rid}|${g.objKey(g.st)}|${g.planVersion}|${g.queue.length}|${force}|${liftedOf(g)?.join(',') ?? ''}`;
     if (this.hover?.key !== key) this.hover = { rid, key, intent: intentFor(g, { fleet: s, ships: liftedOf(g) }, rid, null, force) };
     this.c.style.cursor = this.hover.intent?.ok ? 'pointer' : this.hover.intent ? 'not-allowed' : '';
     if (this.hover.intent) this.showPreview(this.hover.intent, x, y); else this.hidePreview();
@@ -321,7 +321,8 @@ export class Gestures {
     const f = g.fleet(d.src.fleet);
     const over = tok && f && tok.owner === g.you && tok.region === f.region ? (tok.fleetIds.find(i => i !== f.id) ?? null) : null;
     const force = g.mode && g.mode.fleet === d.src.fleet ? g.mode.type : null;
-    const key = `${rid}|${over}|${g.planVersion}|${force}`;
+    // a new state (LIVE tick, turn) re-evaluates: the fleet may have moved under the drag
+    const key = `${rid}|${over}|${g.objKey(g.st)}|${g.planVersion}|${g.queue.length}|${force}`;
     if (key !== d.key) {
       d.key = key; d.rid = rid; d.over = over;
       d.intent = intentFor(g, d.src, rid, over, force);
@@ -340,6 +341,8 @@ export class Gestures {
   private endDrag(commit: boolean) {
     const d = this.drag, g = this.g;
     if (!d) return;
+    // a LIVE tick may have landed while the pointer stood still: commit what the drop means now
+    if (commit) this.dragTo(d.x, d.touch ? d.y + GHOST : d.y);
     this.drag = null;
     g.root.classList.remove('dragging', 'ship-drag');
     g.hud.h.ghost.classList.add('hidden');
@@ -465,7 +468,7 @@ export class Gestures {
       add('scan', '◎', 'Scan', 1, { type: 'scan', target: f.region });
       add('feint', '☍', 'Feint', 2, { type: 'feint', target: f.region });
       add('conceal', ic('conceal'), 'Conceal', 3, { type: 'conceal' }, null);
-      if (f.ships.length > 1 && g.fleetUses(f.id) === 0) add('split', '✂', 'Split', 4, null);
+      if (f.ships.length > 1 && g.fleetUses(f.id) === 0 && splitIds(g, f)) add('split', '✂', 'Split', 4, null);
       if (r.owner === you && (r.buildings.shipyard ?? 0) > 0 && f.ships.some(s => s.mod !== blueprintFor(st, you, s.cls) || s.hp < s.maxHp)) add('refit', '⚒', 'Refit', 5, { type: 'refit', fleet: f.id });
       if (r.relic === 'unclaimed') add('excavate', '✧', 'Excavate', 6, { type: 'excavate', fleet: f.id });
       if (r.kind !== 'void') add('influence', '✦', 'Influence', 7, { type: 'influence', target: f.region });
@@ -487,7 +490,9 @@ export class Gestures {
     const R = this.ring, el = this.g.hud.h.ring;
     if (!R) { el.classList.add('hidden'); el.innerHTML = ''; return; }
     const rad = (this.g.phone ? 74 : 64) * uiScale();
-    const cx = Math.max(rad + 30, Math.min(this.g.map.w - rad - 30, R.x)), cy = Math.max(rad + 30, Math.min(this.g.map.h - rad - 30, R.y));
+    // the items stay on screen and clear of the notch / home bar
+    const si = safeInsets(this.g.root);
+    const cx = Math.max(rad + 30 + si.l, Math.min(this.g.map.w - rad - 30 - si.r, R.x)), cy = Math.max(rad + 30 + si.t, Math.min(this.g.map.h - rad - 30 - si.b, R.y));
     const hv = R.items.find(i => i.a === R.hover);
     el.classList.remove('hidden');
     el.style.transform = `translate(${cx}px, ${cy}px)`;
@@ -496,7 +501,17 @@ export class Gestures {
       return `<button class="ri ${R.hover === i.a ? 'on' : ''}" data-ring="${i.a}" style="transform:translate(${(Math.cos(a) * rad).toFixed(1)}px, ${(Math.sin(a) * rad).toFixed(1)}px)" aria-label="${esc(i.label)}"><i>${glyphHtml(i.icon)}</i></button>`;
     }).join('');
   }
-  private ringHover(a: string | null) { if (this.ring && this.ring.hover !== a) { this.ring.hover = a; this.renderRing(); } }
+  /** Hovering an item only restyles it: rebuilding the ring restarted the items' fly-in (from the centre), so a
+   *  finger sliding onto an item lost it again on the next move and the release committed nothing. */
+  private ringHover(a: string | null) {
+    const R = this.ring;
+    if (!R || R.hover === a) return;
+    R.hover = a;
+    const el = this.g.hud.h.ring;
+    el.querySelectorAll<HTMLElement>('[data-ring]').forEach(b => b.classList.toggle('on', b.dataset.ring === a));
+    const hv = R.items.find(i => i.a === a), rc = el.querySelector('.rc');
+    if (rc) rc.innerHTML = hv ? `<b>${esc(hv.label)}</b><small>${esc(hv.sub)}</small>` : '';
+  }
   private ringPointer(cx: number, cy: number) {
     const el = document.elementFromPoint(cx, cy) as HTMLElement | null;
     this.ringHover(el?.closest<HTMLElement>('[data-ring]')?.dataset.ring ?? null);

@@ -18,7 +18,7 @@
 .hud > * { pointer-events: auto; position: absolute; }
 .hud .dragcard, .hud .ghost, .hud .banner, .hud .loupe { pointer-events: none; }
 .hud button { font: inherit; color: var(--text); letter-spacing: 0; }
-.glassy, .turnbox, .respill, .crests, .strip:not(:empty), .tool, .nchip, .nbadge, .card, .pop, .dragcard, .loupe, .ri, .replaybar {
+.glassy, .turnbox, .respill, .crests, .strip:not(:empty), .tool, .nchip, .nbadge, .hud > .card, .pop, .dragcard, .loupe, .ri, .replaybar {
   background: var(--glass); border: 1px solid var(--edge); box-shadow: 0 0.375rem 1.5rem rgba(0, 0, 0, 0.45);
 }
 
@@ -158,7 +158,7 @@
 .teach-seal .prim [data-submit] { animation: sealpulse 1.2s ease-in-out infinite; }
 
 /* ------------------------------------------------------------ selection card */
-.card { left: auto; right: auto; bottom: calc(5.375rem + var(--safe-b)); width: 22rem; max-height: calc(100% - 10.625rem); overflow-y: auto; border-radius: 1rem; padding: 0.625rem 0.75rem 0.75rem; z-index: 6; scrollbar-width: thin; animation: cardin 0.18s ease-out; }
+.hud > .card { left: auto; right: auto; bottom: calc(5.375rem + var(--safe-b)); width: 22rem; max-height: calc(100% - 10.625rem); overflow-y: auto; padding: 0.625rem 0.75rem 0.75rem; z-index: 6; scrollbar-width: thin; }
 .card.at-left { left: calc(0.75rem + var(--safe-l)); }
 .card.at-right { right: calc(0.75rem + var(--safe-r)); }
 @keyframes cardin { from { opacity: 0; transform: translateY(0.5rem); } }
@@ -359,6 +359,8 @@
 .nlist .nchip { height: 2.75rem; }
 .phone .card { left: 0 !important; right: 0 !important; bottom: 0; width: auto; max-height: 56%; border-radius: 1.125rem 1.125rem 0 0; border-bottom: none; padding: 0.875rem calc(0.75rem + var(--safe-r)) calc(0.75rem + var(--safe-b)) calc(0.75rem + var(--safe-l)); z-index: 7; animation: sheetup 0.22s ease-out; box-shadow: 0 -0.625rem 2.5rem rgba(0, 0, 0, 0.6); background: rgba(20, 21, 26, 0.97); }
 .phone .card::before { content: ''; position: absolute; top: 0.3125rem; left: 50%; width: 2.375rem; height: 0.25rem; margin-left: -1.1875rem; border-radius: 0.125rem; background: rgba(255, 255, 255, 0.25); }
+/* the header is the sheet's grab handle: without this a downward swipe became a native pan (pointercancel) and never dismissed */
+.phone .card .ch, .phone .card .cs { touch-action: none; }
 @keyframes sheetup { from { transform: translateY(40%); opacity: 0.3; } }
 .phone .ib { min-width: 3rem; height: 3.25rem; }
 .phone .seg button { height: 3.25rem; min-width: 3rem; }

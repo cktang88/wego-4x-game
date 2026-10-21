@@ -11,6 +11,7 @@ import { orderCost, costText } from '../../../shared/sim/orders.ts';
 import { esc, overlay, toast } from '../ui/dom.ts';
 import { bannerSvg, sigilSvg } from '../art/sigils.ts';
 import { tip, shortWhy } from './util.ts';
+import { splitIds } from './card.ts';
 import { iconizeDom, ic, icFor } from '../art/icons.ts';
 
 // ------------------------------------------------------------------ short texts (≤ 6 words)
@@ -289,9 +290,8 @@ export function soulAction(g: GameScreen, a: string, data: DOMStringMap): boolea
       case 'split': {
         // warships split off raise a new banner: the founding sheet
         if (!on(g) || f.owner !== g.you) return false;
-        const lifted = f.ships.filter(s => g.lifted.has(s.id)).map(s => s.id);
-        const ids = lifted.length && lifted.length < f.ships.length ? lifted : f.ships.slice(Math.ceil(f.ships.length / 2)).map(s => s.id);
-        if (!ids.length) return true;
+        const ids = splitIds(g, f);
+        if (!ids) return true;
         if (f.ships.filter(s => ids.includes(s.id)).every(s => s.cls === 'scout')) return false;
         openFounding(g, { region: f.region, split: { fleet: f.id, ships: ids } });
         return true;
