@@ -1,5 +1,5 @@
 // Per-player views: what the server sends to each client (fog of war applied).
-import { within } from './graph.ts';
+import { withinArea } from './graph.ts';
 import { coverage, seesFleetsIn } from './visibility.ts';
 import type { Doctrine, Fleet, GameState, PlayerId, RegionId, TurnResult } from './types.ts';
 
@@ -125,10 +125,10 @@ function filterResult(s: GameState, r: TurnResult, p: PlayerId, endCov: Set<Regi
   }
   const cov = new Set<RegionId>(startCov);
   if (endCov) for (const x of endCov) cov.add(x);
-  for (const rid of present) for (const x of within(s, rid, S.fleetRange)) cov.add(x);
-  for (const rid of owned) for (const x of within(s, rid, S.ownedRange)) cov.add(x);
+  for (const rid of present) for (const x of withinArea(s, rid, S.fleetRange)) cov.add(x);
+  for (const rid of owned) for (const x of withinArea(s, rid, S.ownedRange)) cov.add(x);
   const scanSeen = new Set<RegionId>();
-  for (const rid of scanned) for (const x of within(s, rid, S.scanRange)) { cov.add(x); scanSeen.add(x); }
+  for (const rid of scanned) for (const x of withinArea(s, rid, S.scanRange)) { cov.add(x); scanSeen.add(x); }
 
   const fleetsVisible = (rid: RegionId, c: Set<RegionId>, here: Set<RegionId>) => {
     const reg = s.regions[rid];

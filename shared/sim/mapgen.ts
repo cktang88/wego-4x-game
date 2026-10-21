@@ -173,6 +173,7 @@ function tryGenerate(rules: Rules, seed: number, strict: boolean): GeneratedMap 
     } as Region;
   });
   const homes = [0, 1, 2].map(w => sites.findIndex(s => s.kind === 'home' && s.wedge === w));
+  addLanes(rules, regions);
   return { regions, homes };
 }
 
@@ -245,4 +246,38 @@ export function pointInPoly(p: Pt, poly: Pt[]): boolean {
     if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
   }
   return inside;
+}
+
+/**
+ * Long hyperlanes get deep-space waypoints: real (unownable) nodes on the movement graph, so travel
+ * time is visible as dots and fleets can be met in transit. Real regions keep `neighbors` (borders,
+ * influence, supply); `links` is the movement graph through the waypoints. Symmetric by construction.
+ */
+function addLanes(rules: Rules, regions: Region[]) {
+  const th = Array.isArray(rules.map.laneDots) ? rules.map.laneDots : [];
+  const nReal = regions.length;
+  for (const r of regions) r.links = r.neighbors.slice();
+  for (let a = 0; a < nReal; a++) for (const b of regions[a].neighbors) {
+    if (b <= a) continue;
+    const A = regions[a].site, B = regions[b].site;
+    const d = Math.hypot(A.x - B.x, A.y - B.y);
+    const n = th.filter(t => d > t).length;
+    if (!n) continue;
+    const ids: number[] = [];
+    for (let i = 1; i <= n; i++) {
+      const t = i / (n + 1);
+      const site = { x: A.x + (B.x - A.x) * t, y: A.y + (B.y - A.y) * t };
+      const id = regions.length;
+      ids.push(id);
+      regions.push({
+        id, name: 'Deep space', kind: 'lane', feature: 'none', site, poly: [], centroid: site, neighbors: [a, b], links: [],
+        owner: null, homeOf: null, dev: 0, buildings: {}, project: null, garrison: 0, loyalty: [0, 0, 0], relic: null,
+        wreckage: 0, battles: 0, heldSince: 0, memorials: [], baseGarrison: 0, trait: null, vein: null, lane: { a, b, i, n },
+      } as Region);
+    }
+    const chain = [a, ...ids, b];
+    for (let k = 1; k < chain.length - 1; k++) regions[chain[k]].links = [chain[k - 1], chain[k + 1]];
+    regions[a].links = regions[a].links!.map(x => (x === b ? ids[0] : x));
+    regions[b].links = regions[b].links!.map(x => (x === a ? ids[ids.length - 1] : x));
+  }
 }

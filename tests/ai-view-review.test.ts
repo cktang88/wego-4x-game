@@ -182,12 +182,14 @@ describe('mapgen robustness', () => {
     for (const map of [{ regionsPerWedge: 3 }, { regionsPerWedge: 4 }, { regionsPerWedge: 5, minSiteDist: 300 }, { regionsPerWedge: 12, minSiteDist: 300, borderWobble: 0 }]) {
       for (let seed = 1; seed <= 4; seed++) {
         const s = createGame({ seed: seed * 101, rules: { map }, players: [] });
-        expect((s.regions.length - 1) % 3).toBe(0);
+        expect((s.regions.filter(r => r.kind !== 'lane').length - 1) % 3).toBe(0);
+        expect(s.regions.filter(r => r.kind === 'lane').length % 3).toBe(0);
         const throne = s.regions.find(r => r.kind === 'throne')!.id;
         const d = s.players.map(p => findPath(s, p.capital, throne)?.length);
         expect(new Set(d).size).toBe(1);
         expect(d[0]).toBeGreaterThan(0);
         for (const r of s.regions) {
+          if (r.kind === 'lane') continue;   // hyperlane waypoints have no territory
           expect(r.poly.length).toBeGreaterThanOrEqual(3);
           for (const n of r.neighbors) expect(s.regions[n].neighbors).toContain(r.id);
         }
@@ -197,7 +199,7 @@ describe('mapgen robustness', () => {
   it('existing default maps are unchanged by the longer retry loop', () => {
     // first-attempt maps keep their exact geometry (saved-game/sim reproducibility)
     const s = createGame({ seed: 42, players: [] });
-    expect(s.regions.length).toBe(1 + 3 * 8);
+    expect(s.regions.filter(r => r.kind !== 'lane').length).toBe(1 + 3 * 8);
   });
 });
 

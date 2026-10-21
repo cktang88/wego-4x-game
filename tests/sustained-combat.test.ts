@@ -54,7 +54,7 @@ describe('sustained combat', () => {
     x.garrison = x.baseGarrison = 90;   // fortress-sized: 3 bombards need more than one turn
     const a = s.fleets.find(f => f.owner === 0)!;
     stack(s, a, 3, 'bombard');
-    a.region = x.neighbors[0];
+    a.region = x.links![0];
     a.doctrine = { ...a.doctrine, retreatAt: 0 };
     const sub = emptySubmission(s);
     sub.orders[0] = { type: 'seize', fleet: a.id, target: x.id };

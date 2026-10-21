@@ -200,8 +200,8 @@ describe('retreat destinations', () => {
     let retreats = 0;
     for (let seed = 700; seed < 740; seed++) {
       const s = game(seed);
-      const x = s.regions.find(r => r.owner === null && r.neighbors.length >= 3 && r.neighbors.every(n => s.regions[n].owner === null))!;
-      const [calm, ...rest] = x.neighbors;
+      const x = s.regions.find(r => r.owner === null && r.links!.length >= 3 && r.links!.every(n => s.regions[n].owner === null))!;
+      const [calm, ...rest] = x.links!;
       for (const n of rest) { s.regions[n].owner = 2; s.regions[n].garrison = 20; }
       const a = s.fleets.find(f => f.owner === 0 && f.ships.length > 1)!;
       const b = s.fleets.find(f => f.owner === 1 && f.ships.length > 1)!;

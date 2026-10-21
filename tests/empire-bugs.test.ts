@@ -165,7 +165,7 @@ describe('order validation: combined assaults', () => {
     const s = game();
     const mine = s.fleets.filter(f => f.owner === 0);
     const cap = s.players[0].capital;
-    const target = s.regions[cap].neighbors.find(n => s.regions[n].owner !== 0)!;
+    const target = s.regions[cap].links!.find(n => s.regions[n].owner !== 0 && s.regions[n].kind !== 'lane')!;
     const extra = [0, 1, 2].map(i => ({ ...structuredClone(mine[0]), id: 9000 + i, region: cap }));
     s.fleets.push(...extra);
     for (const f of [...mine, ...extra]) { f.region = cap; f.bornTurn = 0; }

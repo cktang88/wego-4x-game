@@ -4,7 +4,7 @@ export type PlayerId = number;   // 0..2
 export type RegionId = number;
 export type FleetId = number;
 
-export type RegionKind = 'home' | 'colony' | 'crown' | 'throne' | 'relic' | 'void';
+export type RegionKind = 'home' | 'colony' | 'crown' | 'throne' | 'relic' | 'void' | 'lane';   // lane = a deep-space waypoint on a long hyperlane
 export type Feature = 'none' | 'nebula' | 'asteroids';
 
 export interface Pt { x: number; y: number }
@@ -31,6 +31,10 @@ export interface Region {
   heldSince: number;        // turn current owner took it
   memorials: string[];      // fallen commanders & famous ships, forever
   baseGarrison: number;     // starting neutral garrison (neutral garrisons regenerate toward it)
+  /** Movement adjacency (through lane waypoints). Absent = `neighbors` (old saves / no long lanes). */
+  links?: RegionId[];
+  /** Lane waypoints only: the hyperlane a–b this dot sits on (i-th of n, counted from a). */
+  lane?: { a: RegionId; b: RegionId; i: number; n: number };
   trait?: string | null;    // world trait (config/empire.ts TRAITS)
   vein?: string | null;     // strategic resource deposit (config/empire.ts VEINS)
 }
@@ -185,7 +189,8 @@ export type FreeAction =
   | { type: 'rename'; fleet: FleetId; name: string }
   | { type: 'research'; tech: string }
   | { type: 'blueprint'; cls: string; mod: string }
-  | { type: 'revoke'; law: string };
+  | { type: 'revoke'; law: string }
+  | { type: 'halt'; fleet: FleetId };
 
 export interface Submission {
   orders: OrderSlots;

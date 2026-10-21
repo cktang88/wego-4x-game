@@ -17,7 +17,7 @@ import { resolveTurn, creditRate } from './resolve.ts';
 import { fleetSpeed } from './graph.ts';
 import { planTurn } from './ai.ts';
 import { validateOrder, ORDER_INFO, orderCost, canAfford, pay } from './orders.ts';
-import { researchBlock, techCost, opposite, blueprintFor, baseHp, hasTech, gateNeighbors } from './empire.ts';
+import { researchBlock, techCost, opposite, blueprintFor, baseHp, hasTech, moveNeighbors } from './empire.ts';
 import { MODULE } from '../config/empire.ts';
 import type { FreeAction, GameState, LiveState, Order, PlayerId, Ship, TurnResult } from './types.ts';
 
@@ -281,7 +281,7 @@ function dropBrokenRoutes(s: GameState) {
   for (const f of s.fleets) {
     const rt = f.route;
     if (!rt) continue;
-    if (rt.path.length ? !gateNeighbors(s, f.owner, f.region).includes(rt.path[0]) : rt.seize !== null && rt.seize !== f.region) f.route = null;
+    if (rt.path.length ? !moveNeighbors(s, f.owner, f.region).includes(rt.path[0]) : rt.seize !== null && rt.seize !== f.region) f.route = null;
   }
 }
 

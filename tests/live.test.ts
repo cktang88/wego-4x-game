@@ -13,12 +13,12 @@ function liveGame(seed = 3, kinds: ('human' | 'ai')[] = ['human', 'ai', 'ai']): 
 /** A region `k` hops from `from` (BFS), not owned by `pid`. */
 function hopsAway(s: GameState, from: number, k: number, pid: number) {
   const d = new Map([[from, 0]]); const q = [from];
-  while (q.length) { const r = q.shift()!; for (const n of s.regions[r].neighbors) if (!d.has(n)) { d.set(n, d.get(r)! + 1); q.push(n); } }
+  while (q.length) { const r = q.shift()!; for (const n of (s.regions[r].links ?? s.regions[r].neighbors)) if (!d.has(n)) { d.set(n, d.get(r)! + 1); q.push(n); } }
   return [...d].find(([r, h]) => h === k && s.regions[r].owner !== pid && s.regions[r].kind !== 'crown' && s.regions[r].kind !== 'throne')![0];
 }
 const pathTo = (s: GameState, from: number, to: number) => {
   const prev = new Map<number, number>([[from, -1]]); const q = [from];
-  while (q.length) { const r = q.shift()!; for (const n of s.regions[r].neighbors) if (!prev.has(n)) { prev.set(n, r); q.push(n); } }
+  while (q.length) { const r = q.shift()!; for (const n of (s.regions[r].links ?? s.regions[r].neighbors)) if (!prev.has(n)) { prev.set(n, r); q.push(n); } }
   const p: number[] = []; for (let r = to; r !== from; r = prev.get(r)!) p.unshift(r);
   return p;
 };

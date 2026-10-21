@@ -456,7 +456,7 @@ export function fightRounds(
     const cf = cameFrom.get(f.id);
     const cfOk = cf !== undefined && cf !== rid && !enemyAt(cf);
     if (cfOk && !enemyGarrison(cf)) return cf;
-    const opts2 = region.neighbors.filter(n => !enemyAt(n));
+    const opts2 = (region.links ?? region.neighbors).filter(n => !enemyAt(n));
     const own = opts2.filter(n => s.regions[n].owner === f.owner);
     if (own.length) return rng.pick(own);
     const calm = opts2.filter(n => !enemyGarrison(n));

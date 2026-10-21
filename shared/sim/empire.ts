@@ -136,6 +136,17 @@ function hostileTo(s: GameState, a: number, b: number) {
 }
 
 /** Neighbours, plus (for the gate owner) every other gate they own. */
+/** Movement neighbours (through hyperlane waypoints), plus (for the gate owner) every other gate they own. */
+export function moveNeighbors(s: GameState, p: PlayerId, rid: RegionId): RegionId[] {
+  const r = s.regions[rid];
+  if (!r) return [];
+  const base = r.links ?? r.neighbors;
+  if (!(r.buildings.gate && r.owner === p)) return base;
+  const gates = s.regions.filter(x => x.id !== rid && x.owner === p && x.buildings.gate && !base.includes(x.id)).map(x => x.id);
+  return gates.length ? [...base, ...gates] : base;
+}
+
+/** Territory neighbours (real borders, ignoring waypoints), plus the owner's gates. Used for supply connection. */
 export function gateNeighbors(s: GameState, p: PlayerId, rid: RegionId): RegionId[] {
   const r = s.regions[rid];
   if (!r) return [];
@@ -162,6 +173,8 @@ export function supplied(s: GameState, p: PlayerId, conn = connected(s, p)): Set
     }
   };
   for (const r of conn) spread(r, s.regions[r].buildings.depot ? Math.max(E.depotRange, E.supplyRange) : E.supplyRange);
+  // hyperlane waypoints are in supply when their lane touches supplied space
+  for (const r of s.regions) if (r.lane && (out.has(r.lane.a) || out.has(r.lane.b))) out.add(r.id);
   return out;
 }
 

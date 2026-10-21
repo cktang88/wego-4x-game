@@ -20,7 +20,11 @@ describe('map', () => {
       const crowns = s.regions.filter(r => r.kind === 'crown').map(r => r.id);
       const throne = s.regions.find(r => r.kind === 'throne')!.id;
       expect(crowns.length).toBe(3);
-      for (const a of s.regions) for (const b of a.neighbors) expect(s.regions[b].neighbors).toContain(a.id);
+      for (const a of s.regions) if (a.kind !== 'lane') for (const b of a.neighbors) expect(s.regions[b].neighbors).toContain(a.id);
+      // the movement graph (through hyperlane waypoints) is symmetric too, and waypoints sit between their lane's ends
+      for (const a of s.regions) for (const b of a.links ?? a.neighbors) expect(s.regions[b].links ?? s.regions[b].neighbors).toContain(a.id);
+      for (const d of s.regions.filter(r => r.kind === 'lane')) { expect(d.owner).toBeNull(); expect(d.links!.length).toBe(2); }
+      expect(s.regions.filter(r => r.kind === 'lane').length % 3).toBe(0);   // 3-fold symmetric
       const dT = homes.map(h => findPath(s, h, throne)!.length);
       expect(new Set(dT).size).toBe(1); // every capital is equally far from the Throne
       for (const h of homes) for (const c of crowns) expect(findPath(s, h, c)!.length).toBeGreaterThanOrEqual(2);

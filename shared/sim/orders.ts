@@ -3,7 +3,7 @@
 import type { Res } from '../config/rules.ts';
 import { fleetSpeed } from './graph.ts';
 import type { GameState, Order, PlayerId, Ship } from './types.ts';
-import { classBlock, gateNeighbors, hasLaw, hasTech, lawBlock, lawCost, lookup, maxDevAt, projectBlock, projectCostMod, shipCostMod, blueprintFor } from './empire.ts';
+import { classBlock, moveNeighbors, hasLaw, hasTech, lawBlock, lawCost, lookup, maxDevAt, projectBlock, projectCostMod, shipCostMod, blueprintFor } from './empire.ts';
 import { LAW } from '../config/empire.ts';
 
 export const ORDER_INFO: Record<Order['type'], { name: string; icon: string; help: string }> = {
@@ -121,10 +121,11 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
     case 'move': {
       if (!Array.isArray(o.path) || !o.path.length) return 'empty path';
       const sp = fleetSpeed(s, fleet!) + (o.overdrive ? s.rules.overdrive.speedBonus : 0);
-      if (!s.live && o.path.length > sp) return `too far (speed ${sp})`;   // LIVE: any distance; travel takes time
+      // WEGO and LIVE: any distance; the fleet travels its speed per turn/tick along the route (legacy pulse rules: one turn's reach)
+      if (!s.live && s.rules.orders.pulses > 1 && o.path.length > sp) return `too far (speed ${sp})`;
       let cur = fleet!.region;
       for (const r of o.path) {
-        if (!s.regions[cur] || !gateNeighbors(s, p, cur).includes(r)) return 'path is not connected';
+        if (!s.regions[cur] || !moveNeighbors(s, p, cur).includes(r)) return 'path is not connected';
         cur = r;
       }
       if (o.overdrive && fleet!.fatigued) return 'fleet is fatigued and cannot overdrive';
@@ -134,22 +135,23 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       const t = reg(o.target);
       if (!t) return 'no such region';
       if (t.owner === p) return 'already yours';
-      if (o.via !== undefined && (!Array.isArray(o.via) || o.via.length > 8 || !o.via.every(x => reg(x)))) return 'bad path';
+      if (t.kind === 'lane') return 'nothing to seize in deep space';
+      if (o.via !== undefined && (!Array.isArray(o.via) || o.via.length > 32 || !o.via.every(x => reg(x)))) return 'bad path';
       const via = o.via ?? [];
       if (via.length) {
         // march then assault: the whole way (via + the target) must fit in one turn's movement
-        if (!s.live && via.length + 1 > fleetSpeed(s, fleet!)) return `too far (speed ${fleetSpeed(s, fleet!)})`;
+        if (!s.live && s.rules.orders.pulses > 1 && via.length + 1 > fleetSpeed(s, fleet!)) return `too far (speed ${fleetSpeed(s, fleet!)})`;
         let cur = fleet!.region;
-        for (const r of via) { if (!gateNeighbors(s, p, cur).includes(r)) return 'path is not connected'; cur = r; }
-        if (!s.regions[cur].neighbors.includes(o.target)) return 'target must be next to the end of the path';
-      } else if (fleet!.region !== o.target && !s.regions[fleet!.region].neighbors.includes(o.target)) return 'target must be adjacent';
+        for (const r of via) { if (!moveNeighbors(s, p, cur).includes(r)) return 'path is not connected'; cur = r; }
+        if (!moveNeighbors(s, p, cur).includes(o.target)) return 'target must be next to the end of the path';
+      } else if (fleet!.region !== o.target && !moveNeighbors(s, p, fleet!.region).includes(o.target)) return 'target must be adjacent';
       if (o.also !== undefined && (!Array.isArray(o.also) || o.also.length > 8)) return 'bad joining fleets';
       // the resolver takes at most MAX_JOINERS distinct joiners and silently drops the rest: say so up front
       if (new Set((o.also ?? []).filter(id => id !== o.fleet)).size > MAX_JOINERS) return `at most ${MAX_JOINERS} fleets can join an assault`;
       for (const id of o.also ?? []) {
         const g = s.fleets.find(x => x.id === id);
         if (!g || g.owner !== p || !g.ships.length) return 'a joining fleet is not yours';
-        if (g.region !== o.target && !s.regions[g.region].neighbors.includes(o.target)) return `${g.name} is not adjacent to the target`;
+        if (g.region !== o.target && !moveNeighbors(s, p, g.region).includes(o.target)) return `${g.name} is not next to the target`;
       }
       return null;
     }
@@ -186,7 +188,7 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       const r = reg(o.target);
       if (!r) return 'no such region';
       if (r.owner === p) return r.loyalty.some((x, i) => i !== p && x > 0) ? null : 'no rival agents to purge here';
-      if (r.kind === 'void') return 'nobody lives there';
+      if (r.kind === 'void' || r.kind === 'lane') return 'nobody lives there';
       if (r.owner !== null && s.players[r.owner].capital === r.id) return 'capitals cannot be subverted';
       if (r.owner !== null && hasLaw(s, r.owner, 'martial')) return `${s.players[r.owner].name} is under Martial Law`;
       if (r.owner !== null && s.pacts.some(x => x.until >= s.turn && ((x.a === p && x.b === r.owner) || (x.b === p && x.a === r.owner)))) return 'you have a pact with its owner';

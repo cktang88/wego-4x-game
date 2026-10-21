@@ -345,7 +345,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
     for (const f of fleets) {
       const uses = fleetUses.get(f.id) ?? 0;
       if (uses >= R.orders.maxPerFleet) continue;
-      if (live && f.route) continue;   // LIVE: already travelling (Halt is free if plans change)
+      if (f.route && f.route.path.length) continue;   // already travelling on a route (it keeps going without orders)
       const fatiguePenalty = uses > 0 ? (me0().res.credits > 20 ? 1 : 4) : 0;
       const pow = fleetPower(s, f);
       const here = s.regions[f.region];
@@ -373,22 +373,23 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
 
       // seize adjacent / current, or (one-step WEGO) march through clear space and assault within speed
       const viaOf = new Map<number, number[]>();
+      const hereLinks = here.links ?? here.neighbors;
       if (oneStep && !live) {
         const sp0 = fleetSpeed(s, f);
         const clear = (x: number) => (s.regions[x].owner === pid || s.regions[x].owner === null || !hostile(s, pid, s.regions[x].owner!)) && !(s.regions[x].owner === null && s.regions[x].garrison > 0) && !hostileFleetsAt(x).length;
         const prev = new Map<number, number>([[here.id, -1]]); let frontier = [here.id];
         for (let d = 1; d < sp0; d++) {
           const next: number[] = [];
-          for (const r of frontier) for (const n of s.regions[r].neighbors) if (!prev.has(n) && clear(n)) { prev.set(n, r); next.push(n); }
+          for (const r of frontier) for (const n of s.regions[r].links ?? s.regions[r].neighbors) if (!prev.has(n) && clear(n)) { prev.set(n, r); next.push(n); }
           frontier = next;
         }
         for (const [r] of prev) {
           if (r === here.id) continue;
           const via: number[] = []; for (let x = r; x !== here.id; x = prev.get(x)!) via.unshift(x);
-          for (const n of s.regions[r].neighbors) if (n !== here.id && !here.neighbors.includes(n) && !prev.has(n) && !viaOf.has(n)) viaOf.set(n, via);
+          for (const n of s.regions[r].links ?? s.regions[r].neighbors) if (n !== here.id && !hereLinks.includes(n) && !prev.has(n) && !viaOf.has(n) && s.regions[n].kind !== 'lane') viaOf.set(n, via);
         }
       }
-      for (const tid of [here.id, ...here.neighbors, ...viaOf.keys()]) {
+      for (const tid of [here.id, ...hereLinks.filter(n => s.regions[n].kind !== 'lane'), ...viaOf.keys()]) {
         const via = viaOf.get(tid);
         const t = s.regions[tid];
         if (t.owner === pid) continue;
@@ -434,11 +435,13 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
       // move: toward opportunities, home to defend, or (expert) to concentrate
       const sp = fleetSpeed(s, f);
       const canOd = expert ? !f.fatigued && uses === 0 : !f.fatigued;
-      const reach = [...within(s, f.region, sp + (canOd && !novice ? R.overdrive.speedBonus : 0))].filter(x => x !== f.region);
+      // destinations are planets (waypoints are passed through); routes may take more than one turn
+      const odBonus = canOd && !novice ? R.overdrive.speedBonus : 0;
+      const reach = [...within(s, f.region, live || R.orders.pulses > 1 ? sp + odBonus : sp * 2 + odBonus)].filter(x => x !== f.region && s.regions[x].kind !== 'lane');
       for (const dest of reach) {
         const path = findPath(s, f.region, dest);
         if (!path) continue;
-        const od = path.length > sp;
+        const od = path.length > sp && path.length <= sp + odBonus;   // overdrive only to arrive this turn
         if (path.slice(0, -1).some(x => s.regions[x].owner !== null && s.regions[x].owner !== pid && s.regions[x].garrison > 0)) continue; // blocked en route
         if (path.slice(0, -1).some(x => hostileFleetsAt(x).length)) continue;                     // would be stopped (and fight) en route
         const dr = s.regions[dest];
@@ -452,7 +455,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level): Submissio
         // rival garrisons now open fire on anything parked in their region: only experts with a plan go in
         if (rivalHeld && (!expert || isScout)) continue;
         let v = 0;
-        if (!novice) v = moveValue(f, units, dest, path.length, mainArmy) - leaveCost;
+        if (!novice) v = moveValue(f, units, dest, path.length, mainArmy) - leaveCost - (path.length > sp + odBonus ? 1 : 0);   // a 2-turn trip
         else {
           if (rivalHeld) continue;
           let best = 0;

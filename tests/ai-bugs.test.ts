@@ -157,6 +157,8 @@ describe('AI: LIVE mode', () => {
         for (const o of sub.orders.filter((x): x is Order => !!x)) {
           const proj = structuredClone(s);
           if (fresh) for (const f of proj.fleets) f.ordersThisTurn = 0;
+          // the plan's free actions (e.g. researching Bureaucracy for a law slot) land before its orders
+          for (const fa of sub.free) if (fa.type === 'research') (proj.players[p.id].techs ??= []).push(fa.tech);
           if ('fleet' in o && o.type !== 'build') {
             const f = proj.fleets.find(x => x.id === o.fleet)!;
             expect(f.route ?? null).toBe(null);      // travelling fleets are left alone

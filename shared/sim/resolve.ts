@@ -22,7 +22,7 @@
 //  VP is only ever scored on the final end-of-turn state.
 // ============================================================================
 import { TECH, LAW, MODULES } from '../config/empire.ts';
-import { techCost, researchBlock, opposite, blueprintFor, baseHp, hasTech, hasLaw, connected, supplied, maxDevAt, gateNeighbors } from './empire.ts';
+import { techCost, researchBlock, opposite, blueprintFor, baseHp, hasTech, hasLaw, connected, supplied, maxDevAt, moveNeighbors } from './empire.ts';
 import { RELICS, LORE } from '../config/content.ts';
 import { fightRounds, hostile, wouldFight, engagementAt, newReport, disengage, type FightOutcome } from './combat.ts';
 import { EDICTS } from './edicts.ts';
@@ -375,9 +375,11 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     }
 
     // ---------------------------------------------------------- 3. movement
-    interface Mover { f: Fleet; path: RegionId[]; idx: number; seize: RegionId | null; p: PlayerId; o: Order; dest?: RegionId }
+    interface Mover { f: Fleet; path: RegionId[]; idx: number; seize: RegionId | null; p: PlayerId; o: Order; dest?: RegionId; stopped?: boolean }
     const movers: Mover[] = [];
     const cameFrom = new Map<number, RegionId>();
+    const wegoRoutes = !live && allAtOnce;
+    const routed = new Set<Fleet>();
     for (const { p, o } of orders) {
       if (o.type !== 'move' && o.type !== 'seize') continue;
       if (live) {
@@ -393,7 +395,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
           f.route = { path: f.region === o.target ? [] : [...(o.via ?? []), o.target], seize: o.target, mp: startMp };
           for (const id of [...new Set(o.also ?? [])].filter(id => id !== o.fleet).slice(0, MAX_JOINERS)) {
             const g = s.fleets.find(x => x.id === id && x.owner === p && x.ships.length);
-            if (!g || g === f || (g.region !== o.target && !s.regions[g.region].neighbors.includes(o.target))) continue;
+            if (!g || g === f || (g.region !== o.target && !(s.regions[g.region].links ?? s.regions[g.region].neighbors).includes(o.target))) continue;
             if (g.ordersThisTurn >= R.orders.maxPerFleet) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is exhausted (max ${R.orders.maxPerFleet} orders per turn)` }); continue; }
             if (g.ordersThisTurn > 0) s.players[p].res.credits -= R.orders.repeatFleetCredits;
             g.ordersThisTurn++;
@@ -406,7 +408,28 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       const err = validateOrder(s, p, o.type === 'seize' ? { ...o, also: undefined } : o);
       if (err) { fail(pulse, p, o, err); continue; }
       const f = s.fleets.find(x => x.id === o.fleet)!;
-      if (movers.some(m => m.f === f)) { fail(pulse, p, o, `${f.name} already has a move or seize this turn`); continue; }
+      if (movers.some(m => m.f === f) || routed.has(f)) { fail(pulse, p, o, `${f.name} already has a move or seize this turn`); continue; }
+      if (wegoRoutes) {
+        // WEGO: a Move/Seize sets a standing route; the fleet covers its speed each turn until it arrives
+        routed.add(f);
+        if (o.type === 'move') { f.route = { path: o.path.slice(), seize: null, mp: 0, overdrive: o.overdrive || undefined }; if (o.overdrive) f.od = true; }
+        else {
+          f.route = { path: f.region === o.target ? [] : [...(o.via ?? []), o.target], seize: o.target, mp: 0 };
+          for (const id of [...new Set(o.also ?? [])].filter(id => id !== o.fleet).slice(0, MAX_JOINERS)) {
+            const g = s.fleets.find(x => x.id === id && x.owner === p && x.ships.length);
+            if (!g || g === f || routed.has(g)) continue;
+            if (g.bornTurn === s.turn && s.turn > 1) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} was only just formed and can't join the assault` }); continue; }
+            if (g.region !== o.target && !(s.regions[g.region].links ?? s.regions[g.region].neighbors).includes(o.target)) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is not next to ${s.regions[o.target].name} and can't join the assault` }); continue; }
+            if (g.ordersThisTurn >= R.orders.maxPerFleet) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is exhausted (max ${R.orders.maxPerFleet} orders per turn)` }); continue; }
+            if (g.ordersThisTurn > 0) s.players[p].res.credits -= R.orders.repeatFleetCredits;
+            g.ordersThisTurn++;
+            routed.add(g);
+            g.route = { path: g.region === o.target ? [] : [o.target], seize: o.target, mp: 0 };
+          }
+        }
+        f.fortified = false;
+        continue;
+      }
       if (o.type === 'move') {
         if (o.overdrive) f.od = true;
         movers.push({ f, path: o.path.slice(), idx: 0, seize: null, p, o });
@@ -417,7 +440,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
           const g = s.fleets.find(x => x.id === id && x.owner === p && x.ships.length);
           if (!g || g === f || movers.some(m => m.f === g)) continue;
           if (g.bornTurn === s.turn && s.turn > 1) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} was only just formed and can't join the assault` }); continue; }
-          if (g.region !== o.target && !s.regions[g.region].neighbors.includes(o.target)) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is not adjacent to ${s.regions[o.target].name} and can't join the assault` }); continue; }
+          if (g.region !== o.target && !(s.regions[g.region].links ?? s.regions[g.region].neighbors).includes(o.target)) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is not adjacent to ${s.regions[o.target].name} and can't join the assault` }); continue; }
           if (g.ordersThisTurn >= R.orders.maxPerFleet) { emit({ k: 'fail', pulse, owner: p, text: `${g.name} is exhausted (max ${R.orders.maxPerFleet} orders per turn)` }); continue; }
           if (g.ordersThisTurn > 0) s.players[p].res.credits -= R.orders.repeatFleetCredits;
           g.ordersThisTurn++;
@@ -427,6 +450,20 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       }
       f.fortified = false;
     }
+    if (wegoRoutes) {
+      // every fleet with a route covers up to its speed this turn (no order needed to keep going)
+      for (const f of s.fleets) {
+        const rt = f.route;
+        if (!rt || !f.ships.length || f.owner === -1) continue;
+        const synth: Order = rt.seize !== null ? { type: 'seize', fleet: f.id, target: rt.seize } : { type: 'move', fleet: f.id, path: rt.path.slice() };
+        if (!rt.path.length) { movers.push({ f, path: [], idx: 0, seize: rt.seize, p: f.owner, o: synth }); f.route = null; continue; }
+        if (!moveNeighbors(s, f.owner, f.region).includes(rt.path[0])) { f.route = null; continue; }
+        const steps = Math.max(1, fleetSpeed(s, f)) + (rt.overdrive ? R.overdrive.speedBonus : 0);
+        const path = rt.path.slice(0, steps);
+        movers.push({ f, path, idx: 0, seize: path.length === rt.path.length ? rt.seize : null, p: f.owner, o: synth, dest: rt.path[rt.path.length - 1] });
+        f.fortified = false;
+      }
+    }
     if (live) {
       for (const f of s.fleets) {
         const rt = f.route;
@@ -434,7 +471,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         const synth: Order = rt.seize !== null ? { type: 'seize', fleet: f.id, target: rt.seize } : { type: 'move', fleet: f.id, path: rt.path.slice() };
         if (!rt.path.length) { movers.push({ f, path: [], idx: 0, seize: rt.seize, p: f.owner, o: synth }); f.route = null; continue; }
         // a route always continues from where the fleet is; if something moved it off its course, it stops
-        if (!gateNeighbors(s, f.owner, f.region).includes(rt.path[0])) { f.route = null; continue; }
+        if (!moveNeighbors(s, f.owner, f.region).includes(rt.path[0])) { f.route = null; continue; }
         rt.mp += Math.max(1, fleetSpeed(s, f)) + (rt.overdrive ? R.overdrive.speedBonus : 0);
         if (rt.mp < R.live.stepCost) continue;
         rt.mp -= R.live.stepCost;
@@ -478,7 +515,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         a.f.region = ra; b.f.region = rb;
         handleFight(out, site, pulse, rep);
         // both are thrown back to their own side and stop; the fight can continue if someone presses on
-        for (const m of [a, b]) m.idx = m.path.length;
+        for (const m of [a, b]) { m.idx = m.path.length; m.stopped = true; }
       }
       // --- advance
       for (const m of stepping) {
@@ -504,6 +541,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         const enemyGarrison = r.owner !== null && hostile(s, r.owner, m.f.owner) && r.garrison > 0;
         if (enemyFleet || enemyGarrison) {
           m.idx = m.path.length;
+          m.stopped = true;
           emit({ k: 'blocked', pulse, fleet: m.f.id, owner: m.f.owner, at: r.id, reason: enemyFleet ? 'enemy fleet' : 'enemy garrison' });
         }
       }
@@ -515,7 +553,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         if (!invaders.length) continue;
         for (const g of s.fleets) {
           if (g.owner !== r.owner || !g.doctrine.guard || g.guardUsed || !g.ships.length) continue;
-          if (g.region === r.id || !r.neighbors.includes(g.region)) continue;
+          if (g.region === r.id || !(r.links ?? r.neighbors).includes(g.region)) continue;
           if (movers.some(m => m.f === g && (m.idx < m.path.length || m.o.type === 'seize'))) continue;
           if (s.fleets.some(x => x.region === g.region && x.ships.length && hostile(s, x.owner, g.owner))) continue; // pinned
           if (engagementAt(s, g.region) && wouldFight(s, g.region)) continue;   // pinned by a battle (e.g. a siege) it is fighting
@@ -530,6 +568,18 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
       }
     }
 
+    // WEGO: routes advance by the steps actually taken; a fleet stopped short (blocked, clashed) halts
+    if (wegoRoutes) for (const m of movers) {
+      const f = m.f;
+      if (!s.fleets.includes(f) || !f.route) continue;
+      f.route.overdrive = undefined;
+      if (m.stopped || m.idx < m.path.length) { f.route = null; continue; }
+      f.route.path = f.route.path.slice(m.path.length);
+      if (!f.route.path.length) { f.route = null; continue; }
+      // ended the turn among enemies short of its goal: intercepted, it stops here
+      const here = s.regions[f.region];
+      if (s.fleets.some(x => x !== f && x.region === here.id && x.ships.length && hostile(s, x.owner, f.owner))) f.route = null;
+    }
     // LIVE: fleets that made their step move along their route; blocked or destroyed fleets stop
     if (live) for (const m of movers) {
       if (!m.path.length) continue;
@@ -824,7 +874,7 @@ export function cleanOrder(s: GameState, o: unknown): Order | null {
   const rid = (x: unknown): x is number => isId(x) && x < s.regions.length;
   switch (o.type) {
     case 'move': {
-      const path = idList(o.path, 16);
+      const path = idList(o.path, 32);
       if (!isId(o.fleet) || !path || !path.every(rid)) return null;
       return o.overdrive ? { type: 'move', fleet: o.fleet, path, overdrive: true } : { type: 'move', fleet: o.fleet, path };
     }
@@ -862,6 +912,7 @@ export function cleanFree(fa: unknown): FreeAction | null {
   if (!isRec(fa)) return null;
   if (fa.type === 'research') return typeof fa.tech === 'string' && Object.hasOwn(TECH, fa.tech) ? { type: 'research', tech: fa.tech } : null;
   if (fa.type === 'revoke') return typeof fa.law === 'string' && Object.hasOwn(LAW, fa.law) ? { type: 'revoke', law: fa.law } : null;
+  if (fa.type === 'halt') return isId(fa.fleet) ? { type: 'halt', fleet: fa.fleet } : null;
   if (fa.type === 'blueprint') return typeof fa.cls === 'string' && typeof fa.mod === 'string' && fa.cls.length < 32 && fa.mod.length < 32 ? { type: 'blueprint', cls: fa.cls, mod: fa.mod } : null;
   if (!isId(fa.fleet)) return null;
   switch (fa.type) {
@@ -913,6 +964,13 @@ function applyFree(s: GameState, rng: Rng, p: PlayerId, fa: Submission['free'][n
     if (!m) return 'unknown module';
     if (m.tech && !hasTech(s, p, m.tech)) return `needs ${TECH[m.tech]?.name ?? m.tech}`;
     (pl.blueprint ??= {})[fa.cls] = fa.mod;
+    return null;
+  }
+  if (fa.type === 'halt') {
+    const f = s.fleets.find(x => x.id === fa.fleet && x.owner === p);
+    if (!f) return 'no such fleet of yours';
+    if (!f.route) return 'not travelling';
+    f.route = null;
     return null;
   }
   const f = s.fleets.find(x => x.id === fa.fleet && x.owner === p);

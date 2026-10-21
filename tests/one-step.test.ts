@@ -79,3 +79,57 @@ describe('one-step WEGO turns', () => {
     expect(n.last!.events.filter(e => e.k === 'pulse').length).toBe(5);
   });
 });
+
+describe('hyperlanes and routes', () => {
+  const game = (seed = 21) => createGame({ seed, players: [0, 1, 2].map(() => ({ kind: 'human' as const })), rules: { map: { laneDots: [330, 520] } } });
+  const findLongLane = (s: GameState) => s.regions.find(r => r.kind === 'lane' && r.lane!.n === 1 && s.regions[r.lane!.a].owner === null && s.regions[r.lane!.b].owner === null)!;
+  it('long lanes have waypoints; a fleet crossing one is in transit on the dot', () => {
+    const s = game();
+    const dot = findLongLane(s);
+    expect(dot).toBeTruthy();
+    const { a, b } = dot.lane!;
+    s.regions[a].garrison = 0; s.regions[b].garrison = 0;
+    const f = s.fleets.find(x => x.owner === 0)!;
+    f.region = a;
+    for (const sh of f.ships) sh.cls = 'dread';   // speed 1: one step per turn
+    const n = turn(s, [{ type: 'move', fleet: f.id, path: [dot.id, b] }]);
+    const g = n.fleets.find(x => x.id === f.id)!;
+    expect(g.region).toBe(dot.id);                 // on the waypoint after turn 1
+    expect(g.route?.path).toEqual([b]);            // still heading on
+    const n2 = turn(n, []);                         // no new order needed
+    expect(n2.fleets.find(x => x.id === f.id)!.region).toBe(b);
+    expect(n2.fleets.find(x => x.id === f.id)!.route ?? null).toBeNull();
+  });
+  it('halt (free) stops a route', () => {
+    const s = game();
+    const dot = findLongLane(s);
+    const { a, b } = dot.lane!;
+    s.regions[a].garrison = 0; s.regions[b].garrison = 0;
+    const f = s.fleets.find(x => x.owner === 0)!;
+    f.region = a;
+    for (const sh of f.ships) sh.cls = 'dread';
+    const n = turn(s, [{ type: 'move', fleet: f.id, path: [dot.id, b] }]);
+    const n2 = resolveTurn(n, { 0: { ...emptySubmission(n), free: [{ type: 'halt', fleet: f.id }] }, 1: emptySubmission(n), 2: emptySubmission(n) });
+    expect(n2.fleets.find(x => x.id === f.id)!.region).toBe(dot.id);
+  });
+  it('fleets meeting on a waypoint fight there (interception)', () => {
+    const s = game();
+    const dot = findLongLane(s);
+    const { a, b } = dot.lane!;
+    s.regions[a].garrison = 0; s.regions[b].garrison = 0;
+    const f = s.fleets.find(x => x.owner === 0)!, e = s.fleets.find(x => x.owner === 1)!;
+    f.region = a; e.region = b;
+    for (const sh of [...f.ships, ...e.ships]) sh.cls = 'dread';
+    f.doctrine.stance = 'aggressive'; e.doctrine.stance = 'aggressive';
+    const n = resolveTurn(s, { 0: sub(s, [{ type: 'move', fleet: f.id, path: [dot.id, b] }]), 1: sub(s, [{ type: 'move', fleet: e.id, path: [dot.id, a] }]), 2: emptySubmission(s) });
+    expect(n.last!.battles.length + n.last!.events.filter(x => x.k === 'clash').length).toBeGreaterThan(0);
+  });
+  it('sensors and supply reach waypoints on lanes touching your space', async () => {
+    const { coverage } = await import('../shared/sim/visibility.ts');
+    const s = game();
+    const cap = s.players[0].capital;
+    const dots = s.regions.filter(r => r.lane && (r.lane.a === cap || r.lane.b === cap));
+    const cov = coverage(s, 0);
+    for (const d of dots) expect(cov.has(d.id)).toBe(true);
+  });
+});

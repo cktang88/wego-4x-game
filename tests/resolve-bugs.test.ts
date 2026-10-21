@@ -231,7 +231,7 @@ describe('resolve: per-turn bookkeeping', () => {
   it('a Seize that lists its own leading fleet among the joiners still takes MAX_JOINERS other fleets', () => {
     const s = game();
     const cap = s.players[0].capital;
-    const t = s.regions.find(r => s.regions[cap].neighbors.includes(r.id) && r.owner === null && r.kind !== 'void')!;
+    const t = s.regions.find(r => s.regions[cap].links!.includes(r.id) && r.owner === null && r.kind !== 'void')!;
     t.garrison = 900; t.baseGarrison = 900;
     for (const f of s.fleets.filter(x => x.owner === 0)) f.region = -1 as any;   // park the starting fleets out of the way
     s.fleets = s.fleets.filter(x => x.owner !== 0);
@@ -303,7 +303,7 @@ describe('resolve: LIVE mode', () => {
   it('a seize route is finished once the fleet arrives (no second siege step next tick)', () => {
     let s = liveGame();
     const f = s.fleets.find(x => x.owner === 0)!;
-    const t = s.regions.find(r => s.regions[f.region].neighbors.includes(r.id) && r.owner === null)!;
+    const t = s.regions.find(r => s.regions[f.region].links!.includes(r.id) && r.owner === null)!;
     f.route = { path: [t.id], seize: t.id, mp: 999 };
     s = runTick(s, () => false);
     const g = s.fleets.find(x => x.id === f.id)!;

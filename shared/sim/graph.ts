@@ -9,7 +9,7 @@ export function findPath(s: GameState, a: RegionId, b: RegionId, maxLen = 99): R
   const seen = new Set([a]);
   while (q.length) {
     const cur = q.shift()!;
-    for (const n of s.regions[cur].neighbors) {
+    for (const n of s.regions[cur].links ?? s.regions[cur].neighbors) {
       if (seen.has(n)) continue;
       seen.add(n); prev.set(n, cur);
       if (n === b) {
@@ -24,16 +24,35 @@ export function findPath(s: GameState, a: RegionId, b: RegionId, maxLen = 99): R
   return null;
 }
 
-/** All regions within `range` jumps of `from` (including from). */
+/** All regions within `range` movement steps of `from` (including from), through hyperlane waypoints. */
 export function within(s: GameState, from: RegionId, range: number): Set<RegionId> {
   const out = new Set([from]);
   let frontier = [from];
   for (let i = 0; i < range; i++) {
     const nxt: RegionId[] = [];
-    for (const r of frontier) for (const n of s.regions[r].neighbors) if (!out.has(n)) { out.add(n); nxt.push(n); }
+    for (const r of frontier) for (const n of s.regions[r].links ?? s.regions[r].neighbors) if (!out.has(n)) { out.add(n); nxt.push(n); }
     frontier = nxt;
   }
   return out;
+}
+
+/** Real regions within `range` border hops (waypoints don't count), plus the waypoints on lanes touching them.
+ *  Sensors and other "area" effects use this, so long lanes don't shrink their reach. */
+export function withinArea(s: GameState, from: RegionId, range: number): Set<RegionId> {
+  const start = s.regions[from]?.lane ? [s.regions[from].lane!.a, s.regions[from].lane!.b] : [from];
+  const out = new Set<RegionId>([from, ...start]);
+  let frontier = start;
+  for (let i = 0; i < (s.regions[from]?.lane ? Math.max(0, range - 1) : range); i++) {
+    const nxt: RegionId[] = [];
+    for (const r of frontier) for (const n of s.regions[r].neighbors) if (!out.has(n)) { out.add(n); nxt.push(n); }
+    frontier = nxt;
+  }
+  return withLaneDots(s, out);
+}
+/** Add every waypoint whose lane touches one of these regions. */
+export function withLaneDots(s: GameState, set: Set<RegionId>): Set<RegionId> {
+  for (const r of s.regions) if (r.lane && (set.has(r.lane.a) || set.has(r.lane.b))) set.add(r.id);
+  return set;
 }
 
 export function distance(s: GameState, a: RegionId, b: RegionId): number {

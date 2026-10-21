@@ -46,6 +46,7 @@ export const DEFAULT_RULES = {
     regionsPerWedge: 8,    // map has 3-fold symmetry: 3 wedges + the Throne
     radius: 1000,          // world units
     minSiteDist: 150,
+    laneDots: [] as number[],   // hyperlanes longer than these get 1, 2 deep-space waypoints (travel takes longer); UX v2 enables [330, 520]
     borderWobble: 0.18,    // 0 = straight Voronoi edges
     minSharedEdge: 30,     // regions touching on a shorter edge are NOT adjacent
     nebulaChance: 0.18,
