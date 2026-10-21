@@ -15,6 +15,8 @@ import { drawStructure } from '../art/structures.ts';
 import { uiScale } from '../ui/dom.ts';
 import { iconizeDom, iconizeHtml, ic, drawIcon, fillIconText } from '../art/icons.ts';
 import { audio } from '../audio/audio.ts';
+// the viewer's DOM uses icons (ic()): size them even where the app's stylesheet isn't loaded (battle-demo.html)
+import '../icons.css';
 
 export interface BattleViewerCtx {
   rules: Rules;
@@ -201,7 +203,12 @@ const CSS = `
   .bv-round{min-width:0;flex:1}
   .bv-sides{gap:0.5rem}.bv-side{flex-basis:8.75rem;padding:0.5rem}
   .bv-vs{display:none}
-}`;
+  /* the end table fits a phone: tighter cells and tracking (it overflowed, clipping the Garrison column) */
+  .bv-end table{letter-spacing:.04em;max-width:100%}
+  .bv-end th{letter-spacing:.08em;padding:0.25rem 0.3125rem}
+  .bv-end td{padding:0.3125rem 0.3125rem}
+  .bv-end td:first-child{letter-spacing:.06em;overflow-wrap:anywhere}
+}`
 
 function injectStyle() {
   if (document.getElementById('bv-style')) return;
@@ -641,7 +648,13 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         if (maxX + 16 + tw < W) sd.label = { x: maxX + 16, y: (minY + maxY) / 2, align: 'left' };
         else if (minX - 16 - tw > 0) sd.label = { x: minX - 16, y: (minY + maxY) / 2, align: 'right' };
         // no room beside it: below the formation (above it, the label collides with damage / crit callouts)
-        else sd.label = { x: clamp((minX + maxX) / 2, tw / 2 + 4, W - tw / 2 - 4), y: Math.min(H - mBot + 12, Math.max(maxY + 26, gu ? gu.hy + gu.s * 1.55 + 36 : 0)), align: 'center' };
+        else {
+          // a garrison close to the bottom edge: lift it so its "GARRISON n" line and the side's name both fit
+          const shipsBottom = Math.max(-Infinity, ...sd.units.filter(x => !x.garrison).map(x => x.hy + x.s));
+          const lift = gu ? Math.min(gu.hy + gu.s * 1.55 + 46 * U - (H - mBot + 12), gu.hy - gu.s * 1.2 - shipsBottom) : 0;
+          if (gu && lift > 0) { gu.hy -= lift; maxY = Math.max(...sd.units.map(x => x.hy + x.s)); }
+          sd.label = { x: clamp((minX + maxX) / 2, tw / 2 + 4, W - tw / 2 - 4), y: Math.min(H - mBot + 12, Math.max(maxY + 26, gu ? gu.hy + gu.s * 1.55 + 46 * U : 0)), align: 'center' };
+        }
       } else {
         sd.label = { x: clamp((minX + maxX) / 2, 90, W - 90), y: clamp(minY - 18, mTop + 4, H), align: 'center' };
       }
@@ -806,7 +819,10 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         g.textAlign = 'center'; g.textBaseline = 'top';
         g.fillStyle = '#e4dcc8';
         setLs(g, '0.1em');
-        g.fillText(u.name.toUpperCase(), ps.x, by + 5);
+        // names of ships packed side by side would run into each other: the first one drawn wins the spot
+        const nm = u.name.toUpperCase(), tw = g.measureText(nm).width;
+        const box = { l: ps.x - tw / 2 - 3, r: ps.x + tw / 2 + 3, t: by + 4, b: by + 20 };
+        if (!nameBoxes.some(o => box.l < o.r && box.r > o.l && box.t < o.b && box.b > o.t)) { nameBoxes.push(box); g.fillText(nm, ps.x, by + 5); }
         setLs(g, '0px');
         g.globalAlpha = 1;
       }
@@ -1319,6 +1335,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     g.translate(camX, camY); g.scale(camK, camK);
     drawWrecks(tt);
     for (const sd of sides) for (const u of sd.units) if (u.garrison) drawGarrison(u, tt, sd.color);
+    nameBoxes.length = 0;
     const order = shipUnits.slice().sort((a, b) => a.hy - b.hy);
     for (const u of order) drawShip(u, tt, sides[u.side].color);
     drawShots(tt);
@@ -1335,10 +1352,14 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
 
   // ---------------------------------------------------------------- UI sync
   let capShown = -1;
+  /** ship name labels drawn this frame (screen boxes), so neighbours' names don't overprint */
+  const nameBoxes: { l: number; r: number; t: number; b: number }[] = [];
+  let playIcon: boolean | null = null;
   function sync() {
     const ri = currentRound(T);
     roundLbl.textContent = T < INTRO ? 'Deploying' : !nRounds ? 'No fighting' : T >= BATTLE_END && T >= END - 0.01 ? `Round ${nRounds}/${nRounds}` : `Round ${Math.max(1, ri + 1)}/${nRounds}`;
-    bPlay.innerHTML = playing ? ic('pause') : ic('play');
+    // only on change: replacing the icon every frame swallowed real clicks (the press landed on a node that was gone)
+    if (playIcon !== playing) { playIcon = playing; bPlay.innerHTML = playing ? ic('pause', { title: 'Pause (Space)' }) : ic('play', { title: 'Play (Space)' }); bPlay.dataset.state = playing ? 'playing' : 'paused'; }
     barFill.style.width = `${(T / END) * 100}%`;
     speedBtns.forEach(b => b.classList.toggle('bv-on', Number(b.dataset.v) === speed));
     // intro card

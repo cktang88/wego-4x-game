@@ -30,7 +30,7 @@ import {
   type Tier, type Lens, coarsePointer, medianRegionRadius, tierFor, slotFor, slotScale, anchorOf, powerOf, garrisonPower,
   garrisonMax, regionEdges, empireLabels, nearestRegion, ROMAN, isLane, hyperlanes,
 } from './mapmodel.ts';
-import { fleetSpeed } from '../../../shared/sim/graph.ts';
+import { fleetSpeed, within, findPath } from '../../../shared/sim/graph.ts';
 import {
   TAU, numFont, nameFont, displayFont, PLATE, INK, desat, inkOn, roundRect, shieldPath, diamondPath, chevronPath, swords,
   crownGlyph, starGlyph, planet, haloText, letterSpaced, buildingIcon, TRAY_ORDER, hatchTile, hexA as hexA0,
@@ -56,7 +56,11 @@ export interface Fx {
 }
 export type DragVerb = 'move' | 'od' | 'seize' | 'join' | 'merge' | 'split' | 'invalid';
 /** The live arrow while a fleet token (or ship chip) is being dragged. `to` should already be snapped to a region site. */
-export interface DragArrow { from: Pt; to: Pt; verb: DragVerb; color: string; path?: Pt[]; ghost?: Pt | null }
+export interface DragArrow {
+  from: Pt; to: Pt; verb: DragVerb; color: string; path?: Pt[]; ghost?: Pt | null;
+  /** a hover preview of the selected fleet's order (not a drag in progress) */
+  blink?: boolean;
+}
 export interface PlannedArrow {
   from: Pt; to: Pt;
   /** roman slot ("II") → badge at the midpoint; anything else (LIVE ETA "3h") → label at the head */
@@ -152,6 +156,8 @@ export class MapRenderer {
   // ---- semantic zoom
   private _tier: Tier | null = null;
   private fade: { c: HTMLCanvasElement; cam: Cam; t0: number } | null = null;
+  /** the crossfade snapshot canvas, kept between tier switches (a full-screen canvas per switch was churn) */
+  private fadeSpare: HTMLCanvasElement | null = null;
   /** read-only: the current semantic-zoom tier */
   get tier(): Tier { return this._tier ?? this.computeTier(null); }
 
@@ -183,15 +189,30 @@ export class MapRenderer {
   private tokHits: TokHit[] = [];
   private bannerHits: BannerHit[] = [];
   /** last garrison seen per region (fogged banners show "~N") */
+  private lastKnownBy = new Map<number | null, Map<number, number>>();
+  /** the current viewer's memory (per seat: hotseat seats must not see each other's scouting) */
   private lastKnown = new Map<number, number>();
   private lkVer = 0;
   private dragHead: Pt | null = null;
+  /** lane focus: eased brightness per hyperlane segment (key = segment index in laneSegs) */
+  private laneA = new Map<number, number>();
+  private laneMemo: { key: string; t: Map<number, number> } = { key: '', t: new Map() };
+  /** last mouse position over the map canvas (screen px), for star / fleet hover; null for touch or when it left */
+  private mouse: Pt | null = null;
   private aftermathSeen = new Map<string, number>();
   private memoSup: { st: GameState | null; you: number | null; conn: Set<number> | null; sup: Set<number> | null } = { st: null, you: null, conn: null, sup: null };
   private fleetIdx: { src: Fleet[] | null; m: Map<number, Fleet>; last: Map<number, Fleet> } = { src: null, m: new Map(), last: new Map() };
 
   constructor(public canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
+    // hover is mouse-only (touch selects instead): remember where it is for the lane focus
+    canvas.addEventListener('pointermove', e => {
+      if (e.pointerType !== 'mouse') { this.mouse = null; return; }
+      const r = canvas.getBoundingClientRect();
+      this.mouse = { x: e.clientX - r.left, y: e.clientY - r.top };
+    }, { passive: true });
+    canvas.addEventListener('pointerleave', () => { this.mouse = null; }, { passive: true });
+    canvas.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') this.mouse = null; }, { passive: true });
     // labels are cached in the static layer: redraw once web fonts arrive
     document.fonts?.ready.then(() => this.invalidate()).catch(() => { /* */ });
     // planets painted in idle time: refresh the cached layer when they land
@@ -414,7 +435,9 @@ export class MapRenderer {
     if (!fast && (base !== this.layerKey || !camSame)) {
       // tier switch: keep a snapshot of the old layer and crossfade it out (text never scales; the content swaps)
       if (prevTier && prevTier !== this._tier && this.layerKey && lc && !reducedMotion()) {
-        const c = this.fade?.c && this.fade.c.width === W && this.fade.c.height === H ? this.fade.c : document.createElement('canvas');
+        const spare = this.fade?.c ?? this.fadeSpare;
+        const c = spare && spare.width === W && spare.height === H ? spare : document.createElement('canvas');
+        this.fadeSpare = c;
         c.width = W; c.height = H;
         const x = c.getContext('2d')!;
         x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, W, H); x.drawImage(this.layer, 0, 0);
@@ -460,6 +483,7 @@ export class MapRenderer {
       for (const rid of I.unsupplied) { const r = st.regions[rid]; if (!r || r.kind === 'void') continue; path(ctx, r.poly); ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fill(); }
     }
     this.drawRegionSelection(I);
+    this.drawLaneFocus(I);
     // animated parts of sites (culled to the view)
     { const a = this.toWorld(-40, -40), b = this.toWorld(this.w + 40, this.h + 40); this.view = { x0: a.x, y0: a.y, x1: b.x, y1: b.y }; }
     for (const r of st.regions) this.drawSiteAnim(r, I, this.colorOf(st, I.owners[r.id]));
@@ -512,6 +536,9 @@ export class MapRenderer {
 
   /** Remember garrisons while visible, so fogged banners can say "~N". */
   private rememberGarrisons(I: DrawInput) {
+    let lk = this.lastKnownBy.get(I.you);
+    if (!lk) { lk = new Map(); this.lastKnownBy.set(I.you, lk); }
+    if (lk !== this.lastKnown) { this.lastKnown = lk; this.lkVer++; }
     for (const r of I.state.regions) {
       if (r.garrison < 0) continue;
       if (I.you !== null && !I.visible.has(r.id) && r.owner !== I.you) continue;
@@ -673,13 +700,14 @@ export class MapRenderer {
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       ctx.beginPath();
       for (const L of hyperlanes(st)) { L.pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); }
-      // groove (dark), the lit lip on the lamp side, the faint glow of the printed route
-      ctx.strokeStyle = 'rgba(0,0,8,0.5)'; ctx.lineWidth = (strat ? 3 : 4.2) * S; ctx.stroke();
-      ctx.strokeStyle = strat ? 'rgba(150,180,255,0.16)' : 'rgba(150,185,255,0.24)'; ctx.lineWidth = (strat ? 2.2 : 3) * S; ctx.stroke();
-      ctx.strokeStyle = strat ? 'rgba(215,228,255,0.38)' : 'rgba(225,235,255,0.55)'; ctx.lineWidth = (strat ? 0.8 : 1.1) * S; ctx.stroke();
+      // a quiet thread by default (the lanes touching a hovered/selected star or your fleet's reach are lit in the
+      // dynamic pass, see drawLaneFocus): a faint groove and a thin pale core, dim waypoint buoys
+      ctx.strokeStyle = 'rgba(0,0,8,0.3)'; ctx.lineWidth = (strat ? 2.6 : 3.4) * S; ctx.stroke();
+      ctx.strokeStyle = strat ? 'rgba(200,215,255,0.22)' : 'rgba(210,222,255,0.22)'; ctx.lineWidth = (strat ? 1 : 1.1) * S; ctx.stroke();
       const dr = (strat ? 2.2 : 3.4);
       const buoy = buoySprite(dr * this.rdpr, false);
       const bw = (buoy.width / this.rdpr) * S;
+      ctx.globalAlpha = 0.42;
       for (const r of st.regions) if (isLane(r)) ctx.drawImage(buoy, r.site.x - bw / 2, r.site.y - bw / 2, bw, bw);
       ctx.restore();
     }
@@ -2450,6 +2478,123 @@ export class MapRenderer {
     }
   }
 
+  /** The star the mouse is over: the hovered region, when the pointer is on its star or its banner (not just
+   *  anywhere inside the region, which tiles the whole map). */
+  private hoverStar(I: DrawInput): number | null {
+    const m = this.mouse;
+    if (!m) return null;
+    const b = this.bannerAt(m.x, m.y);
+    if (b !== null) return b;
+    const rid = I.hoverRegion;
+    const r = rid !== null ? I.state.regions[rid] : null;
+    if (!r || isLane(r) || r.kind === 'void') return null;
+    const p = this.toScreen(r.site);
+    const R = Math.max(18, this.siteR(r, this.bannerTier(r, I)) + 8) * this.ui;
+    return Math.hypot(p.x - m.x, p.y - m.y) <= R ? r.id : null;
+  }
+
+  /** Per-segment target brightness: 0.8 for lanes touching a hovered/selected star, 0.55 for the lanes your
+   *  hovered/selected fleet can reach this turn, 1 along its route or planned path. Nothing while dragging. */
+  private laneTargets(I: DrawInput, segs: LaneSeg[]): Map<number, number> {
+    const st = I.state;
+    const stars: number[] = [];
+    const dragging = !!I.drag && !I.drag.blink;
+    const sr = I.selectedRegion;
+    if (sr !== null && st.regions[sr] && !isLane(st.regions[sr])) stars.push(sr);
+    const hs = dragging ? null : this.hoverStar(I);
+    if (hs !== null && !stars.includes(hs)) stars.push(hs);
+    const fleets = new Set<number>();
+    if (!dragging && I.you !== null) {
+      for (const f of I.fleets) if (f.selected && f.owner === I.you && !f.ghost) fleets.add(f.id);
+      const hit = this.mouse ? this.tokenAt(this.mouse.x, this.mouse.y) : null;
+      if (hit && hit.owner === I.you) for (const id of hit.fleetIds) fleets.add(id);
+    }
+    if (dragging) stars.length = 0;
+    const fl = [...fleets].map(id => this.fleetById(st, id)).filter((f): f is Fleet => !!f && !!st.regions[f.region]);
+    const arrows = I.plannedArrows.map(a => `${a.from.x},${a.from.y}>${a.to.x},${a.to.y}`).join(';');
+    const key = `${this.objId(st)}|${stars.join(',')}|${fl.map(f => `${f.id}@${f.region}`).join(',')}|${arrows}`;
+    if (key === this.laneMemo.key) return this.laneMemo.t;
+    const t = new Map<number, number>();
+    const idx = laneIndex(st, segs);
+    const bump = (si: number, v: number) => { if ((t.get(si) ?? 0) < v) t.set(si, v); };
+    for (const rid of stars) for (const si of idx.touch.get(rid) ?? []) bump(si, 0.8);
+    const markPath = (ids: number[]) => { for (let i = 1; i < ids.length; i++) { const si = idx.pair.get(pairKey(ids[i - 1], ids[i])); if (si !== undefined) bump(si, 1); } };
+    for (const f of fl) {
+      let sp = 1;
+      try { sp = Math.max(1, fleetSpeed(st, f)); } catch { /* */ }
+      const reach = within(st, f.region, sp);
+      segs.forEach((g, si) => { if (reach.has(g.u) && reach.has(g.v)) bump(si, 0.55); });
+      if (f.route?.path?.length) markPath([f.region, ...f.route.path]);
+      // your plan for it this turn: the chain of planned arrows that starts at its token (or its system)
+      const near = (a: Pt, b: Pt | undefined) => !!b && Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;
+      const tokPos = I.fleets.find(d => d.id === f.id)?.pos;
+      let cur = f.region, starts = [st.regions[f.region].site, tokPos];
+      for (let hop = 0; hop < 64; hop++) {
+        const a = I.plannedArrows.find(x => starts.some(p => near(x.from, p)));
+        const to = a ? st.regions.find(r => near(a.to, r.site)) : undefined;
+        const p = to && to.id !== cur ? findPath(st, cur, to.id) : null;
+        if (!to || !p) break;
+        markPath([cur, ...p]);
+        cur = to.id; starts = [to.site, undefined];
+      }
+    }
+    this.laneMemo = { key, t };
+    return t;
+  }
+
+  /** Brighten the hyperlanes that matter right now over the faint base (eased ~150 ms, culled to the view). */
+  private drawLaneFocus(I: DrawInput) {
+    const st = I.state;
+    const segs = laneSegs(st);
+    const tg = this.laneTargets(I, segs);
+    for (const si of tg.keys()) if (!this.laneA.has(si)) this.laneA.set(si, 0);
+    if (!this.laneA.size) return;
+    const e = reducedMotion() ? 1 : 1 - Math.exp(-this.dt / 50);
+    const { ctx } = this;
+    const S = this.px(1);
+    const strat = this.tier === 'strategic';
+    const v = this.toWorld(-40, -40), w = this.toWorld(this.w + 40, this.h + 40);
+    const dots = new Map<number, number>();
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (const [si, a0] of this.laneA) {
+      const target = tg.get(si) ?? 0;
+      const a = a0 + (target - a0) * e;
+      if (a < 0.01 && !target) { this.laneA.delete(si); continue; }
+      this.laneA.set(si, a);
+      const g = segs[si];
+      if (!g) continue;
+      if (Math.max(g.a.x, g.b.x) < v.x || Math.min(g.a.x, g.b.x) > w.x || Math.max(g.a.y, g.b.y) < v.y || Math.min(g.a.y, g.b.y) > w.y) continue;
+      // stop short of the stars (they sit in the static layer underneath)
+      const L = Math.hypot(g.b.x - g.a.x, g.b.y - g.a.y) || 1;
+      const ra = this.laneTrim(st.regions[g.u], I) * S, rb = this.laneTrim(st.regions[g.v], I) * S;
+      if (ra + rb >= L) continue;
+      const ux = (g.b.x - g.a.x) / L, uy = (g.b.y - g.a.y) / L;
+      const x0 = g.a.x + ux * ra, y0 = g.a.y + uy * ra, x1 = g.b.x - ux * rb, y1 = g.b.y - uy * rb;
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+      ctx.strokeStyle = `rgba(255,190,90,${0.22 * a})`; ctx.lineWidth = (strat ? 4 : 5.5) * S; ctx.stroke();
+      ctx.strokeStyle = `rgba(255,226,160,${0.85 * a})`; ctx.lineWidth = (strat ? 1.3 : 1.7) * S; ctx.stroke();
+      for (const id of [g.u, g.v]) if (isLane(st.regions[id])) dots.set(id, Math.max(dots.get(id) ?? 0, a));
+    }
+    if (dots.size) {
+      const dr = strat ? 2.2 : 3.4;
+      const buoy = buoySprite(dr * this.rdpr, true);
+      const bw = (buoy.width / this.rdpr) * S;
+      for (const [id, a] of dots) {
+        const q = st.regions[id].site;
+        ctx.globalAlpha = Math.min(1, a * 1.1);
+        ctx.drawImage(buoy, q.x - bw / 2, q.y - bw / 2, bw, bw);
+        ctx.beginPath(); ctx.arc(q.x, q.y, dr * 0.45 * S, 0, TAU); ctx.fillStyle = 'rgba(255,214,140,0.9)'; ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+  /** How far (design px) a lit lane stops short of a system's site: its star, plus a little air. */
+  private laneTrim(r: Region | undefined, I: DrawInput): number {
+    if (!r || isLane(r)) return 0;
+    return this.siteR(r, this.bannerTier(r, I)) + 3;
+  }
+
   private drawHover(I: DrawInput) {
     const { ctx } = this;
     const k = Math.min(1, this.dt / 110);
@@ -2957,7 +3102,7 @@ export class MapRenderer {
   private prepare(st: GameState) {
     this.seed = st.seed;
     this.asteroidCache.clear();
-    this.lastKnown.clear();
+    this.lastKnownBy.clear(); this.lastKnown = new Map();
     this.tokDisp.clear();
     for (const r of st.regions) {
       if (r.feature !== 'asteroids') continue;
@@ -3025,3 +3170,34 @@ export function path(ctx: CanvasRenderingContext2D, poly: Pt[]) {
 }
 
 export function hexA(hex: string, a: number): string { return hexA0(hex, a); }
+
+// ------------------------------------------------------------------ lane focus: hyperlanes as segments
+interface LaneSeg { a: Pt; b: Pt; u: number; v: number }
+const pairKey = (u: number, v: number) => (u < v ? `${u}|${v}` : `${v}|${u}`);
+const segCache = new WeakMap<Region[], LaneSeg[]>();
+/** Every hyperlane split into site-to-site segments (stable order per map). */
+function laneSegs(st: GameState): LaneSeg[] {
+  let v = segCache.get(st.regions);
+  if (v) return v;
+  v = [];
+  for (const L of hyperlanes(st)) for (let i = 1; i < L.ids.length; i++) v.push({ a: L.pts[i - 1], b: L.pts[i], u: L.ids[i - 1], v: L.ids[i] });
+  segCache.set(st.regions, v);
+  return v;
+}
+const idxCache = new WeakMap<LaneSeg[], { pair: Map<string, number>; touch: Map<number, number[]> }>();
+/** Segment by its two ends, and every segment of each lane that touches a real system. */
+function laneIndex(st: GameState, segs: LaneSeg[]) {
+  let v = idxCache.get(segs);
+  if (v) return v;
+  const pair = new Map<string, number>(), touch = new Map<number, number[]>();
+  segs.forEach((g, i) => pair.set(pairKey(g.u, g.v), i));
+  let si = 0;
+  for (const L of hyperlanes(st)) {
+    const n = L.ids.length - 1, mine = Array.from({ length: n }, (_, k) => si + k);
+    for (const end of [L.ids[0], L.ids[L.ids.length - 1]]) (touch.get(end) ?? touch.set(end, []).get(end)!).push(...mine);
+    si += n;
+  }
+  v = { pair, touch };
+  idxCache.set(segs, v);
+  return v;
+}
