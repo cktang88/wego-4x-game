@@ -3,11 +3,15 @@
 import type { GameState } from '../../../shared/sim/types.ts';
 import { ORDER_INFO } from '../../../shared/sim/orders.ts';
 import { ORDER_ICON } from '../hud/util.ts';
+import { MAP_INTRO, MAP_LEGEND } from './modal-help.ts';
 
 export function helpHtml(st: GameState): string {
   const R = st.rules, S = R.soul;
   return `<h1 style="color:var(--gold)">How to play Three Crowns</h1>
   <p>Three heirs fight over the frontier of a dead empire. Everyone plans <b>at the same time</b>, in secret; then every order of all three players resolves together in <b>one step</b>, and you watch it happen on the board. You don't need to be online together: a turn resolves when all three have sealed.</p>
+  <h2>Reading the map</h2>
+  <p>${MAP_INTRO}</p>
+  <ul>${MAP_LEGEND.map(([k, v]) => `<li><b>${k}</b>: ${v}</li>`).join('')}</ul>
   <h2>The board is the interface</h2>
   <ul>
     <li><b>Drag one of your fleets onto a world.</b> The target picks the verb: your own or an empty world means <b>Move</b>, a hostile or neutral one means <b>Seize</b>, your own fleet means <b>Merge</b> (free). A card at the arrow head says what will happen, with the odds; invalid targets never light up.</li>

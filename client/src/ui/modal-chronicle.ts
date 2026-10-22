@@ -69,7 +69,7 @@ export function chronicleBody(c: Ctx): string {
     const bs = ti < 8 ? battlesOf(c, turn) : [];
     const bsShown = (bs ?? []).filter(b => f !== 'mine' || (g.you !== null && b.sides.some(s => s.owner === g.you)));
     if (!es.length && !bsShown.length && turn !== latest) return '';
-    const battles = bs === null ? '<span class="dim sm">…</span>' : bsShown.map(b => {
+    const battles = bs === null ? '<span class="dim">Loading battles…</span>' : bsShown.map(b => {
       const lost = Object.values(b.losses).reduce((a, n) => a + n, 0);
       const w = b.winner;
       return `<button class="bchip" data-a="battle" data-id="${b.id}" data-turn="${turn}" style="--pc:${esc(w === null ? '#a59ccc' : g.color(w))}" title="${esc(b.name)}"><span class="bchip-ic">⚔</span><b>${esc(b.name.replace(/^(The )?Battle (of|for) /i, ''))}</b><span class="dim">${b.sides.map(s => `<i class="dot" style="background:${esc(g.color(s.owner))}"></i>`).join('')}${lost ? ` −${lost}` : ''}</span></button>`;
@@ -85,7 +85,7 @@ export function chronicleBody(c: Ctx): string {
       const bodyChip = reg && bk ? `<span class="ce-body" title="${esc(`${taggedBodyName(st, reg, e.body!)} (${reg.name})`)}"><i>${ic(bk === 'station' ? 'station' : icFor('body', bk, BODIES[bk].icon))}</i>${esc(taggedBodyName(st, reg, e.body!))}</span>` : '';
       return `<div class="ce ${e.major ? 'major' : ''} ${open ? 'open' : ''}" style="--pc:${esc(col)}"><button class="ce-b" data-a="chron-x" data-id="${k}"${more ? '' : ' data-static'}><span class="ce-ic">${entryIcon(e)}</span><span class="ce-t">${esc(open ? e.text : short)}${bodyChip}</span>${more ? `<span class="ce-more">${open ? '−' : '+'}</span>` : ''}</button>${e.region !== undefined ? `<button class="ce-go" data-a="region" data-id="${e.region}" title="Show on map" aria-label="Show on map">◎</button>` : ''}</div>`;
     }).join('');
-    return `<section class="ct"><header class="ct-h"><span class="ct-n"><small>${T}</small><b>${turn}</b></span><button class="mbtn m-ghost sm" data-a="replay" data-id="${turn}" title="Replay ${T.toLowerCase()} ${turn}">▶ Replay</button><span class="ct-bs">${battles}</span></header>
+    return `<section class="ct"><header class="ct-h"><span class="ct-n"><small>${T}</small><b>${turn}</b></span><button class="mbtn m-ghost sm" data-a="replay" data-id="${turn}" title="Replay ${T.toLowerCase()} ${turn}">▶ Replay</button></header>${battles ? `<div class="ct-bs">${battles}</div>` : ''}
       ${entries ? `<div class="ct-es">${entries}</div>` : bsShown.length ? '' : `<div class="ct-es"><div class="dim ce-quiet">Quiet</div></div>`}</section>`;
   }).join('');
   return `<div class="chron">${rows || '<div class="m-empty">The chronicle is empty</div>'}</div>`;

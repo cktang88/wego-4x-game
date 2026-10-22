@@ -185,3 +185,9 @@ h2 { color: var(--accent); }
 
 /* icons in the chrome are glyphs, not colour emoji */
 .hud, .mdl-root, .overlay, .herald-ov, .saga-ov, .uxtip, .toast { font-variant-emoji: text; }
+
+/* touch: dialog controls (How to play, victory, confirms) at least 44px */
+@media (pointer: coarse) {
+  .closex { width: 2.75rem; height: 2.75rem; }
+  .dialog .row > button, .dialog > button { min-height: 2.75rem; }
+}

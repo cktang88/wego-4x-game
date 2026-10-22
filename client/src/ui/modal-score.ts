@@ -64,7 +64,7 @@ export function scoreBody(c: Ctx): string {
     return `<article class="pc ${you ? 'you' : ''} ${p.eliminated ? 'out' : ''}" style="--pc:${esc(p.color)}">
       <header class="pc-h"><span class="crest"></span><b>${esc(p.name)}</b>${you ? '<small class="m-tag">YOU</small>' : p.kind === 'ai' ? '<small class="m-tag dim">AI</small>' : ''}</header>
       <div class="pc-vp"><b data-num="mvp-${p.id}">${p.vp}</b><span class="gold">♛</span>${st.winner === p.id ? '<span class="m-tag gold">WINNER</span>' : ''}</div>
-      <div class="pc-track" title="${p.vp} of ${target} to win">${bar}<span>${target}</span></div>
+      <div class="pc-track" title="${p.vp} of ${target} to win">${bar}<span>${target} to win</span></div>
       ${hold}
       <div class="pc-leg">${legend || '<span class="dim">no VP yet</span>'}</div>
       <div class="pc-stats"><span>Crowns <b>${crowns}</b></span><span>Worlds <b>${worlds}</b></span></div>
@@ -85,8 +85,8 @@ function oathHtml(c: Ctx, p: Player): string {
   if (!ob.length && !debts.length && !vend.length) return '';
   const T = c.g.live ? 'C' : 'T';
   return `<div class="pc-oath">${ob.map(o => `<div class="brand-row"><span class="brand">OATHBREAKER</span><small>${T}${o.turn} · vs <b style="color:${esc(c.g.color(o.victim))}">${esc(c.g.pname(o.victim))}</b></small>${o.words ? `<q>${esc(o.words)}</q>` : ''}</div>`).join('')}
-    ${debts.map(d => `<div class="debt-row" title="Blood-debt: ${esc(c.g.pname(d.creditor))} hits harder against them"><i>✠</i>Owes <b style="color:${esc(c.g.color(d.creditor))}">${esc(c.g.pname(d.creditor).split(' ').slice(-1)[0])}</b> for ${esc(d.victim)}</div>`).join('')}
-    ${vend.map(v => `<div class="debt-row" title="Vengeance for a razed world"><i>♨</i>Vendetta vs <b style="color:${esc(c.g.color(v.vs))}">${esc(c.g.pname(v.vs).split(' ').slice(-1)[0])}</b> · ${T}${v.until}</div>`).join('')}</div>`;
+    ${debts.map(d => `<div class="debt-row" title="Blood-debt: ${esc(c.g.pname(d.creditor))} hits harder against them"><i>✠</i>Owes <b style="color:${esc(c.g.color(d.creditor))}">${esc(c.g.pname(d.creditor))}</b> for ${esc(d.victim)}</div>`).join('')}
+    ${vend.map(v => `<div class="debt-row" title="Vengeance for a razed world"><i>♨</i>Vendetta vs <b style="color:${esc(c.g.color(v.vs))}">${esc(c.g.pname(v.vs))}</b> · ${T}${v.until}</div>`).join('')}</div>`;
 }
 
 function diplo(c: Ctx, p: Player): string {
@@ -108,7 +108,7 @@ function diplo(c: Ctx, p: Player): string {
   else if (g.canPlan) {
     const short = leftover(g, you).influence < cost;
     act = `<input class="pact-words" data-pact-words="${p.id}" data-keep="pw-${p.id}" maxlength="${st.rules.soul?.pactWordsMax ?? 120}" placeholder="Sworn words (optional)" value="${esc(ui.pactWords[p.id] ?? '')}" title="Break a sworn pact and you are branded Oathbreaker">
-      <button class="mbtn go ${offered ? 'hot' : ''}" data-a="pact" data-id="${p.id}"${short ? ' disabled title="Not enough influence"' : ''}>${offered ? 'Accept pact' : 'Offer pact'} <span class="cost ${short ? 'neg' : ''}">✦${cost} · 1 order</span></button>`;
+      <button class="mbtn go ${offered ? 'hot' : ''}" data-a="pact" data-id="${p.id}"${short ? ` disabled title="Not enough influence: needs ✦${cost}"` : ''}>${offered ? 'Accept pact' : 'Offer pact'} <span class="cost ${short ? 'neg' : ''}">✦${cost}<span class="ord"> · 1 order</span></span></button>`;
   } else act = `<span class="m-why dim">${esc(lockWhy(g))}</span>`;
   const theirWords = (p.pactWords ?? {})[you];
   const myWords = (() => { const o = k !== null ? (g.live ? g.st.live?.queue[you]?.[k] : g.plan.orders[k]) : null; return o && o.type === 'pact' ? o.words : undefined; })();

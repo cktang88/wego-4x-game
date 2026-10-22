@@ -60,10 +60,12 @@ function ctx(o: Open): Ctx {
 export function openModal(screen: GameScreen, name: ModalName, tab?: string): void {
   const g = screen as unknown as Host;
   if (!META[name]) return;
+  const newTab = !!tab && META[name].tabs.some(x => x[0] === tab) && ui.tabs[name] !== tab;
   if (tab && META[name].tabs.some(x => x[0] === tab)) ui.tabs[name] = tab;
   if (cur && cur.g !== g) { teardown(cur, true); cur = null; }
   if (cur) {
     if (cur.name !== name) { cur.name = name; cur.body.scrollTop = 0; audio.ui('page'); }
+    else if (newTab) cur.body.scrollTop = 0;
     render(true);
     return;
   }
@@ -125,7 +127,7 @@ function teardown(o: Open, instant: boolean) {
 
 function headHtml(o: Open, c: Ctx): string {
   const m = META[o.name];
-  const tabs = m.tabs.length ? `<nav class="mh-tabs" role="tablist">${m.tabs.map(([id, ic, n], i) => `<button class="mt ${c.tab === id ? 'on' : ''}" data-a="tab" data-id="${id}" role="tab" aria-selected="${c.tab === id}"><i>${ic}</i><span>${n}</span><kbd>${i + 1}</kbd></button>`).join('')}</nav>` : '';
+  const tabs = m.tabs.length ? `<nav class="mh-tabs" role="tablist">${m.tabs.map(([id, ic, n], i) => `<button class="mt ${c.tab === id ? 'on' : ''}" data-a="tab" data-id="${id}" role="tab" aria-selected="${c.tab === id}" title="${esc(n)} (${i + 1})"><i>${ic}</i><span>${n}</span><kbd aria-hidden="true">${i + 1}</kbd></button>`).join('')}</nav>` : '';
   const extra = o.name === 'empire' ? empireHead(c) : o.name === 'score' ? scoreHead(c) : o.name === 'chronicle' ? chronicleHead(c) : '';
   const sw = `<nav class="mh-sw" aria-label="Screens">${ORDER.map(n => `<button class="sw ${n === o.name ? 'on' : ''}" data-a="modal" data-id="${n}" title="${META[n].title} (${META[n].key})" aria-label="${META[n].title}">${META[n].icon}</button>`).join('')}</nav>`;
   // without tabs the extras (chat button, filters) sit in the title row; phones wrap them under it
@@ -189,9 +191,29 @@ function render(force = false) {
 }
 
 function after(o: Open, c: Ctx) {
+  tabBar(o);
   if (o.name === 'empire') empireAfter(c, o.body);
 }
 function onResize() { if (cur) after(cur, ctx(cur)); }
+
+/** Tab bars scroll sideways when they don't fit: keep the active tab in view and fade the edge that hides more. */
+function tabBar(o: Open) {
+  o.head.querySelectorAll<HTMLElement>('.mh-tabs, .mh-seg').forEach(nav => {
+    const fade = () => {
+      const max = nav.scrollWidth - nav.clientWidth;
+      nav.classList.toggle('fl', max > 1 && nav.scrollLeft > 1);
+      nav.classList.toggle('fr', max > 1 && nav.scrollLeft < max - 1);
+    };
+    const on = nav.querySelector<HTMLElement>('.on');
+    if (on && nav.scrollWidth > nav.clientWidth + 1) {
+      const l = on.offsetLeft, r = l + on.offsetWidth;  // .mh-tabs / .mh-seg are position: relative
+      if (l < nav.scrollLeft + 24) nav.scrollLeft = Math.max(0, l - 24);
+      else if (r > nav.scrollLeft + nav.clientWidth - 24) nav.scrollLeft = r - nav.clientWidth + 24;
+    }
+    if (!nav.dataset.fade) { nav.dataset.fade = '1'; nav.addEventListener('scroll', fade, { passive: true }); }
+    fade();
+  });
+}
 
 // ====================================================================== input
 function onClick(e: MouseEvent) {

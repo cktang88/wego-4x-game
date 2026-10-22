@@ -1,0 +1,104 @@
+/* ============================================================================
+   herald.css: the Herald's front page layout (client/src/ui/herald.ts): story bodies, columns that reflow with
+   the paper's own width (a container query, so a phone in landscape and a narrow tablet get the right layout),
+   a footer that never scrolls away, and touch-sized controls. soul.css holds the paper itself and loads later,
+   so every rule here is scoped under .herald-ov to win on specificity.
+   ============================================================================ */
+.herald-ov .herald {
+  container: herald / inline-size;
+  width: min(72rem, 100%); padding-bottom: 0;
+  overscroll-behavior: contain;
+}
+.herald-ov .herald :focus-visible { outline: 0.125rem solid #6a1c10; outline-offset: 0.125rem; }
+
+/* ---- stories */
+.herald-ov .hl h2 { overflow-wrap: anywhere; }
+.herald-ov .hl-go {
+  all: unset; cursor: pointer; display: block; width: 100%; text-align: inherit; box-sizing: border-box; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit;
+  text-decoration: underline; text-decoration-color: rgba(42, 29, 16, 0.2); text-decoration-thickness: 1px; text-underline-offset: 0.1875rem;
+}
+.herald-ov .hl-go, .herald-ov .hl-go:hover:not(:disabled), .herald-ov .hl-go:active:not(:disabled) { background: none; border: 0; box-shadow: none; border-radius: 0; transform: none; filter: none; padding: 0; }
+.herald-ov .hl-go:hover { text-decoration-color: currentColor; }
+.herald-ov .hl-go:focus-visible { outline: 0.125rem solid #6a1c10; outline-offset: 0.125rem; }
+.herald-ov .hl-body { margin-top: 0.5rem; font-family: 'IM Fell English', Georgia, 'Times New Roman', serif; color: #23190e; text-align: left; }
+.herald-ov .hl-body p { margin: 0 0 0.5rem; font-size: 1.0625rem; line-height: 1.45; hyphens: auto; overflow-wrap: break-word; }
+.herald-ov .hl-body p:last-child { margin-bottom: 0; }
+.herald-ov .hl-body .hl-byl { font-style: italic; color: #4a3820; margin-bottom: 0.25rem; }
+.herald-ov .hl-body .hl-dl { font-family: 'Cinzel', Georgia, serif; font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: #3a2a16; margin-bottom: 0.25rem; }
+.herald-ov .hl.lead.has-body { text-align: left; }
+.herald-ov .hl.lead.has-body > h2, .herald-ov .hl.lead.has-body > .hl-ic { text-align: center; }
+.herald-ov .hl.lead .hl-body { columns: 2 17rem; column-gap: 1.5rem; column-rule: 1px solid rgba(42, 29, 16, 0.35); margin-top: 0.75rem; }
+.herald-ov .hl.lead .hl-body .hl-dl, .herald-ov .hl.lead .hl-body .hl-byl { column-span: all; text-align: center; }
+.herald-ov .hl.lead .hl-body p { font-size: 1.125rem; }
+.herald-ov .hl.lead .hl-body p.first::first-letter {
+  float: left; font-family: 'Cinzel', Georgia, serif; font-weight: 900; font-size: 3.4em; line-height: 0.82; margin: 0.1em 0.12em 0 0; color: #6a1c10;
+}
+.herald-ov .hd-cols { columns: 3 17rem; column-gap: 1.375rem; }
+.herald-ov .hd-cols .hl.has-body h2 { font-size: 1.1875rem; }
+.herald-ov .hd-cols .hl-body p { font-size: 1rem; line-height: 1.4; }
+.herald-ov .hd-cols .hl-body .hl-dl { font-size: var(--fs-xs); }
+
+/* ---- the sidebar: dispatches and the plant form */
+.herald-ov .hd-body { grid-template-columns: minmax(0, 1fr) 17rem; }
+.herald-ov .hd-side { min-width: 0; }
+.herald-ov .dsp p, .herald-ov .plant.filed p { overflow-wrap: anywhere; }
+.herald-ov .plant-row { flex-wrap: wrap; }
+.herald-ov .seg2 button { height: 2.25rem; padding: 0 0.625rem; font-size: var(--fs-sm); }
+.herald-ov .seg2 button:not(.on) { color: #2a1d10; }
+.herald-ov .dsp-count { color: #4a3820; }
+.herald-ov .herald .hb { height: 2.5rem; }
+.herald-ov .herald .hb.go { height: 2.75rem; white-space: nowrap; }
+
+/* ---- the footer: always on screen, however long the paper */
+.herald-ov .hd-foot {
+  position: sticky; bottom: 0; z-index: 2; margin: 0.75rem -1.875rem 0; padding: 0.625rem 1.875rem 0.875rem;
+  background: linear-gradient(180deg, #ddcca4, #cdb98a); box-shadow: 0 -0.375rem 0.75rem -0.375rem rgba(60, 40, 10, 0.35);
+}
+.herald-ov .hd-nav { min-width: 0; flex-wrap: wrap; }
+.herald-ov .hd-nav button { height: 2.5rem; padding: 0 0.75rem; white-space: nowrap; color: #2a1d10; }
+.herald-ov .hd-nav button:hover { background: rgba(42, 29, 16, 0.08); }
+
+/* ---- a medium paper (tablet portrait, small windows): one column of stories, the dispatches below */
+@container herald (max-width: 52rem) {
+  .herald-ov .hd-body { grid-template-columns: 1fr; gap: 0.75rem; }
+  .herald-ov .hd-side { border-left: none; padding-left: 0; border-top: 1px solid #2a1d10; padding-top: 0.625rem; }
+  .herald-ov .hd-cols, .herald-ov .hl.lead .hl-body { columns: 1; }
+}
+/* ---- a narrow paper (phones) */
+@container herald (max-width: 36rem) {
+  .herald-ov .hd-mast { grid-template-columns: 1fr; }
+  .herald-ov .hd-ear { display: none; }
+  .herald-ov .hd-mast h1 { font-size: 2.75rem; }
+  .herald-ov .hd-date { letter-spacing: 0.08em; }
+  .herald-ov .hd-date span:nth-child(3) { display: none; }
+  .herald-ov .hl.lead h2 { font-size: 1.625rem; }
+  .herald-ov .hl.lead .hl-body p { font-size: 1.0625rem; }
+  .herald-ov .hd-cols .hl h2 { font-size: 1.125rem; }
+  .herald-ov .hd-foot { margin: 0.75rem -0.75rem 0; padding: 0.5rem 0.75rem calc(0.625rem + env(safe-area-inset-bottom)); flex-wrap: wrap; }
+  .herald-ov .herald .hb.go { flex: 1 1 100%; order: -1; }
+  .herald-ov .hd-nav { justify-content: space-between; }
+}
+/* phones and short windows: the paper fills the screen */
+@media (max-width: 700px), (max-height: 520px) {
+  .herald-ov { padding: 0.5rem; align-items: stretch; }
+  .herald-ov .herald { padding: 0.75rem 0.75rem 0; max-height: calc(100dvh - 1rem); transform: none; }
+  .herald-ov.show .herald { transform: none; }
+  .herald-ov .hd-foot { margin-left: -0.75rem; margin-right: -0.75rem; padding-left: 0.75rem; padding-right: 0.75rem; }
+}
+@media (max-height: 520px) {
+  .herald-ov .hd-ear { display: none; }
+  .herald-ov .hd-mast { grid-template-columns: 1fr; }
+  .herald-ov .hd-mast h1 { font-size: 2.5rem; }
+}
+@media (pointer: coarse) {
+  .herald-ov .hd-nav button, .herald-ov .seg2 button, .herald-ov .herald .hb { min-height: 2.75rem; }
+  .herald-ov .hl-go { min-height: 2.75rem; display: flex; align-items: center; justify-content: inherit; }
+  .herald-ov .hl.lead .hl-go { justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .herald-ov .herald, .herald-ov .hl { animation: none !important; transition: none !important; }
+}
+
+/* masthead ears: room for the sigil beside the words */
+.herald-ov .hd-mast { grid-template-columns: minmax(7rem, auto) 1fr minmax(7rem, auto); column-gap: 0.75rem; }
+.herald-ov .hd-ear svg { flex: none; }

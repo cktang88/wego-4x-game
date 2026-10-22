@@ -50,7 +50,7 @@ export function openSaga(g: GameScreen) {
     ...S.vowsBroken.map(v => `<li>${esc(v.fleet)} <span class="dim">(${esc(g.pname(v.owner))})</span> forswore its vow <small>T${v.turn}</small></li>`),
   ].join('');
   const debts = S.debts.map(d => `<li>${pn(d.debtor)} owed ${pn(d.creditor)} for ${esc(d.victim)} <small>T${d.turn}</small> ${d.cleared ? `<span class="paid">avenged T${d.cleared}</span>` : '<span class="unpaid">unpaid</span>'}</li>`).join('');
-  const worlds = S.worlds.slice(0, 12).map(w => `<li><b>${esc(w.name)}</b>${w.epithet ? ` <em>${esc(w.epithet)}</em>` : ''}${w.calling ? ` · ${ic(icFor('calling', w.calling, CALLINGS[w.calling]?.icon))} ${esc(CALLINGS[w.calling]?.name ?? w.calling)}` : ''}${w.deeds.length ? ` · ${w.deeds.map(esc).join(', ')}` : ''}</li>`).join('');
+  const worlds = S.worlds.slice(0, 12).map(w => `<li><b>${esc(w.name)}</b>${w.epithet ? ` <em>${esc(w.epithet)}</em>` : ''}${w.calling ? ` · ${ic(icFor('calling', w.calling, CALLINGS[w.calling]?.icon))} ${esc(CALLINGS[w.calling]?.name ?? w.calling)}` : ''}${(() => { const ds = w.deeds.filter(d => d.toLowerCase() !== (w.epithet ?? '').toLowerCase()); return ds.length ? ` · ${ds.map(esc).join(', ')}` : ''; })()}</li>`).join('');
   const link = shareLink(g);
   el.innerHTML = `<div class="saga" role="dialog" aria-label="The Saga">
     <header class="sg-head"><small class="kicker">The Saga of</small><h1>The Three Crowns</h1>

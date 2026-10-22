@@ -4,6 +4,20 @@ import { type Ctx } from './modal-util.ts';
 import { ic } from '../art/icons.ts';
 import { openSoundSettings, soundIcon } from '../audio/hooks.ts';
 
+/** "Reading the map": the board's visual language, first in How to win (and in the lobby's How to play, help.ts). */
+export const MAP_INTRO = 'Everything on the board is either a territory, a star, a fleet piece, a battle, or an order line. Numbers appear only when you point at something: hover (or tap) a star for its defenders, a fleet for its strength, a battle for its odds. Zoom out for who owns what and where the armies are; zoom in for names, then the full tabletop.';
+export const MAP_LEGEND: [string, string][] = [
+  ['Coloured territory', 'who holds it.'],
+  ['Gold ring', 'a Crown, worth victory points each turn. <b>Double ring</b>: the Throne.'],
+  ['A counter or chevron beside a star', 'a fleet there; yours sit on the left.'],
+  ['A piece on a lane', 'a fleet travelling.'],
+  ['Crossed swords', 'a battle.'],
+  ['Dashed line with arrowhead', 'a planned move. <b>Reticle</b>: a planned attack.'],
+  ['Breathing rim', 'no orders. <b>Amber dashed rim</b>: out of supply.'],
+  ['Hatching', 'cut off. <b>Dashed ring</b>: contested.'],
+];
+const mapRead = () => `<section class="hc map-read"><h3><span>◎</span>Reading the map</h3><p class="mr-intro">${MAP_INTRO}</p><ul class="mr-legend">${MAP_LEGEND.map(([k, v]) => `<li><b>${k}</b>: ${v}</li>`).join('')}</ul></section>`;
+
 const A = (href: string, text: string) => `<a href="${href}" target="_blank" rel="noopener">${text}</a>`;
 
 export const HELP_TABS: [string, string, string][] = [['win', '♛', 'How to win'], ['orders', '➤', 'Orders'], ['combat', '⚔', 'Combat'], ['soul', '⚑', 'Banners'], ['bets', '⛉', 'Postures'], ['empire', '✺', 'Empire'], ['live', '⏱', 'Live mode']];
@@ -84,7 +98,7 @@ export function helpBody(c: Ctx): string {
   const keys = c.tab === 'win' ? `<section class="hc keys"><h3><span>⌨</span>Keys</h3><div class="kgrid"><kbd>E</kbd><span>Empire</span><kbd>Q</kbd><span>Score</span><kbd>C</kbd><span>Chronicle</span><kbd>?</kbd><span>Help</span><kbd>Esc</kbd><span>Close</span><kbd>1–7</kbd><span>Tabs</span><kbd>Tab</kbd><span>Idle fleet</span><kbd>Enter</kbd><span>Seal</span><kbd>Space</kbd><span>Peek / skip</span><kbd>Shift+M</kbd><span>Mute sound</span></div></section>` : '';
   const restart = c.g.you !== null && (c.g.restartTips || c.g.restartTour) ? `<button class="mbtn m-ghost" data-a="tips">↻ Restart tips</button>` : '';
   const sound = `<button class="mbtn m-ghost" data-a="sound">${soundIcon(false)} Sound settings</button>`;
-  return `<div class="m-help"><div class="hgrid">${cs.map(x => `<section class="hc"><h3><span>${x.ic}</span>${x.t}</h3><ul>${x.b.map(b => `<li>${b}</li>`).join('')}</ul></section>`).join('')}${keys}${credits}</div><div class="help-foot">${sound}${restart}</div></div>`;
+  return `<div class="m-help"><div class="hgrid">${c.tab === 'win' ? mapRead() : ''}${cs.map(x => `<section class="hc"><h3><span>${x.ic}</span>${x.t}</h3><ul>${x.b.map(b => `<li>${b}</li>`).join('')}</ul></section>`).join('')}${keys}${credits}</div><div class="help-foot">${sound}${restart}</div></div>`;
 }
 
 export function helpAct(c: Ctx, a: string): boolean {
