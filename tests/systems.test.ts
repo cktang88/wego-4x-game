@@ -13,6 +13,8 @@ import { hashString, Rng } from '../shared/sim/rng.ts';
 import { growSystem, citizenCap, slotsOf, sysOn, roleOf, worldFx, isChokepoint, systemsBlock, systemCostMult } from '../shared/sim/systems.ts';
 import type { Fleet, GameState, Order, Region, Submission } from '../shared/sim/types.ts';
 
+/** Today's rules without the simplified-world layer (slots, Stations: docs/SIMPLIFY.md B3 is opt-in per game). */
+const OLD = { world: { enabled: false } };
 const game = (seed = 31, rules?: unknown) => createGame({ seed, rules, players: [0, 1, 2].map(() => ({ kind: 'human' as const })) });
 const idle = (s: GameState): Record<number, Submission> => Object.fromEntries(s.players.map(p => [p.id, emptySubmission(s)]));
 const withOrders = (s: GameState, p: number, orders: Order[]) => { const sub = idle(s); orders.forEach((o, i) => { sub[p].orders[i] = o; }); return sub; };
@@ -199,7 +201,7 @@ describe('citizens, slots, gates, discount (step 2)', () => {
   });
 
   it('gates: a Shipyard needs 2 citizens or a Station; an Academy needs 3; old yards are grandfathered', () => {
-    const s = game();
+    const s = game(31, OLD);
     const r = real(s).find(x => x.kind === 'colony' && x.owner === null)!;
     own(s, r, 0, 1);
     r.star = 'yellow'; r.bodies = [{ kind: 'habitable', q: 'fair', name: 'X I' }, { kind: 'belt', name: 'B' }];
@@ -219,7 +221,7 @@ describe('citizens, slots, gates, discount (step 2)', () => {
   });
 
   it('civil slots come from bodies (+1 Station); sites gate Mines and Trade Hubs', () => {
-    const s = game();
+    const s = game(31, OLD);
     const r = real(s).find(x => x.kind === 'colony' && x.owner === null && !x.vein)!;
     own(s, r, 0, 3);
     r.star = 'yellow'; r.bodies = [{ kind: 'habitable', q: 'fair', name: 'X I' }];
@@ -239,7 +241,7 @@ describe('citizens, slots, gates, discount (step 2)', () => {
   });
 
   it('military slots: 2 everywhere, +1 at chokepoints', () => {
-    const s = game();
+    const s = game(31, OLD);
     const r = real(s).find(x => x.kind === 'colony' && x.owner === null && !isChokepoint(s, x.id))!;
     own(s, r, 0, 3);
     r.buildings.fortress = 1; r.buildings.sensor = 1;

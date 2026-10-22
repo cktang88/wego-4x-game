@@ -1,0 +1,572 @@
+/* ============================================================================
+   The selection card v3 (docs/WORLD-CARD.md §8.6): a painted card per world and per fleet, in the art bible's
+   materials (docs/ART-BIBLE.md): a blued-steel plate in a metal frame whose colour is the world's ROLE (Core brass,
+   Forge ember, Harbor verdigris, Waystation silver), a painted diorama header, Cinzel for titles and verbs, IM Fell
+   for the epithet and the chronicle, tabular figures for numbers. Every target is 44px on touch; nothing is under the
+   font floor (--fs-xs); radii are 3px (plates, buttons) and 7px (the card, sheets).
+   Layout: the face never scrolls; the open verb (.wc-body) does. Phone: a bottom sheet with two snap points.
+   Imported by hud/card.ts. Specific selectors (.hud > .card ...) because theme.css loads after this file.
+   ============================================================================ */
+:root {
+  --card-w: 23rem;
+  --gambit: #d7b4ff;            /* violet: the colour of secret bets (gold stays VP / Fate) */
+  --gambit-lo: #2a1f33;
+  --wc-ink: var(--k-ivory, #ece3cf);
+  --wc-dim: var(--k-parchment, #c4b89c);
+  --wc-faint: var(--k-faded, #958a74);
+}
+
+/* ------------------------------------------------------------ the plate and its role frame */
+.hud > .card.wc {
+  --role: #c8964a; --role-hi: #efd59a; --role-lo: #6b4a1c;
+  display: flex; flex-direction: column; overflow: hidden; padding: 0; border-radius: 7px; isolation: isolate;
+  color: var(--wc-ink); font-size: var(--fs-md);
+  border: 1px solid transparent;
+  background:
+    var(--k-grain) 0 0 / 160px,
+    radial-gradient(120% 70% at 18% 0%, #2c2f38 0%, #1b1d23 48%, #121318 100%);
+  background-blend-mode: soft-light, normal;
+  box-shadow: var(--k-bevel), 0 0 0 1px rgba(0, 0, 0, 0.7), 0 0 0 4px color-mix(in srgb, var(--role) 18%, #0d0e12),
+    0 0 0 5px color-mix(in srgb, var(--role) 42%, #000), var(--k-cast-lift);
+}
+.hud > .card.wc::before { display: none; }
+.hud > .card.wc[data-role=forge] { --role: #b8673a; --role-hi: #f0b07a; --role-lo: #5a2410; }
+.hud > .card.wc[data-role=harbor] { --role: #3f8a7c; --role-hi: #9fd8c8; --role-lo: #163a34; }
+.hud > .card.wc[data-role=way] { --role: #8a909c; --role-hi: #e3e7ee; --role-lo: #353945; }
+.hud > .card.wc[data-role=none], .hud > .card.wc[data-role=''] { --role: #5b6170; --role-hi: #9aa1ae; --role-lo: #262932; }
+.hud > .card.wc[data-role=fleet] { --role: #a87a35; --role-hi: #dcb46c; --role-lo: #3a2810; }
+.hud > .card.wc .ic { flex: none; }
+
+/* ------------------------------------------------------------ the art: the system's diorama */
+.card.wc .wc-art {
+  --art-k: 1;
+  position: relative; flex: none; height: calc(7rem * var(--art-k)); overflow: hidden;
+  background: radial-gradient(140% 120% at 0% 50%, #221f22 0%, #111217 55%, #08090c 100%);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--role) 55%, #000), inset 0 -2px 0 rgba(0, 0, 0, 0.6);
+}
+.card.wc .wc-art::after { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 1;
+  background: linear-gradient(180deg, rgba(8, 9, 12, 0) 52%, rgba(8, 9, 12, 0.72)), linear-gradient(90deg, rgba(255, 217, 160, 0.05), transparent 40%); }
+.card.wc .wc-art .wc-bg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.card.wc .wc-art.fog .wc-bg, .card.wc .wc-art.fog .bd canvas { filter: grayscale(0.85) brightness(0.62); }
+.card.wc .wc-art .bd {
+  position: absolute; z-index: 2; transform: translate(-50%, -50%); padding: 0; border: 0; background: none; box-shadow: none; border-radius: 50%;
+  width: max(2.75rem, calc(var(--d, 40) * 1px * var(--art-k))); height: max(2.75rem, calc(var(--d, 40) * 1px * var(--art-k)));
+  display: grid; place-items: center; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.card.wc .wc-art .bd canvas { display: block; pointer-events: none; }
+.card.wc .wc-art .bd:hover, .card.wc .wc-art .bd:active { background: none; transform: translate(-50%, -50%); box-shadow: none; filter: none; }
+.card.wc .wc-art .bd::after { content: ''; position: absolute; inset: 12%; border-radius: 50%; opacity: 0; transition: opacity var(--k-t-tick, 90ms);
+  box-shadow: 0 0 0 1px rgba(240, 210, 140, 0.75), 0 0 0.6rem rgba(255, 210, 140, 0.25); }
+.card.wc .wc-art .bd:hover::after, .card.wc .wc-art .bd.peeking::after, .card.wc .wc-art .bd:focus-visible::after { opacity: 1; }
+.card.wc .wc-art .bstar { position: absolute; z-index: 2; transform: translate(-50%, -50%); width: calc(5rem * var(--art-k)); height: calc(5rem * var(--art-k)); padding: 0; border: 0; border-radius: 50%; background: none; box-shadow: none; cursor: pointer; }
+.card.wc .wc-art .bstar:hover, .card.wc .wc-art .bstar:active { background: none; transform: translate(-50%, -50%); box-shadow: none; }
+.card.wc .wc-art .bstar:focus-visible { outline: 1px solid rgba(240, 210, 140, 0.75); }
+.card.wc .wc-art .bd.b-belt { border-radius: 40%; }
+.card.wc .wc-art .bd.relic::before { content: ''; position: absolute; inset: 20%; border-radius: 50%; background: radial-gradient(circle, rgba(255, 220, 140, 0.45), transparent 70%); }
+.card.wc .wc-art .gem { position: absolute; right: 8%; bottom: 8%; width: 1rem; height: 1rem; display: grid; place-items: center; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff, #4a3a6a 60%, #1b1424); box-shadow: 0 0 0 1px var(--k-brass-500, #a87a35), 0 1px 2px #000; }
+.card.wc .wc-art .gem .ic { width: 0.65rem; height: 0.65rem; color: #f3ecff; }
+.card.wc .wc-art .gem.v-antimatter { background: radial-gradient(circle at 35% 30%, #ffd6f4, #9a3a7c 60%, #2a0c22); }
+.card.wc .wc-art .gem.v-crystal { background: radial-gradient(circle at 35% 30%, #e6fbff, #3a7c8a 60%, #0c2228); }
+/* the garrison on the art's right shoulder */
+.card.wc .garr { position: absolute; z-index: 3; right: 3.25rem; top: 0.5rem; display: flex; align-items: center; gap: 0.125rem; height: 2rem;
+  font: 800 1.375rem/1 var(--font); font-variant-numeric: lining-nums tabular-nums; color: #fff4dc; text-shadow: 0 1px 0 #000, 0 0 0.5rem #000; }
+.card.wc .garr .ic { width: 1.375rem; height: 1.375rem; color: var(--gc, var(--role-hi)); filter: drop-shadow(0 1px 0 #000); margin-right: 0.125rem; }
+.card.wc .garr small { font-size: var(--fs-xs); font-weight: 700; color: var(--wc-dim); align-self: flex-end; margin-bottom: 0.2rem; }
+.card.wc .wc-art .x, .card.wc .fl-art .x {
+  position: absolute; z-index: 4; right: 0.5rem; top: 0.4375rem; width: 2.25rem; height: 2.25rem; padding: 0; border-radius: 50%; display: grid; place-items: center;
+  color: var(--wc-dim); border: 1px solid transparent;
+  background: radial-gradient(circle at 35% 30%, #3a3e48, #15161b);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+.card.wc .wc-art .x .ic, .card.wc .fl-art .x .ic { width: 1rem; height: 1rem; }
+.card.wc .wc-art .x:hover, .card.wc .fl-art .x:hover { color: var(--wc-ink); filter: brightness(1.15); }
+.touch .card.wc .wc-art .x, .touch .card.wc .fl-art .x { width: 2.75rem; height: 2.75rem; right: 0.3125rem; top: 0.3125rem; }
+.touch .card.wc .garr { right: 3.5rem; top: 0.625rem; }
+/* the role crest: an engraved word in the role's metal */
+.card.wc .wc-crest { position: absolute; z-index: 3; left: 0.375rem; bottom: 0.4375rem; display: flex; align-items: center; gap: 0.3125rem; padding: 0.25rem 1rem 0.25rem 0.375rem; border-radius: 2px;
+  background: linear-gradient(90deg, rgba(8, 9, 12, 0.88), rgba(8, 9, 12, 0.6) 70%, rgba(8, 9, 12, 0));
+  font: 800 var(--fs-xs)/1 var(--k-display, var(--display)); letter-spacing: 0.22em; text-transform: uppercase; color: var(--role-hi); text-shadow: 0 1px 0 #000, 0 0 0.4rem rgba(0, 0, 0, 0.9); }
+.card.wc .wc-crest .ic { width: 1rem; height: 1rem; filter: drop-shadow(0 1px 0 #000); }
+/* one state ribbon, bottom right: an enamel strip with a swallow-tail */
+.card.wc .ribbon { position: absolute; z-index: 3; right: 0; bottom: 0.5rem; max-width: 70%; display: flex; align-items: center; gap: 0.3125rem; padding: 0.1875rem 0.625rem 0.1875rem 0.875rem;
+  font: 700 var(--fs-xs)/1.25 var(--font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  clip-path: polygon(0.5rem 0, 100% 0, 100% 100%, 0.5rem 100%, 0 50%); box-shadow: inset 0 1px 0 rgba(255, 238, 205, 0.2); }
+.card.wc .ribbon .ic { width: 1rem; height: 1rem; }
+.card.wc .ribbon.war { background: linear-gradient(90deg, #7a2420, #3e0e10); color: #ffd6cc; }
+.card.wc .ribbon.gold { background: linear-gradient(90deg, #6b4a1c, #3a2810); color: var(--k-fate, #f1d488); }
+.card.wc .ribbon.dim { background: linear-gradient(90deg, #2a2c34, #17181d); color: var(--wc-dim); }
+.card.wc .ribbon.cut { background: linear-gradient(90deg, #5a4618, #2a2010); color: #f2d798; }
+.card.wc .ribbon .dot { width: 0.625rem; height: 0.75rem; background: var(--pc); clip-path: polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%); }
+
+/* ------------------------------------------------------------ the face: name, citizens, epithet, calling, yield */
+.card.wc .wc-face { flex: none; display: flex; flex-direction: column; }
+.card.wc .wc-head { padding: 0.5rem 0.875rem 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 0.625rem; align-items: center; }
+.card.wc .wc-name { display: flex; align-items: center; gap: 0.3125rem; min-width: 0; font: 800 1.375rem/1.15 var(--k-display, var(--display)); letter-spacing: 0.06em;
+  color: color-mix(in srgb, var(--pc, var(--wc-ink)) 75%, #fff 25%); text-shadow: 0 1px 0 #000; }
+.card.wc .wc-name > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card.wc .wc-name .seat { color: var(--k-fate, #f1d488); display: inline-flex; }
+.card.wc .wc-name .seat .ic { width: 1rem; height: 1rem; }
+.card.wc .wc-cit { display: inline-flex; align-items: center; gap: 0.1875rem; }
+.card.wc .wc-cit i { width: 0.625rem; height: 0.625rem; border-radius: 50%; background: rgba(255, 255, 255, 0.08); box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.7); }
+.card.wc .wc-cit i.on { background: radial-gradient(circle at 35% 30%, #fff1c4, #c8964a 70%, #6b4a1c); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); }
+.card.wc .wc-cit i.next { background: transparent; box-shadow: inset 0 0 0 1px rgba(244, 220, 156, 0.75); }
+.card.wc .wc-epi { grid-column: 1 / -1; font: italic 1rem/1.25 var(--k-prose, 'IM Fell English', Georgia, serif); color: #e3d6b8; min-width: 0; overflow-wrap: anywhere; }
+.card.wc .wc-epi em { font-style: italic; }
+.card.wc .wc-epi .sys { color: var(--wc-dim); font-size: var(--fs-sm); }
+.card.wc .wc-epi .rk { font-style: normal; font-family: var(--font); font-size: var(--fs-xs); color: var(--wc-dim); letter-spacing: 0.04em; }
+.card.wc .wc-calling { margin: 0.5rem 0.75rem 0; display: flex; align-items: center; gap: 0.5rem; min-height: 2.125rem; padding: 0.25rem 0.625rem; border-radius: 3px; min-width: 0;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--role) 26%, transparent), transparent 85%); box-shadow: inset 3px 0 0 var(--role), inset 0 1px 0 rgba(255, 238, 205, 0.06); }
+.card.wc .wc-calling .ic { width: 1.25rem; height: 1.25rem; color: var(--role-hi); }
+.card.wc .wc-calling b { font: 700 var(--fs-sm)/1 var(--k-display, var(--display)); letter-spacing: 0.1em; text-transform: uppercase; color: var(--role-hi); flex: none; }
+.card.wc .wc-calling .eff, .card.wc .wc-calling > span:not(.ten):not(.cit) { font-size: var(--fs-xs); color: var(--wc-ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card.wc .wc-calling .ten, .card.wc .wc-calling .cit { margin-left: auto; display: flex; gap: 0.125rem; flex: none; }
+.card.wc .wc-calling .ten i { width: 0.75rem; height: 0.3125rem; border-radius: 1px; background: rgba(255, 255, 255, 0.12); }
+.card.wc .wc-calling .ten i.on { background: linear-gradient(180deg, var(--role-hi), var(--role)); }
+.card.wc .wc-calling .cit i { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: rgba(255, 255, 255, 0.12); }
+.card.wc .wc-calling .cit i.on { background: radial-gradient(circle at 35% 30%, #fff1c4, #c8964a 70%); }
+.card.wc .wc-calling.none { background: none; box-shadow: inset 3px 0 0 rgba(255, 255, 255, 0.12); }
+.card.wc .wc-calling.none .ic, .card.wc .wc-calling.none > span { color: var(--wc-dim); }
+.card.wc .wc-calling.dorm { background: none; box-shadow: inset 3px 0 0 rgba(255, 255, 255, 0.14); }
+.card.wc .wc-calling.dorm .ic, .card.wc .wc-calling.dorm > span { color: var(--wc-dim); }
+.card.wc .wc-yield { display: flex; align-items: center; gap: 0.875rem; padding: 0.4375rem 0.875rem 0.5rem; font: 700 1.25rem/1 var(--font); font-variant-numeric: lining-nums tabular-nums; }
+.card.wc .wc-yield span { display: inline-flex; align-items: center; gap: 0.25rem; }
+.card.wc .wc-yield .ic { width: 1.0625rem; height: 1.0625rem; color: var(--brass, #c8964a); }
+.card.wc .wc-yield small { margin-left: auto; font: 600 var(--fs-xs)/1.2 var(--font); color: var(--wc-dim); text-align: right; }
+.card.wc .wc-yield small.lost { color: var(--k-bad, #e2725d); }
+
+/* ------------------------------------------------------------ the verbs: the same slots everywhere */
+.card.wc .wc-tabs { flex: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; margin: 0.125rem 0.625rem 0; padding: 2px; border-radius: 3px;
+  background: linear-gradient(180deg, #060607, #18191e); box-shadow: inset 1px 1px 3px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 230, 170, 0.08); }
+.card.wc .wc-tabs.n2 { grid-template-columns: repeat(2, 1fr); }
+.card.wc .wc-tabs button { position: relative; display: flex; align-items: center; justify-content: center; gap: 0.375rem; min-height: 2.5rem; padding: 0 0.25rem; border: 0; border-radius: 2px;
+  background: transparent; box-shadow: none; font: 700 var(--fs-sm)/1 var(--k-display, var(--display)); letter-spacing: 0.1em; text-transform: uppercase; color: var(--wc-dim); }
+.card.wc .wc-tabs button .ic { width: 1rem; height: 1rem; }
+.card.wc .wc-tabs button:hover { color: var(--wc-ink); background: rgba(255, 240, 210, 0.04); transform: none; filter: none; }
+.card.wc .wc-tabs button.on { color: var(--k-brass-100, #fbedc8); text-shadow: 0 -1px 0 #000;
+  background: var(--k-grain) 0 0 / 160px, linear-gradient(162deg, color-mix(in srgb, var(--role) 40%, #424754) 0%, color-mix(in srgb, var(--role) 18%, #2b2e37) 40%, #1b1d23 100%);
+  background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel), inset 0 -2px 0 color-mix(in srgb, var(--role-hi) 70%, transparent); }
+.card.wc .wc-tabs button.off:not(.on) { color: var(--wc-faint); }
+.card.wc .wc-tabs .dot { position: absolute; top: 0.375rem; right: 0.5rem; width: 0.4375rem; height: 0.4375rem; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff2c0, #e4ab4a); box-shadow: 0 0 0.25rem rgba(255, 190, 90, 0.7); }
+.card.wc .wc-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0.625rem 0.75rem 0.75rem; scrollbar-width: thin; }
+.card.wc .wc-body.foreign { display: flex; flex-direction: column; gap: 0.5rem; }
+.card.wc .wc-body:empty { display: none; }
+
+/* shared buttons inside the card: steel plates in a brass rim (the kit's secondary), never default chrome */
+.card.wc .hull, .card.wc .go, .card.wc .ib, .card.wc .bet, .card.wc .pick, .card.wc .intrigue button, .card.wc .mem, .card.wc .prompt .acts button, .card.wc .sel, .card.wc .lx, .card.wc .lk-go, .card.wc .mini, .card.wc .temper, .card.wc .odds {
+  border: 1px solid transparent; border-radius: 3px; color: var(--wc-ink);
+  background: var(--k-grain) 0 0 / 160px, linear-gradient(162deg, #31343d 0%, #212329 45%, #16171c 100%);
+  background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel), 0 1px 0 rgba(0, 0, 0, 0.55);
+}
+.card.wc .hull:hover:not([aria-disabled=true]), .card.wc .go:hover:not([aria-disabled=true]), .card.wc .ib:hover:not([aria-disabled=true]), .card.wc .bet:hover:not([aria-disabled=true]), .card.wc .pick:hover:not([aria-disabled=true]), .card.wc .intrigue button:hover:not([aria-disabled=true]), .card.wc .mem:hover:not([aria-disabled=true]), .card.wc .prompt .acts button:hover:not([aria-disabled=true]), .card.wc .sel:hover:not([aria-disabled=true]), .card.wc .lx:hover, .card.wc .lk-go:hover, .card.wc .mini:hover:not([aria-disabled=true]), .card.wc .odds:hover {
+  filter: brightness(1.14); }
+.card.wc .hull:active:not([aria-disabled=true]), .card.wc .go:active:not([aria-disabled=true]), .card.wc .ib:active:not([aria-disabled=true]), .card.wc .bet:active:not([aria-disabled=true]), .card.wc .pick:active:not([aria-disabled=true]) {
+  transform: translate(1px, 2px); box-shadow: var(--k-press); }
+.card.wc [aria-disabled=true] { cursor: not-allowed; }
+.card.wc .price { display: inline-flex; align-items: center; gap: 0.375rem; font: 700 var(--fs-xs)/1 var(--font); font-variant-numeric: lining-nums tabular-nums; color: var(--wc-dim); }
+.card.wc .price .pr { display: inline-flex; align-items: center; gap: 0.125rem; }
+.card.wc .price .ic { width: 0.9375rem; height: 0.9375rem; color: var(--brass, #c8964a); }
+.card.wc .price s { color: var(--wc-faint); font-weight: 500; margin-right: 0.1875rem; }
+.card.wc .go .disc { font-style: normal; font-weight: 700; color: var(--k-good, #86c08f); margin-right: 0.375rem; }
+.card.wc .price.short, .card.wc .price.short .ic { color: var(--k-bad, #e2725d); }
+
+/* ------------------------------------------------------------ RAISE */
+.card.wc .into { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.5rem; margin-bottom: 0.5rem; }
+.card.wc .into-lbl { font: 700 var(--fs-xs)/1 var(--k-display, var(--display)); letter-spacing: 0.16em; text-transform: uppercase; color: var(--wc-faint); }
+.card.wc .into .sel { display: inline-flex; align-items: center; gap: 0.375rem; min-height: 2.25rem; max-width: 100%; padding: 0 0.625rem 0 0.375rem; font: 600 var(--fs-sm)/1 var(--font); }
+.card.wc .into .sel > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card.wc .into .sel small { color: var(--wc-dim); font-weight: 700; }
+.card.wc .into .sel small.bad { color: var(--k-bad, #e2725d); }
+.card.wc .into .sel svg { flex: none; }
+.card.wc .into .sel .ic { width: 1rem; height: 1rem; color: var(--k-brass-300, #dcb46c); }
+.card.wc .into-alt { flex-basis: 100%; font-size: var(--fs-xs); color: var(--wc-faint); }
+.card.wc .hulls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.375rem; }
+.card.wc .hull { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 0.1875rem; min-height: 5rem; padding: 0.625rem 0.25rem 0.4375rem; }
+.card.wc .hulls:has(.sug) { margin-top: 0.625rem; }
+.card.wc .hull canvas { width: 5.5rem; height: 2.25rem; display: block; }
+.card.wc .hull b { font: 700 var(--fs-sm)/1.1 var(--font); }
+.card.wc .hull[aria-disabled=true] { filter: saturate(0.4) brightness(0.8); }
+.card.wc .hull.sug { background: var(--k-grain) 0 0 / 160px, linear-gradient(162deg, #3a3628 0%, #23211b 45%, #16171c 100%);
+  background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel), 0 0 0.9rem -0.2rem rgba(255, 210, 120, 0.35); }
+.card.wc .sugtag { position: absolute; top: -0.625rem; left: 50%; transform: translateX(-50%); padding: 0 0.375rem; border-radius: 2px; white-space: nowrap; font-style: normal;
+  font: 700 var(--fs-xs)/1.25 var(--font); letter-spacing: 0.04em; color: #2a1a06;
+  background: linear-gradient(172deg, #f7e2a6, #dcb05e 40%, #a87a35); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 252, 230, 0.7); }
+.card.wc .lockline { margin-top: 0.5rem; display: flex; align-items: center; gap: 0.375rem; }
+.card.wc .lx { flex: 1; display: flex; align-items: center; gap: 0.5rem; min-height: 2.5rem; padding: 0 0.625rem; font: 600 var(--fs-xs)/1 var(--font); color: var(--wc-dim);
+  background: transparent !important; box-shadow: inset 0 0 0 1px rgba(214, 173, 98, 0.22); }
+.card.wc .lx .ic { width: 1rem; height: 1rem; color: var(--wc-faint); }
+.card.wc .lx .ghosts { display: inline-flex; gap: 0.125rem; filter: grayscale(1) brightness(0.8); opacity: 0.7; }
+.card.wc .lx .ghosts canvas { width: 1.75rem; height: 0.875rem; }
+.card.wc .lx.open .ic:last-child { transform: rotate(90deg); margin-left: auto; }
+.card.wc .lk-go { flex: none; min-height: 2.5rem; padding: 0 0.625rem; font: 700 var(--fs-xs)/1 var(--font); color: var(--k-fate, #f1d488); white-space: nowrap; }
+.card.wc .locks { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.card.wc .lk { display: grid; grid-template-columns: 2.5rem 5.75rem 1fr auto; align-items: center; gap: 0.375rem; font-size: var(--fs-xs); padding: 0.125rem 0.25rem; }
+.card.wc .lk canvas { width: 2.5rem; height: 1.125rem; filter: grayscale(1); opacity: 0.6; }
+.card.wc .lk b { font-weight: 700; }
+.card.wc .lk span { color: var(--wc-dim); line-height: 1.25; }
+.card.wc .lk .lk-go { min-height: 2.25rem; }
+.card.wc .teach { display: flex; gap: 0.625rem; align-items: center; padding: 0.5rem 0.625rem; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(214, 173, 98, 0.3); }
+.card.wc .teach > .ic { width: 2rem; height: 2rem; color: var(--wc-faint); }
+.card.wc .teach b { display: block; font-size: var(--fs-md); }
+.card.wc .teach span { color: var(--wc-dim); font-size: var(--fs-xs); line-height: 1.35; }
+
+/* ------------------------------------------------------------ IMPROVE: one row per track */
+.card.wc .tracks { display: flex; flex-direction: column; gap: 0.375rem; }
+.card.wc .trk { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.5rem; padding: 0.25rem 0.25rem 0.25rem 0.375rem; border-radius: 3px;
+  background: linear-gradient(90deg, rgba(255, 240, 210, 0.035), rgba(255, 240, 210, 0.01)); box-shadow: inset 0 0 0 1px rgba(214, 173, 98, 0.12); }
+.card.wc .trk .trn { display: flex; align-items: center; gap: 0.5rem; min-width: 0; min-height: 2.5rem; padding: 0 0.125rem; border: 0; background: none; box-shadow: none; text-align: left; color: inherit; }
+.card.wc .trk button.trn:hover { background: none; filter: brightness(1.15); transform: none; }
+.card.wc .trk .trn > .ic { width: 1.5rem; height: 1.5rem; color: var(--k-brass-200, #efd59a); filter: drop-shadow(0 -1px 0 rgba(0, 0, 0, 0.7)); }
+.card.wc .trk .trn > span { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
+.card.wc .trk .trn b { display: flex; align-items: center; gap: 0.4375rem; font: 700 var(--fs-md)/1.15 var(--font); }
+.card.wc .trk .trn small { color: var(--wc-dim); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card.wc .lv { display: inline-flex; gap: 0.125rem; }
+.card.wc .lv i { width: 0.625rem; height: 0.625rem; transform: rotate(45deg) scale(0.74); background: rgba(255, 255, 255, 0.1); box-shadow: inset 1px 1px 1px rgba(0, 0, 0, 0.6); }
+.card.wc .lv i.on { background: linear-gradient(135deg, #fff1c4, #c8964a); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45); }
+.card.wc .lv.cit i { transform: none; border-radius: 50%; width: 0.5rem; height: 0.5rem; }
+.card.wc .go { min-width: 6.75rem; min-height: 2.5rem; padding: 0.25rem 0.625rem; display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 0.125rem; line-height: 1.1; text-align: right; }
+.card.wc .go b { font: 700 var(--fs-sm)/1.1 var(--font); white-space: nowrap; }
+.card.wc .go b .ic { width: 0.9375rem; height: 0.9375rem; }
+.card.wc .go small { display: flex; font-size: var(--fs-xs); color: var(--wc-dim); }
+.card.wc .go.sug { background: var(--k-grain) 0 0 / 160px, linear-gradient(162deg, #3a3628 0%, #23211b 45%, #16171c 100%);
+  background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel), 0 0 0.8rem -0.2rem rgba(255, 210, 120, 0.35); }
+.card.wc .go.why { background: transparent; box-shadow: inset 0 0 0 1px rgba(214, 173, 98, 0.2); }
+.card.wc .go.why b { color: var(--wc-dim); font-weight: 600; }
+.card.wc .go.why small { color: var(--k-warn, #e4ab4a); }
+.card.wc .go.max { background: none; box-shadow: none; border-color: transparent; }
+.card.wc .go.max b { color: var(--k-good, #86c08f); display: inline-flex; align-items: center; gap: 0.25rem; }
+.card.wc .go.max.busy b { color: var(--wc-ink); }
+.card.wc .go.max.busy small { color: var(--k-warn, #e4ab4a); }
+.card.wc .go.queued { background: var(--k-grain) 0 0 / 160px, linear-gradient(162deg, #2e3a36 0%, #1e2724 45%, #141816 100%); background-blend-mode: soft-light, normal; }
+.card.wc .go.queued small { color: var(--k-good, #86c08f); }
+.card.wc .go.wide { width: 100%; flex-direction: row; justify-content: space-between; align-items: center; margin-top: 0.5rem; }
+.card.wc .go.wide small { gap: 0.375rem; align-items: center; }
+.card.wc .trk.dim .trn { opacity: 0.66; }
+.touch .card.wc .go, .touch .card.wc .trk .trn { min-height: 2.75rem; }
+.card.wc .trk.cit { padding-right: 0.625rem; }
+.card.wc .auto { font: 700 var(--fs-sm)/1 var(--font); color: var(--k-good, #86c08f); white-space: nowrap; }
+.card.wc .auto.dim { color: var(--wc-faint); font-weight: 600; }
+.card.wc .members { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem; padding: 0.125rem 0 0.25rem; }
+.card.wc .mem { display: grid; grid-template-columns: auto 1fr auto; grid-template-rows: auto auto; column-gap: 0.375rem; align-items: center; min-height: 2.75rem; padding: 0.25rem 0.5rem; text-align: left; }
+.card.wc .mem .ic { grid-row: span 2; width: 1.125rem; height: 1.125rem; color: var(--k-brass-300, #dcb46c); }
+.card.wc .mem b { font: 700 var(--fs-xs)/1.15 var(--font); }
+.card.wc .mem small { font-size: var(--fs-xs); color: var(--wc-faint); text-align: right; }
+.card.wc .mem > span { grid-column: 2 / -1; font-size: var(--fs-xs); color: var(--wc-dim); }
+.card.wc .mem[aria-disabled=true] { filter: saturate(0.3) brightness(0.85); }
+.card.wc .foot-note { margin: 0.5rem 0 0; color: var(--wc-faint); font-size: var(--fs-xs); display: flex; gap: 0.375rem; align-items: center; line-height: 1.3; }
+.card.wc .foot-note .ic { width: 1rem; height: 1rem; }
+
+/* ------------------------------------------------------------ STORY */
+.card.wc .story { display: flex; flex-direction: column; gap: 0.625rem; }
+.card.wc .story h4, .card.wc h4.sub { margin: 0 0 0.25rem; font: 700 var(--fs-xs)/1.2 var(--k-display, var(--display)); letter-spacing: 0.16em; text-transform: uppercase; color: var(--k-engraved, #d9b26a); }
+.card.wc .story p { margin: 0; }
+.card.wc .story .line { font-size: var(--fs-sm); line-height: 1.35; }
+.card.wc .story .line small { color: var(--wc-dim); font-size: var(--fs-xs); }
+.card.wc .story .line .ic { width: 1rem; height: 1rem; color: var(--role-hi); vertical-align: -0.15em; }
+.card.wc .bodies { display: flex; flex-direction: column; gap: 0.1875rem; }
+.card.wc .body { display: grid; grid-template-columns: 2.25rem minmax(0, 1fr) auto; gap: 0.5rem; align-items: center; font-size: var(--fs-sm); min-height: 1.875rem; }
+.card.wc .body .bi { display: grid; place-items: center; font-style: normal; }
+.card.wc .body .bi .ic { width: 1.25rem; height: 1.25rem; }
+.card.wc .body .bi canvas { display: block; }
+.card.wc .body > span { min-width: 0; overflow-wrap: anywhere; line-height: 1.2; }
+.card.wc .body small { color: var(--wc-dim); font-size: var(--fs-xs); }
+.card.wc .body em { font-style: normal; color: var(--wc-dim); font-size: var(--fs-xs); text-align: right; display: inline-flex; gap: 0.25rem; align-items: center; }
+.card.wc .body em .ic { width: 0.875rem; height: 0.875rem; color: var(--brass, #c8964a); }
+.card.wc .syssplit { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; margin-top: 0.25rem; font-size: var(--fs-xs); }
+.card.wc .bsplit { display: inline-flex; align-items: center; gap: 0.25rem; }
+.card.wc .bsplit .ic { width: 0.875rem; height: 0.875rem; }
+.card.wc .rcv { font-style: normal; font-weight: 700; padding: 0 0.25rem; border-radius: 2px; background: rgba(0, 0, 0, 0.45); box-shadow: inset 0 0 0 1px var(--pc, #888); }
+.card.wc .rcv.lost { --pc: rgba(226, 114, 93, 0.6); color: #f0b4a4; }
+.card.wc .deeds { display: flex; flex-wrap: wrap; gap: 0.375rem; }
+.card.wc .deed { display: inline-flex; align-items: center; gap: 0.375rem; min-height: 2rem; padding: 0.1875rem 0.5rem; border-radius: 3px; font: italic 1rem/1.15 var(--k-prose, 'IM Fell English', Georgia, serif);
+  background: linear-gradient(160deg, #3a2f1c, #1d1810); box-shadow: inset 0 0 0 1px rgba(214, 173, 98, 0.45), 0 1px 0 rgba(0, 0, 0, 0.6); }
+.card.wc .deed .ic { width: 1rem; height: 1rem; color: var(--k-fate, #f1d488); }
+.card.wc .deed small { font: 600 var(--fs-xs)/1 var(--font); color: var(--wc-faint); }
+.card.wc .deed.engraved { box-shadow: inset 0 0 0 1px #e6b54e, 0 0 0.5rem rgba(255, 200, 100, 0.2); }
+.card.wc .deed .eng { min-width: 2rem; min-height: 2rem; padding: 0; border-radius: 2px; display: grid; place-items: center; }
+.touch .card.wc .deed .eng { min-width: 2.75rem; min-height: 2.75rem; }
+.card.wc .marks { display: flex; flex-wrap: wrap; gap: 0.875rem; font: 700 var(--fs-sm)/1 var(--font); }
+.card.wc .marks span { display: inline-flex; gap: 0.25rem; align-items: center; }
+.card.wc .marks .ic { width: 1rem; height: 1rem; color: var(--brass, #c8964a); }
+.card.wc .wchron { display: flex; flex-direction: column; gap: 0.25rem; font: 1rem/1.3 var(--k-prose, 'IM Fell English', Georgia, serif); color: #ddd0b2; }
+.card.wc .wchron span { font: 600 var(--fs-xs)/1 var(--font); color: var(--wc-faint); margin-right: 0.375rem; }
+.card.wc .hands { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; font-size: var(--fs-xs); color: var(--wc-dim); }
+.card.wc .hands span { display: inline-flex; align-items: center; gap: 0.1875rem; }
+.card.wc .hands span i { width: 0.625rem; height: 0.75rem; background: var(--pc); clip-path: polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%); }
+.card.wc .hands b { color: var(--wc-faint); font-weight: 400; }
+.card.wc .story .sp { display: inline-flex; align-items: center; gap: 0.25rem; height: auto; min-height: 1.75rem; padding: 0.125rem 0.5rem; font-size: var(--fs-xs); }
+.card.wc .story .sp .ic { width: 0.9375rem; height: 0.9375rem; }
+.card.wc .soulrow { display: flex; flex-wrap: wrap; gap: 0.3125rem; }
+.card.wc .story input[data-rename] { width: 100%; height: 2.5rem; padding: 0 0.625rem; border-radius: 3px; font: 700 var(--fs-md) var(--k-display, var(--display)); color: var(--wc-ink);
+  background: #0c0d10; border: 1px solid transparent; box-shadow: inset 1px 1px 3px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(220, 180, 108, 0.35); }
+.touch .card.wc .story input[data-rename] { height: 2.75rem; }
+.card.wc .mini { display: inline-flex; align-items: center; justify-content: center; gap: 0.3125rem; height: 2rem; padding: 0 0.625rem; font: 600 var(--fs-xs)/1 var(--font); }
+.card.wc .mini.wide { width: 100%; margin-top: 0.375rem; height: 2.5rem; }
+.touch .card.wc .mini { height: 2.75rem; }
+.card.wc .mini .ic { width: 1rem; height: 1rem; }
+
+/* ------------------------------------------------------------ the Gambit: one compact control, violet (secret bets) */
+.card.wc .gambit { flex: none; margin: 0.5rem 0.625rem 0.625rem; }
+.card.wc .gchip { width: 100%; display: flex; align-items: center; gap: 0.5rem; min-height: 2.75rem; padding: 0 0.625rem; border-radius: 3px; text-align: left; border: 1px solid transparent;
+  background: var(--k-grain) 0 0 / 160px, linear-gradient(160deg, #2c2133, #17121b);
+  background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel), 0 1px 0 rgba(0, 0, 0, 0.55); color: var(--wc-ink); }
+.card.wc .gchip > .ic { width: 1.25rem; height: 1.25rem; color: var(--gambit); }
+.card.wc .gchip b { font: 700 var(--fs-sm)/1 var(--k-display, var(--display)); letter-spacing: 0.12em; text-transform: uppercase; color: #ead9ff; flex: none; }
+.card.wc .gchip > span:not(.coins) { min-width: 0; color: var(--wc-dim); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card.wc .gchip.set { background: var(--k-grain) 0 0 / 160px, linear-gradient(160deg, #3d2a4b, #1d1424); background-blend-mode: soft-light, normal; }
+.card.wc .gchip.set > span:not(.coins) { color: #ead9ff; }
+.card.wc .gchip:hover { filter: brightness(1.12); background-blend-mode: soft-light, normal; }
+.card.wc .coins { margin-left: auto; display: inline-flex; gap: 0.0625rem; flex: none; }
+.card.wc .coins i { display: grid; place-items: center; color: rgba(255, 255, 255, 0.2); }
+.card.wc .coins i.on { color: var(--k-fate, #f1d488); }
+.card.wc .coins .ic { width: 1rem; height: 1rem; }
+.card.wc .gopen { margin-top: 0.375rem; padding: 0.5rem; border-radius: 3px; background: rgba(0, 0, 0, 0.35); box-shadow: inset 0 0 0 1px rgba(190, 140, 220, 0.25); }
+.card.wc .bets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.375rem; }
+.card.wc .bets.n2 { grid-template-columns: repeat(2, 1fr); }
+.card.wc .bets.n4 { grid-template-columns: repeat(4, 1fr); }
+.card.wc .bet { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.125rem; min-height: 3.75rem; padding: 0.375rem 0.125rem;
+  background: var(--k-grain) 0 0 / 160px, linear-gradient(160deg, #2a2430, #17141b); background-blend-mode: soft-light, normal; }
+.card.wc .bet > .ic { width: 1.375rem; height: 1.375rem; color: #e2c8ff; }
+.card.wc .bet b { font: 700 var(--fs-xs)/1.1 var(--font); }
+.card.wc .bet small { font-size: var(--fs-xs); color: var(--wc-dim); text-align: center; line-height: 1.15; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 0.125rem; }
+.card.wc .bet.on { background: var(--k-grain) 0 0 / 160px, linear-gradient(160deg, #4a3260, #241a30); background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel), 0 0 0.75rem rgba(200, 150, 255, 0.22); }
+.card.wc .bet.fate { background: var(--k-grain) 0 0 / 160px, linear-gradient(160deg, #2e2818, #17140c); background-blend-mode: soft-light, normal; }
+.card.wc .bet.fate > .ic { color: var(--k-fate, #f1d488); }
+.card.wc .bet.fate.on, .card.wc .bet.fate.armed { background: var(--k-grain) 0 0 / 160px, linear-gradient(160deg, #4a3c18, #241c0c); background-blend-mode: soft-light, normal; }
+.card.wc .bet.armed b { color: var(--k-fate, #f1d488); }
+.card.wc .bet[aria-disabled=true] { filter: saturate(0.25) brightness(0.8); }
+.card.wc .betline { margin-top: 0.5rem; display: grid; grid-template-columns: auto 1fr; gap: 0.1875rem 0.5rem; font-size: var(--fs-xs); line-height: 1.3; }
+.card.wc .betline .k { color: var(--wc-faint); display: inline-flex; align-items: center; }
+.card.wc .betline .k .ic { width: 0.875rem; height: 0.875rem; }
+.card.wc .betline .ok { color: var(--k-good, #86c08f); }
+.card.wc .betline .no { color: #eb9a88; }
+.card.wc .betline.none { display: block; color: var(--wc-dim); }
+
+/* ------------------------------------------------------------ prompts: one decision takes the face for one turn */
+.card.wc .prompt { margin: 0.5rem 0.75rem 0; padding: 0.5rem 0.625rem; border-radius: 3px;
+  background: linear-gradient(160deg, rgba(241, 212, 136, 0.13), rgba(0, 0, 0, 0.22)); box-shadow: inset 0 0 0 1px rgba(241, 212, 136, 0.7), 0 0 0.9rem -0.3rem rgba(255, 210, 120, 0.3); }
+.card.wc .prompt .ph { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; font: 800 var(--fs-xs)/1.25 var(--k-display, var(--display)); letter-spacing: 0.12em; text-transform: uppercase; color: var(--k-fate, #f1d488); }
+.card.wc .prompt .ph > span { display: inline-flex; align-items: center; gap: 0.375rem; min-width: 0; }
+.card.wc .prompt .ph .ic { width: 1rem; height: 1rem; }
+.card.wc .prompt .ph small { font: 600 var(--fs-xs)/1 var(--font); letter-spacing: 0; text-transform: none; color: var(--wc-dim); white-space: nowrap; }
+.card.wc .prompt p { margin: 0.25rem 0 0; font-size: var(--fs-xs); color: var(--wc-dim); line-height: 1.35; }
+.card.wc .prompt.terms { box-shadow: inset 0 0 0 1px rgba(241, 212, 136, 0.7), inset 3px 0 0 var(--pc, #f1d488); }
+.card.wc .prompt.purge { background: linear-gradient(160deg, rgba(226, 114, 93, 0.12), rgba(0, 0, 0, 0.22)); box-shadow: inset 0 0 0 1px rgba(226, 114, 93, 0.6); }
+.card.wc .prompt.purge .ph { color: #f0b4a4; }
+.card.wc .picks { display: grid; grid-template-columns: 1fr 1fr; gap: 0.375rem; margin-top: 0.375rem; }
+.card.wc .pick { display: flex; flex-direction: column; align-items: flex-start; gap: 0.125rem; min-height: 4.25rem; padding: 0.4375rem 0.5rem; text-align: left; }
+.card.wc .pick > .ic { width: 1.375rem; height: 1.375rem; color: var(--k-fate, #f1d488); }
+.card.wc .pick b { font: 700 var(--fs-sm)/1.15 var(--k-display, var(--display)); letter-spacing: 0.06em; }
+.card.wc .pick small { font-size: var(--fs-xs); color: var(--wc-dim); line-height: 1.2; }
+.card.wc .pick em { font: italic var(--fs-xs)/1.2 var(--k-prose, 'IM Fell English', Georgia, serif); color: var(--wc-faint); }
+.card.wc .pick.on { background: var(--k-grain) 0 0 / 160px, linear-gradient(162deg, #4a3c18, #241c0c); background-blend-mode: soft-light, normal; }
+.card.wc .pick.gated { min-height: 0; grid-column: 1 / -1; flex-direction: row; align-items: center; gap: 0.375rem; filter: saturate(0.3) brightness(0.8); background: transparent; box-shadow: inset 0 0 0 1px rgba(214, 173, 98, 0.18); }
+.card.wc .pick.gated small { color: var(--k-warn, #e4ab4a); }
+.card.wc .prompt .acts { display: flex; gap: 0.375rem; margin-top: 0.375rem; }
+.card.wc .prompt .acts button { flex: 1; display: flex; gap: 0.375rem; justify-content: center; align-items: center; min-height: 2.5rem; padding: 0 0.5rem; font: 700 var(--fs-sm)/1.1 var(--font); }
+.touch .card.wc .prompt .acts button { min-height: 2.75rem; }
+.card.wc .prompt .acts button .ic { width: 1rem; height: 1rem; }
+.card.wc .prompt .acts .yes { color: #2a1a06; text-shadow: 0 1px 0 rgba(255, 245, 210, 0.55);
+  background: var(--k-grain) 0 0 / 160px, var(--k-brass-face, linear-gradient(172deg, #f7e2a6, #dcb05e 22%, #b8863a 55%, #8a5f22));
+  background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel-brass), 0 1px 0 rgba(0, 0, 0, 0.6); }
+.card.wc .prompt .acts .on { color: var(--k-good, #86c08f); }
+
+/* ------------------------------------------------------------ a foreign world: the seize, what it gives, intrigue */
+.card.wc .odds { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.25rem 0.5rem; width: 100%; min-height: 3.25rem; padding: 0.375rem 0.625rem 0.5rem; text-align: left; margin: 0; }
+.card.wc .odds > .ic { width: 1.25rem; height: 1.25rem; color: #f0b4a4; }
+.card.wc .odds .nm { font: 700 var(--fs-sm)/1.2 var(--font); min-width: 0; overflow-wrap: anywhere; }
+.card.wc .odds .nm small { display: flex; align-items: center; gap: 0.1875rem; color: var(--wc-dim); font-weight: 600; font-size: var(--fs-xs); }
+.card.wc .odds .nm small .ic { width: 0.875rem; height: 0.875rem; }
+.card.wc .odds .p { font: 800 1.375rem/1 var(--font); font-variant-numeric: tabular-nums; }
+.card.wc .odds .bar { grid-column: 1 / -1; height: 0.3125rem; border-radius: 1px; background: rgba(0, 0, 0, 0.55); overflow: hidden; box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.8); }
+.card.wc .odds .bar i { display: block; height: 100%; }
+.card.wc .odds.good .p { color: var(--k-good, #86c08f); } .card.wc .odds.good .bar i { background: linear-gradient(180deg, #a6d6ae, #3f7a4c); }
+.card.wc .odds.warn .p { color: var(--k-warn, #e4ab4a); } .card.wc .odds.warn .bar i { background: linear-gradient(180deg, #f0c878, #8f6418); }
+.card.wc .odds.bad .p { color: var(--k-bad, #e2725d); } .card.wc .odds.bad .bar i { background: linear-gradient(180deg, #f09a88, #9a3427); }
+.card.wc .odds.good { background: var(--k-grain) 0 0 / 160px, linear-gradient(160deg, #3e1a1c, #1e0b0d); background-blend-mode: soft-light, normal; }
+.card.wc .gainline { margin: 0; font-size: var(--fs-xs); color: var(--wc-dim); display: flex; flex-wrap: wrap; gap: 0.25rem 0.5rem; align-items: center; }
+.card.wc .gainline b { display: inline-flex; gap: 0.25rem; align-items: center; color: var(--wc-ink); }
+.card.wc .gainline .ic { width: 0.9375rem; height: 0.9375rem; color: var(--brass, #c8964a); }
+.card.wc .intrigue { display: flex; gap: 0.375rem; }
+.card.wc .intrigue button { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.0625rem; min-height: 3.25rem; padding: 0.25rem 0.125rem; font: 600 var(--fs-xs)/1.15 var(--font); }
+.card.wc .intrigue button .ic { width: 1.25rem; height: 1.25rem; color: var(--k-brass-200, #efd59a); }
+.card.wc .intrigue button small { color: var(--wc-dim); font-size: var(--fs-xs); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card.wc .intrigue button[aria-disabled=true] { filter: saturate(0.3) brightness(0.8); }
+.card.wc .fan.foe { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0; }
+.card.wc .fan .cls { display: inline-flex; align-items: center; gap: 0.25rem; min-height: 2.25rem; padding: 0 0.375rem; border: 0; background: none; box-shadow: none; font: 700 var(--fs-xs)/1 var(--font); color: var(--wc-ink); }
+.card.wc .fan .cls canvas { width: 2.5rem; height: 1.125rem; }
+.card.wc .fan .cls .ic { width: 1rem; height: 1rem; }
+.touch .card.wc .fan .cls { min-width: 2.75rem; min-height: 2.75rem; }
+
+/* ------------------------------------------------------------ the fleet card */
+.card.wc .fl-art { height: auto; min-height: 4.75rem; display: flex; align-items: center; gap: 0.625rem; padding: 0.5rem 3.25rem 0.5rem 0.75rem;
+  background: radial-gradient(120% 140% at 0% 50%, color-mix(in srgb, var(--pc, #2f6ea6) 14%, #1c1d22) 0%, #111217 60%, #0a0b0e 100%); }
+.card.wc .fl-art::after { display: none; }
+.card.wc .fl-art .bn { flex: none; line-height: 0; filter: drop-shadow(0.1rem 0.25rem 0.25rem rgba(0, 0, 0, 0.7)); }
+.card.wc .fl-art .picket { display: grid; place-items: center; width: 2.75rem; height: 3.25rem; color: var(--wc-dim); }
+.card.wc .fl-art .picket .ic { width: 1.75rem; height: 1.75rem; }
+.card.wc .fl-id { min-width: 0; flex: 1; }
+.card.wc .fl-id .wc-name { font-size: 1.25rem; }
+.card.wc .fl-id .wc-epi { font-size: var(--fs-sm); }
+.card.wc .fl-id .brand { margin-left: 0.375rem; }
+.card.wc .fl-art .vow { flex: none; max-width: 8.5rem; text-align: right; font: italic var(--fs-sm)/1.15 var(--k-prose, 'IM Fell English', Georgia, serif); color: #e8dcc0; overflow-wrap: anywhere; }
+.card.wc .fl-art .vow small { display: block; font: 600 var(--fs-xs)/1.2 var(--font); font-style: normal; color: var(--wc-dim); }
+.card.wc .fl-art .vow.owner { font: 700 var(--fs-sm)/1.1 var(--font); font-style: normal; color: var(--wc-ink); display: inline-flex; align-items: center; gap: 0.3125rem; }
+.card.wc .fl-art .vow .dot { width: 0.625rem; height: 0.75rem; background: var(--pc); clip-path: polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%); }
+.card.wc .fl-art .sib { position: absolute; right: 0.5rem; bottom: 0.25rem; display: inline-flex; align-items: center; gap: 0.125rem; z-index: 3; }
+.card.wc .fl-art .sib button { width: 1.75rem; height: 1.75rem; padding: 0; border-radius: 3px; display: grid; place-items: center; background: rgba(0, 0, 0, 0.35); border: 0; box-shadow: none; color: var(--wc-dim); }
+.card.wc .fl-art .sib button:first-child .ic { transform: scaleX(-1); }
+.card.wc .fl-art .sib small { font-size: var(--fs-xs); color: var(--wc-dim); }
+.touch .card.wc .fl-art .sib { position: static; }
+.touch .card.wc .fl-art .sib button { width: 2.75rem; height: 2.75rem; }
+.card.wc .fl-stats { display: flex; align-items: center; gap: 0.875rem; padding: 0.4375rem 0.875rem 0.375rem; font: 700 1.1875rem/1 var(--font); font-variant-numeric: lining-nums tabular-nums; }
+.card.wc .fl-stats span { display: inline-flex; align-items: center; gap: 0.25rem; }
+.card.wc .fl-stats span.bad { color: var(--k-bad, #e2725d); }
+.card.wc .fl-stats .ic { width: 1rem; height: 1rem; color: var(--brass, #c8964a); }
+.card.wc .fl-stats small { margin-left: auto; font: 600 var(--fs-xs)/1 var(--font); color: var(--wc-dim); }
+.card.wc .route { margin: 0 0.75rem 0.375rem; display: flex; align-items: center; gap: 0.5rem; min-height: 2.5rem; padding: 0.25rem 0.375rem 0.25rem 0.625rem; border-radius: 3px; font-size: var(--fs-sm);
+  background: rgba(0, 0, 0, 0.3); box-shadow: inset 0 0 0 1px rgba(214, 173, 98, 0.2); }
+.card.wc .route > .ic { width: 1.125rem; height: 1.125rem; color: var(--k-info, #9bbbd9); }
+.card.wc .route.seize > .ic { color: #f0b4a4; }
+.card.wc .route > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.card.wc .route .mini { margin-left: auto; flex: none; }
+.card.wc .route .warn { color: var(--k-warn, #e4ab4a); font-size: var(--fs-xs); display: inline-flex; gap: 0.25rem; align-items: center; }
+.card.wc .route.idle { color: var(--wc-dim); }
+.card.wc .route.limp > .ic { color: #f0b07a; }
+.card.wc .fl-status { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; padding: 0 0.875rem 0.375rem; font-size: var(--fs-xs); color: var(--wc-dim); }
+.card.wc .fl-status > span { display: inline-flex; align-items: center; gap: 0.25rem; }
+.card.wc .fl-status .ic { width: 0.9375rem; height: 0.9375rem; }
+.card.wc .fl-status .war { color: #f0b07a; } .card.wc .fl-status .warn { color: var(--k-bad, #e2725d); } .card.wc .fl-status .fatechip { color: var(--k-fate, #f1d488); }
+.card.wc .wc-face > .fan { display: flex; flex-wrap: wrap; gap: 0.3125rem; padding: 0 0.75rem 0.5rem; margin: 0; }
+.card.wc .wc-face > .fan.foe { padding-top: 0.125rem; }
+.card.wc .sc { position: relative; width: 3.125rem; height: 2.875rem; padding: 0; border-radius: 3px; display: grid; place-items: center; cursor: grab; border: 1px solid transparent;
+  background: var(--k-grain) 0 0 / 160px, linear-gradient(162deg, #2c2f37, #18191e); background-blend-mode: soft-light, normal;
+  box-shadow: var(--k-bevel), 0 1px 0 rgba(0, 0, 0, 0.55); transition: transform var(--k-t-settle, 260ms) var(--k-ease-heavy, ease), box-shadow var(--k-t-settle, 260ms); }
+.card.wc .sc canvas { width: 2.625rem; height: 1.375rem; margin-top: -0.375rem; }
+.card.wc .sc:hover { filter: brightness(1.12); background-blend-mode: soft-light, normal; }
+.card.wc .sc.up { transform: translateY(-0.375rem); box-shadow: var(--k-bevel), var(--k-cast-lift);
+  background: var(--k-grain) 0 0 / 160px, linear-gradient(162deg, #3a3628, #1d1b14); background-blend-mode: soft-light, normal; }
+.card.wc .sc .hb { position: absolute; left: 0.375rem; right: 0.375rem; bottom: 0.3125rem; height: 0.1875rem; border-radius: 1px; background: rgba(0, 0, 0, 0.6); overflow: hidden; }
+.card.wc .sc .hb > i { display: block; height: 100%; background: linear-gradient(180deg, #a6d6ae, #3f7a4c); }
+.card.wc .sc .hb > i.low { background: linear-gradient(180deg, #f09a88, #9a3427); }
+.card.wc .sc .md { position: absolute; top: 0.25rem; right: 0.25rem; width: 0.375rem; height: 0.375rem; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); }
+.card.wc .sc .md.old { box-shadow: 0 0 0 1.5px var(--k-fate, #f1d488); }
+.card.wc .sc .sx { position: absolute; top: 0.125rem; left: 0.25rem; font: 700 var(--fs-xs)/1 var(--font); font-style: normal; color: var(--k-bad, #e2725d); }
+.touch .card.wc .sc { width: 3.125rem; height: 2.75rem; }
+.card.wc .verbs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.375rem; }
+.card.wc .ib { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.125rem; min-width: 0; min-height: 3.25rem; padding: 0.25rem 0.125rem; font: 600 var(--fs-xs)/1.15 var(--font); }
+.card.wc .ib .ic { width: 1.25rem; height: 1.25rem; color: var(--k-brass-200, #efd59a); }
+.card.wc .ib span { color: var(--wc-ink); }
+.card.wc .ib small { font-size: var(--fs-xs); color: var(--wc-faint); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card.wc .ib[aria-disabled=true] { background: transparent; box-shadow: inset 0 0 0 1px rgba(214, 173, 98, 0.16); }
+.card.wc .ib[aria-disabled=true] .ic, .card.wc .ib[aria-disabled=true] span { color: var(--wc-faint); }
+.card.wc h4.sub { margin: 0.625rem 0 0.25rem; }
+.card.wc .temper { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 2px; background: linear-gradient(180deg, #060607, #18191e); box-shadow: inset 1px 1px 3px rgba(0, 0, 0, 0.9); }
+.card.wc .temper button { display: flex; align-items: center; justify-content: center; gap: 0.3125rem; min-height: 2.5rem; padding: 0 0.25rem; border: 0; border-radius: 2px; background: transparent; box-shadow: none; font: 700 var(--fs-xs)/1 var(--font); color: var(--wc-dim); }
+.touch .card.wc .temper button { min-height: 2.75rem; }
+.card.wc .temper button .ic { width: 1rem; height: 1rem; }
+.card.wc .temper button.on { color: #2a1a06; text-shadow: 0 1px 0 rgba(255, 245, 210, 0.5); background: var(--k-grain) 0 0 / 160px, var(--k-brass-face, linear-gradient(172deg, #f7e2a6, #dcb05e 22%, #b8863a 55%, #8a5f22)); background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel-brass); }
+.card.wc .temper button:hover:not(.on) { color: var(--wc-ink); background: rgba(255, 240, 210, 0.05); transform: none; filter: none; }
+
+/* ------------------------------------------------------------ the peek: a vellum slip (hover / long-press) */
+.cardpeek { position: fixed; z-index: 40; width: 15.5rem; padding: 0.5625rem 0.75rem 0.625rem; pointer-events: none; opacity: 0; transform: translateY(0.25rem);
+  transition: opacity var(--k-t-tick, 90ms) linear, transform var(--k-t-settle, 260ms) var(--k-ease-heavy, ease); font: var(--fs-sm)/1.35 var(--k-prose, 'IM Fell English', Georgia, serif); }
+.cardpeek.on { opacity: 1; transform: none; }
+.cardpeek b { display: block; margin-bottom: 0.125rem; font: 700 var(--fs-xs)/1.25 var(--k-display, var(--display)); letter-spacing: 0.08em; color: #4a2c10; text-transform: uppercase; }
+.cardpeek b em { font: italic var(--fs-xs) var(--k-prose, 'IM Fell English', Georgia, serif); text-transform: none; letter-spacing: 0; color: #6b5638; }
+.cardpeek p { margin: 0.125rem 0 0; color: #2a1d10; }
+.cardpeek .stats { font: 700 var(--fs-sm)/1.2 var(--font); display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; color: #3a2408; }
+.cardpeek .ic { width: 0.9375rem; height: 0.9375rem; vertical-align: -0.12em; color: #6b4a1c; }
+.cardpeek .d { color: #6b5638; font-size: var(--fs-xs); }
+.cardpeek .gain { color: #2f5a36; }
+.cardpeek .loss { color: #7a2418; }
+
+/* ------------------------------------------------------------ the phone: a bottom sheet with two snap points */
+.phone .hud > .card.wc { left: calc(0.25rem + var(--safe-l)) !important; right: calc(0.25rem + var(--safe-r)) !important; width: auto; border-radius: 7px; z-index: 7;
+  animation: sheetup var(--k-t-sheet, 340ms) var(--k-ease-heavy, ease-out); touch-action: none; }
+.phone:not(.landscape) .hud > .card.wc { bottom: calc(8.125rem + var(--safe-b)); max-height: calc(100% - 12rem - var(--safe-t) - var(--safe-b)); }
+.phone.no-prim:not(.landscape) .hud > .card.wc { bottom: calc(4.25rem + var(--safe-b)); max-height: calc(100% - 8.25rem - var(--safe-t) - var(--safe-b)); }
+.phone:not(.landscape) .hud > .card.wc[data-snap=full] { top: calc(3.75rem + var(--safe-t)); max-height: none; }
+/* peek hides the open verb (own worlds and fleets); a card with no verbs (a rival's world or fleet) shows its body */
+.phone:not(.landscape) .hud > .card.wc[data-snap=peek]:is([data-kind=own-planet], [data-kind=own-fleet]) .wc-body, .phone:not(.landscape) .hud > .card.wc[data-snap=peek] .gopen { display: none; }
+/* the grabber: a brass bar on the sheet's top edge */
+.phone .hud > .card.wc::after { content: ''; position: absolute; z-index: 6; top: 0.3125rem; left: 50%; width: 2.5rem; height: 0.25rem; margin-left: -1.25rem; border-radius: 2px; pointer-events: none;
+  background: linear-gradient(180deg, #efd59a, #8a5f22); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.7); }
+.phone.landscape .hud > .card.wc::after { display: none; }
+.phone .card.wc .wc-art { --art-k: 0.857; }
+.phone:not(.landscape) .card.wc[data-snap=full] .wc-art:not(.fl-art) { --art-k: 0.643; }
+.phone:not(.landscape) .card.wc[data-snap=full] .wc-art .wc-crest { bottom: 0.3125rem; }
+.phone:not(.landscape) .card.wc[data-snap=full] .wc-art .ribbon { bottom: 0.3125rem; }
+.phone .card.wc .wc-tabs button { min-height: 2.75rem; font-size: var(--fs-sm); }
+.phone .card.wc .wc-name { font-size: 1.25rem; }
+.phone .card.wc .primary { display: flex; align-items: center; gap: 0.625rem; width: auto; margin: 0.125rem 0.75rem 0.5rem; min-height: 3.25rem; padding: 0 0.75rem;
+  font: 800 var(--fs-md)/1.1 var(--font); letter-spacing: 0.02em; text-transform: none; justify-content: flex-start; }
+.phone .card.wc .primary canvas { width: 3rem; height: 1.375rem; flex: none; filter: brightness(0.35) sepia(0.4); }
+.phone .card.wc .primary > .ic { width: 1.375rem; height: 1.375rem; }
+.phone .card.wc .primary > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone .card.wc .primary .price { margin-left: auto; color: #2a1a06; }
+.phone .card.wc .primary .price .ic { color: #3a2408; }
+.phone .card.wc .primary .price.short, .phone .card.wc .primary .price.short .ic { color: #7a2418; }
+.phone .card.wc .primary em { display: none; }
+.card.wc .primary { display: none; }
+.phone .card.wc .primary { display: flex; }
+.phone .card.wc .hulls { gap: 0.3125rem; }
+.phone .card.wc .gambit { margin-bottom: 0.5rem; }
+.phone .card.wc .wc-body { padding-bottom: 0.875rem; }
+/* phone on its side: a side sheet, everything shown (no snap) */
+.phone.landscape .card.wc .wc-art { --art-k: 0.643; }
+
+@media (prefers-reduced-motion: reduce) {
+  .card.wc .sc, .cardpeek, .card.wc .wc-art .bd::after { transition: none; }
+  .phone .hud > .card.wc { animation: none; }
+}
+/* a prompt's choice once made: back to a steel plate, the state in malachite (brass is for the open choice) */
+.card.wc .prompt .acts .yes.on, .card.wc .prompt .acts button.on { color: var(--k-good, #86c08f); text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.8);
+  background: var(--k-grain) 0 0 / 160px, linear-gradient(162deg, #2e3a36 0%, #1e2724 45%, #141816 100%);
+  background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel), 0 1px 0 rgba(0, 0, 0, 0.55); }
+
+/* ------------------------------------------------------------ rims as rings (box-shadow), not border-box gradients:
+   the same lit edge, and the plate's face stays the only thing behind its text (contrast is judged on it) */
+.hud > .card.wc { border: 0; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--role) 75%, #000), inset 1px 1px 0 1px color-mix(in srgb, var(--role-hi) 45%, transparent), 0 0 0 1px rgba(0, 0, 0, 0.7),
+  0 0 0 4px color-mix(in srgb, var(--role) 18%, #0d0e12), 0 0 0 5px color-mix(in srgb, var(--role) 42%, #000), var(--k-cast-lift); }
+.card.wc .hull, .card.wc .go, .card.wc .ib, .card.wc .bet, .card.wc .pick, .card.wc .intrigue button, .card.wc .mem, .card.wc .prompt .acts button, .card.wc .sel, .card.wc .lk-go, .card.wc .mini, .card.wc .odds, .card.wc .sc, .card.wc .gchip {
+  border: 0; box-shadow: inset 0 0 0 1px rgba(200, 160, 90, 0.5), var(--k-bevel), 0 1px 0 rgba(0, 0, 0, 0.55); }
+.card.wc .temper { border: 0; box-shadow: inset 1px 1px 3px rgba(0, 0, 0, 0.9), inset 0 0 0 1px rgba(200, 160, 90, 0.3); }
+.card.wc .hull.sug, .card.wc .go.sug { box-shadow: inset 0 0 0 1px #dcb46c, var(--k-bevel), 0 0 0.9rem -0.2rem rgba(255, 210, 120, 0.4); }
+.card.wc .go.queued { box-shadow: inset 0 0 0 1px var(--k-good, #86c08f), var(--k-bevel); }
+.card.wc .go.why, .card.wc .ib[aria-disabled=true] { box-shadow: inset 0 0 0 1px rgba(214, 173, 98, 0.2); }
+.card.wc .go.max { box-shadow: none; }
+.card.wc .bet { box-shadow: inset 0 0 0 1px rgba(190, 140, 220, 0.45), var(--k-bevel); }
+.card.wc .bet.on { box-shadow: inset 0 0 0 1px #e2c8ff, var(--k-bevel), 0 0 0.75rem rgba(200, 150, 255, 0.22); }
+.card.wc .bet.fate { box-shadow: inset 0 0 0 1px rgba(241, 212, 136, 0.6), var(--k-bevel); }
+.card.wc .bet.fate.on, .card.wc .bet.fate.armed, .card.wc .pick.on { box-shadow: inset 0 0 0 1px #efd59a, var(--k-bevel), 0 0 0.7rem rgba(255, 210, 120, 0.25); }
+.card.wc .pick.gated { box-shadow: inset 0 0 0 1px rgba(214, 173, 98, 0.18); }
+.card.wc .gchip { box-shadow: inset 0 0 0 1px rgba(215, 180, 255, 0.55), var(--k-bevel), 0 1px 0 rgba(0, 0, 0, 0.55); }
+.card.wc .gchip.set { box-shadow: inset 0 0 0 1px var(--gambit), var(--k-bevel); }
+.card.wc .sc.up { box-shadow: inset 0 0 0 1px #efd59a, var(--k-bevel), var(--k-cast-lift); }
+.card.wc .odds.good { box-shadow: inset 0 0 0 1px rgba(226, 114, 93, 0.65), var(--k-bevel); }
+.card.wc .prompt .acts .yes { box-shadow: inset 0 0 0 1px #fff3c8, var(--k-bevel-brass), 0 1px 0 rgba(0, 0, 0, 0.6); }
+.card.wc .prompt .acts .yes.on, .card.wc .prompt .acts button.on { box-shadow: inset 0 0 0 1px var(--k-good, #86c08f), var(--k-bevel); }
+.card.wc .lx { box-shadow: inset 0 0 0 1px rgba(214, 173, 98, 0.22); }
+/* long names wrap rather than clip */
+.card.wc .wc-name { align-items: flex-start; }
+.card.wc .wc-name > span { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.2; }
+/* 44px targets on touch */
+.touch .card.wc .wc-tabs button, .touch .card.wc .into .sel { min-height: 2.75rem; }
+.card.wc .wc-art .x, .card.wc .fl-art .x { border: 0; box-shadow: inset 0 0 0 1px rgba(154, 161, 174, 0.55), 0 1px 2px rgba(0, 0, 0, 0.7); }
+/* the phone's suggested action: the kit's brass plate, its rim as a ring too */
+.phone .card.wc .primary.k-btn { border: 0; background: var(--k-grain) 0 0 / 160px, var(--k-brass-face); background-blend-mode: soft-light, normal; box-shadow: inset 0 0 0 1px #fff3c8, var(--k-bevel-brass), var(--k-cast); }
+/* when a prompt, a long name and an open Gambit outgrow the card, the open verb keeps a little room and the card
+   itself scrolls (the last resort: normally only the verb scrolls and the face stays put) */
+.hud > .card.wc { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.card.wc .wc-body { min-height: 4.5rem; }
+.card.wc .wc-body:empty { min-height: 0; }
+.phone:not(.landscape) .hud > .card.wc[data-snap=peek] .wc-body { min-height: 0; }
+/* a dimmed track (Outpost before Depots) dims its ink, not its opacity: it must still read */
+.card.wc .trk.dim .trn { opacity: 1; }
+.card.wc .trk.dim .trn b { color: var(--wc-dim); }
+.card.wc .trk.dim .trn small { color: var(--wc-faint); }
+.card.wc .trk.dim .trn > .ic { color: var(--k-steel-300, #9aa1ae); }
+.touch .card.wc .lx, .touch .card.wc .lk-go { min-height: 2.75rem; }
+/* the ribbon is a label on the art, not a control: taps go through to the bodies under it */
+.card.wc .ribbon { pointer-events: none; }

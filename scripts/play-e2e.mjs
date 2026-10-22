@@ -52,8 +52,8 @@ for (let turn = 0; turn < Number(process.argv[4] ?? 3); turn++) {
   // build at capital
   await page.evaluate(id => window.tc.screen.select({ kind: 'region', id }), info.cap);
   await page.waitForTimeout(200);
-  const b = await page.$('[data-a=build][data-cls=frigate]');
-  if (b) await b.click();
+  // by selector, not a held handle: the card re-renders when the planner's suggestion lands (idle time)
+  if (await page.$('[data-a=build][data-cls=frigate]')) await page.click('[data-a=build][data-cls=frigate]', { timeout: 15000 }).catch(() => {});
   // building into a new fleet raises a banner: the founding sheet (found with its defaults)
   await page.waitForTimeout(200);
   const go = await page.$('[data-found] [data-f=go]');

@@ -8,6 +8,8 @@ import { LAW } from '../config/empire.ts';
 import { DEEDS } from '../config/content.ts';
 import { soulOn, SR, bannersFree, bannerLimit, resolveFound, razeBlock, soulShipDiscount, hasBane } from './soul.ts';
 import { isDugIn } from './signature.ts';
+import { worldOn, WD } from './systems.ts';
+import { isTrack, trackOrder } from './tracks.ts';
 
 export const ORDER_INFO: Record<Order['type'], { name: string; icon: string; help: string }> = {
   move:      { name: 'Move',      icon: '➤', help: 'Move a fleet up to its speed in regions. Overdrive: +1 range, but the fleet is fatigued next turn (weaker attacks).' },
@@ -44,7 +46,9 @@ export function orderCost(s: GameState, o: Order, p: PlayerId): Partial<Res> {
       }
       return out;
     }
-    case 'develop': return projectCostMod(s, p, o.project, o.region, { ...(Object.hasOwn(s.rules.projects, o.project) ? s.rules.projects[o.project].cost : undefined) });
+    // stage C (docs/SIMPLIFY.md §5): a develop order may name a track; it costs what the track's next level buys
+    case 'develop': if (isTrack(o.project)) { const c = trackOrder(s, p, o.region, o.project); return c.order ? orderCost(s, c.order, p) : {}; }
+      return projectCostMod(s, p, o.project, o.region, { ...(Object.hasOwn(s.rules.projects, o.project) ? s.rules.projects[o.project].cost : undefined) });
     case 'influence': {
       const r = s.regions[o.target];
       const c = r && r.owner !== null && r.owner !== p ? I.rivalSubvertCost : I.orderCost;
@@ -102,7 +106,7 @@ export function describeOrder(s: GameState, o: Order): string {
     case 'move': return `${fn(o.fleet)} → ${o.path.map(rn).join(' → ')}${o.overdrive ? ' (overdrive)' : ''}`;
     case 'seize': return `${fn(o.fleet)}${o.also?.length ? ` + ${o.also.map(fn).join(' + ')}` : ''} seize${o.also?.length ? '' : 's'} ${rn(o.target)}`;
     case 'build': return `Build ${lookup(s.rules.ships, o.cls)?.name ?? o.cls} at ${rn(o.region)}`;
-    case 'develop': return `${lookup(s.rules.projects, o.project)?.name ?? o.project} at ${rn(o.region)}`;
+    case 'develop': return isTrack(o.project) ? `${o.project.charAt(0).toUpperCase()}${o.project.slice(1)} at ${rn(o.region)}` : `${lookup(s.rules.projects, o.project)?.name ?? o.project} at ${rn(o.region)}`;
     case 'fortify': return `${fn(o.fleet)} fortifies`;
     case 'influence': return `Influence ${rn(o.target)}`;
     case 'scan': return `Scan ${rn(o.target)}`;
@@ -204,6 +208,8 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
     case 'develop': {
       const r = reg(o.region);
       if (!r) return 'no such region';
+      // stage C: a track name ('works' | 'yard' | 'walls' | 'outpost') stands for the building its next level buys
+      if (isTrack(o.project)) { const c = trackOrder(s, p, o.region, o.project); return c.order ? null : c.why ?? 'nothing left to build on that track'; }
       const pd = Object.hasOwn(s.rules.projects, o.project) ? s.rules.projects[o.project] : undefined;
       if (!pd) return 'unknown project';
       if (!own(o.region)) return 'not your region';
@@ -248,6 +254,8 @@ export function validateOrder(s: GameState, p: PlayerId, o: Order): string | nul
       return null;
     }
     case 'engrave': {
+      // the simplified world (docs/SIMPLIFY.md B4): Engrave is cut
+      if (worldOn(s) && WD(s).engrave === false) return 'Engrave is not in these rules';
       const r = reg(o.region);
       if (!r) return 'no such region';
       if (!soulOn(s) || !r.story) return 'no deeds here';

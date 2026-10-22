@@ -26,6 +26,7 @@
 import { SIGNATURE_DEFAULTS } from '../config/rules.ts';
 import { POSTURES, WORLD_POSTURES, FATE_USES } from '../config/content.ts';
 import { beat, headline } from './soul.ts';
+import { worldOn, WD } from './systems.ts';
 import type { Rng } from './rng.ts';
 import type { Engagement, FateUse, Fleet, GameEvent, GameState, PlayerId, Posture, PostureFx, PostureOutcome, Region, RegionId, Stance, Submission, WorldPosture } from './types.ts';
 
@@ -150,6 +151,8 @@ export function wpostureBlock(s: GameState, p: PlayerId, rid: unknown, kind: unk
   if (r.owner !== p) return 'not your system';
   if (r.kind === 'lane' || r.kind === 'void') return 'nobody lives there';
   if (typeof kind !== 'string' || !WORLD_POSTURE_IDS.includes(kind as WorldPosture)) return 'unknown world posture';
+  // the simplified world (docs/SIMPLIFY.md B1): Open the Gates is cut
+  if (kind === 'gates' && worldOn(s) && WD(s).gatesPosture === false) return 'Open the Gates is not in these rules';
   if (r.wposture && r.wposture.turn === s.turn) return 'that system already took a posture this turn';
   return null;
 }

@@ -5,7 +5,8 @@
 import type { GameScreen } from '../game.ts';
 import type { FoundSpec, FreeAction, Fleet, Order, Region, VowKind } from '../../../shared/sim/types.ts';
 import { BOONS, BANES, VOWS, SCARS, CALLINGS, DEEDS, SHIP_TRAITS, SIGILS } from '../../../shared/config/content.ts';
-import { RANK_NAMES, SR, soulOn, foundingOffer, modsBlock, modPoints, boonsOf, vowBlock, vowText, razeBlock, callingTier, tenureTier, tenureTurns, worldEpithet, limpRoute } from '../../../shared/sim/soul.ts';
+import { RANK_NAMES, SR, soulOn, foundingOffer, modsBlock, modPoints, boonsOf, vowBlock, vowText, razeBlock, tenureTier, tenureTurns, worldEpithet, limpRoute } from '../../../shared/sim/soul.ts';
+import { TRAITS as CMD_TRAITS } from '../../../shared/config/content.ts';
 import { fleetSpeed } from '../../../shared/sim/graph.ts';
 import { orderCost, costText } from '../../../shared/sim/orders.ts';
 import { esc, overlay, toast } from '../ui/dom.ts';
@@ -200,70 +201,182 @@ export function shipTraitBits(traits: string[] | undefined): { icons: string; ti
   return { icons: `<i class="trt">${t.map(id => esc(SHIP_TRAITS[id].icon)).join('')}</i>`, tip: ` · ${t.map(id => SHIP_TRAITS[id].name).join(', ')}` };
 }
 
-// ------------------------------------------------------------------ world card
-export function worldEpi(g: GameScreen, r: Region): string {
+// ------------------------------------------------------------------ world card (docs/WORLD-CARD.md §8.5)
+/** The world's epithet ("the Unbroken"), or ''. Its deeds' summary: the card's subtitle. */
+export function epithetOf(g: GameScreen, r: Region): string {
   if (!on(g) || !r.story) return '';
-  const ep = r.story.epithet ?? worldEpithet(g.st, r);
-  return ep ? `<div class="epi world"><em>${esc(ep)}</em></div>` : '';
+  return r.story.epithet ?? worldEpithet(g.st, r) ?? '';
 }
-export function worldSoulRows(g: GameScreen, r: Region): string {
-  if (!on(g) || !r.story || r.kind === 'void' || (r.kind as string) === 'lane') return '';
-  const st = g.st, sto = r.story, you = g.you;
-  let html = '';
-  // ledger: five tiny counters
-  const marks = MARKS.filter(([k]) => sto[k] > 0).map(([k, ic, t]) => `<span class="mk"${tip(t)}><i>${ic}</i><b>${sto[k]}</b></span>`).join('');
-  // calling + tenure
-  let calling = '';
+/** One line for what a calling does at tier t (0 = none yet, 1-3 = tenure tiers). */
+export function callingEffect(g: GameScreen, id: string, t: number): string {
+  const S = SR(g.st), at = (a: number[]) => a[Math.max(0, Math.min(a.length - 1, t))];
+  switch (id) {
+    case 'arsenal': return `ships built here −${Math.round(at(S.arsenalDiscount) * 100)}%`;
+    case 'granary': return `+${at(S.granaryIndustry)}⚙ +${at(S.granaryCredits)}¢ a turn`;
+    case 'bastion': return `garrison +${at(S.bastionGarrison)}, rebuilds +${at(S.bastionRegen)}`;
+    case 'refinery': return `+${at(S.refineryCredits)}¢ a turn`;
+    case 'proving': return `new ships blood green commanders`;
+    case 'oracle': return `sensor +${at(S.oracleRange)} from here`;
+    case 'cenotaph': return `fight harder here, armoured garrison`;
+    case 'bulwark': return `siege damage −${at(S.bulwarkSiegeCut)} here`;
+  }
+  return CALLING_SHORT[id] ?? '';
+}
+/** The card's title line: the Calling with its effect and three tenure segments; dormant; or the teaser before it. */
+export function callingLine(g: GameScreen, r: Region): string {
+  if (!on(g) || !r.story || r.kind === 'void' || (r.kind as string) === 'lane' || r.owner === null) return '';
+  const st = g.st, sto = r.story;
+  if (sto.pendingCalling) return '';   // the prompt takes the line's place
   if (sto.calling) {
     const c = CALLINGS[sto.calling.id];
-    const dorm = (sto.calling.dormantUntil ?? -1) > st.turn;
-    const tier = r.owner !== null ? tenureTier(st, r) : 0;
+    const dormLeft = (sto.calling.dormantUntil ?? -1) - st.turn;
+    const icon = ic(icFor('calling', sto.calling.id, c?.icon));
+    if (dormLeft > 0) return `<div class="wc-calling dorm"${tip(`${c?.name}: sleeps after a capture`)}>${icon}<span>Calling dormant ${dormLeft} turn${dormLeft === 1 ? '' : 's'} · ${esc(c?.name ?? sto.calling.id)}</span></div>`;
+    const tier = tenureTier(st, r);
+    const T = SR(st).tenureTiers, tt = tenureTurns(st, r), nxt = T.find(x => x > tt);
     const segs = [0, 1, 2].map(i => `<i class="${i < tier ? 'on' : ''}"></i>`).join('');
-    const T = SR(st).tenureTiers;
-    const tt = tenureTurns(st, r);
-    const nxt = T.find(x => x > tt);
-    calling = `<span class="calling ${dorm ? 'dorm' : ''}"${tip(dorm ? `Dormant until turn ${sto.calling.dormantUntil}` : `${c?.name}: ${CALLING_SHORT[sto.calling.id] ?? ''}`)}><i>${ic(icFor('calling', sto.calling.id, c?.icon))}</i><b>${esc(c?.name ?? sto.calling.id)}</b><span class="ten"${tip(`Tenure ${tt}t${nxt ? ` · next tier at ${nxt}` : ''}`)}>${segs}</span>${dorm ? '<small>dormant</small>' : ''}</span>`;
-    void callingTier;
+    return `<div class="wc-calling"${tip(`${c?.name}: ${c?.desc ?? ''}`)}>${icon}<b>${esc(c?.name ?? sto.calling.id)}</b><span class="eff">${esc(callingEffect(g, sto.calling.id, tier))}</span><span class="ten" role="img" aria-label="Tenure tier ${tier} of 3"${tip(`Held ${tt}t${nxt ? ` · tier ${tier + 1} at ${nxt}t` : ' · top tier'}`)}>${segs}</span></div>`;
   }
-  if (marks || calling) html += `<div class="ledger">${marks}${calling}</div>`;
-  // pending calling (owner only)
-  const pc = sto.pendingCalling;
-  if (pc && r.owner === you && you !== null) {
-    const picked = pendingFree(g, 'calling', x => x.region === r.id);
-    const pid = picked ? (typeof picked.pick === 'number' ? pc.options[picked.pick] : picked.pick) : null;
-    html += `<div class="choice"><div class="choice-h"><span>◈ Calling</span><small>choose one</small></div><div class="picks">${pc.options.map(id => {
-      const c = CALLINGS[id];
-      return `<button class="bigpick ${pid === id ? 'on' : ''}" data-a="calling" data-pick="${esc(id)}"${g.canPlan ? '' : ' aria-disabled="true"'}><i>${ic(icFor('calling', id, c?.icon))}</i><b>${esc(c?.name ?? id)}</b><small>${esc(CALLING_SHORT[id] ?? '')}</small><em>${c?.from === 'mark' ? 'its history' : 'its nature'}</em></button>`;
-    }).join('')}${(pc.gated ?? []).map(x => {
-      // star systems: a calling this world would have been offered but can't take (the bodies or history it lacks)
-      const c = CALLINGS[x.id];
-      return `<button class="bigpick gated" aria-disabled="true"${tip(`${c?.name ?? x.id} ${x.why}`)}><i>${ic(icFor('calling', x.id, c?.icon))}</i><b>${esc(c?.name ?? x.id)}</b><small>⊘ ${esc(x.why)}</small></button>`;
-    }).join('')}</div></div>`;
+  const need = SR(st).callingAtDev;
+  if (r.owner !== g.you || r.dev < need - 1) return '';
+  const pips = Array.from({ length: need }, (_, i) => `<i class="${i < r.dev ? 'on' : ''}"></i>`).join('');
+  return `<div class="wc-calling none">${ic('calling')}<span>${r.dev >= need ? 'A Calling comes at the turn\'s end' : `Calling at ${need} citizens`}</span><span class="cit" role="img" aria-label="${Math.min(r.dev, need)} of ${need} citizens">${pips}</span></div>`;
+}
+/** "What will Mire become?": the two Calling picks (and gated ones, dimmed with their reason). Your world only. */
+export function callingPrompt(g: GameScreen, r: Region): string {
+  const pc = r.story?.pendingCalling;
+  if (!on(g) || !pc || r.owner !== g.you || g.you === null) return '';
+  const picked = pendingFree(g, 'calling', x => x.region === r.id);
+  const pid = picked ? (typeof picked.pick === 'number' ? pc.options[picked.pick] : picked.pick) : null;
+  const picks = pc.options.map(id => {
+    const c = CALLINGS[id];
+    return `<button class="pick ${pid === id ? 'on' : ''}" data-a="calling" data-pick="${esc(id)}"${g.canPlan ? '' : ' aria-disabled="true"'}>${ic(icFor('calling', id, c?.icon))}<b>${esc(c?.name ?? id)}</b><small>${esc(callingEffect(g, id, 0))}</small><em>${c?.from === 'mark' ? 'its history' : 'its nature'}</em></button>`;
+  }).join('') + (pc.gated ?? []).map(x => {
+    const c = CALLINGS[x.id];
+    return `<button class="pick gated" aria-disabled="true"${tip(`${c?.name ?? x.id} ${x.why}`)}>${ic(icFor('calling', x.id, c?.icon))}<b>${esc(c?.name ?? x.id)}</b><small>⊘ ${esc(x.why)}</small></button>`;
+  }).join('');
+  return `<div class="prompt calling"><div class="ph"><span>${ic('calling')} What will ${esc(shortName(r.name))} become?</span><small>${pid ? 'chosen · at seal' : 'free · once'}</small></div><div class="picks">${picks}</div></div>`;
+}
+const shortName = (n: string) => n.replace(/^the\s+/i, '').split(/\s+/).slice(0, 2).join(' ');
+/** Raze-or-keep, the turn after a capture: its payout on the button. */
+const kept = new Set<string>();
+export function razePrompt(g: GameScreen, r: Region): string {
+  const st = g.st, you = g.you;
+  if (!on(g) || you === null || r.owner !== you || !g.canPlan || kept.has(`${st.turn}:${r.id}`)) return '';
+  const pend = pendingFree(g, 'raze', x => x.region === r.id);
+  const pendO = pendingOrderIdx(g, o => o.type === 'raze' && o.region === r.id);
+  const S = SR(st), lump = S.razeLump + S.razeLumpPerDev * r.dev;
+  const free = !razeBlock(st, you, r.id, true), order = !free && !razeBlock(st, you, r.id, false);
+  if (!pend && pendO < 0 && !free && !order) return '';
+  const h = `<div class="ph"><span>${ic('occupied')} Just taken</span><small>${free ? 'free · this turn only' : '1 order · last chance'}</small></div>`;
+  if (pend || pendO >= 0) return `<div class="prompt raze">${h}<div class="acts"><button class="on" data-a="unraze"${pend && !g.live ? tip('Take it back') : ' aria-disabled="true"'}>${ic('raze')} Razing: +${lump}⚙ +${lump}¢${pend && !g.live ? ' ↶' : ''}</button></div></div>`;
+  return `<div class="prompt raze">${h}<div class="acts"><button data-a="raze"${free ? ' data-free="1"' : ''}${tip(`Loot it: citizens −1, its calling lost, ${nameOf(g, r.story?.captured?.from)} swears vengeance`)}>${ic('raze')} Raze: +${lump}⚙ +${lump}¢</button><button class="yes" data-a="keep">Keep it</button></div></div>`;
+}
+const nameOf = (g: GameScreen, p: number | null | undefined) => (p === null || p === undefined ? 'its old owner' : g.pname(p).split(' ').slice(-1)[0]);
+/** Rival agents near flipping (from half the threshold): Purge. */
+export function purgePrompt(g: GameScreen, r: Region, thr: number): string {
+  const st = g.st, you = g.you;
+  if (you === null || r.owner !== you) return '';
+  const worst = st.players.filter(p => p.id !== you).map(p => ({ p, n: r.loyalty[p.id] ?? 0 })).sort((a, b) => b.n - a.n)[0];
+  if (!worst || worst.n < Math.ceil(thr / 2)) return '';
+  const o: Order = { type: 'influence', target: r.id };
+  const why = g.canPlan ? g.orderWhy(o) : 'not planning';
+  return `<div class="prompt purge"><div class="ph"><span>${ic('influence')} ${esc(nameOf(g, worst.p.id))} agents ${worst.n}/${thr}</span><small>flips at ${thr}</small></div><div class="acts"><button class="yes" data-a="influence"${why ? ` aria-disabled="true"${tip(`⊘ ${shortWhy(why)}`)}` : tip('Remove rival agents')}>${ic('influence')} Purge · ${costText(orderCost(g.st, o, you))}</button></div></div>`;
+}
+/** The Story tab's world half: the calling's tier, deeds (and Engrave where the rules keep it), ledger, chronicle, hands. */
+export function storyWorld(g: GameScreen, r: Region): string {
+  if (!on(g) || !r.story || r.kind === 'void' || (r.kind as string) === 'lane') return '';
+  const st = g.st, sto = r.story, you = g.you;
+  const sec = (h: string, body: string) => body ? `<section><h4>${h}</h4>${body}</section>` : '';
+  let html = '';
+  if (sto.calling) {
+    const c = CALLINGS[sto.calling.id], tier = r.owner !== null ? tenureTier(st, r) : 0, T = SR(st).tenureTiers, tt = tenureTurns(st, r), nxt = T.find(x => x > tt);
+    html += sec('Calling', `<p class="line">${ic(icFor('calling', sto.calling.id, c?.icon))} <b>${esc(c?.name ?? sto.calling.id)}</b> · tier ${tier} <small>(held ${tt}t${nxt ? `; tier ${tier + 1} at ${nxt}t` : ''})</small> · ${esc(callingEffect(g, sto.calling.id, tier))}</p>`);
   }
-  // deeds (max 2), engrave
   if (sto.deeds.length) {
-    const canEng = r.owner === you && you !== null && g.canPlan && !sto.deeds.some(d => d.engraved);
+    const engraveOn = !(st.rules.world?.enabled !== false && st.rules.world && st.rules.world.engrave === false);
+    const canEng = engraveOn && r.owner === you && you !== null && g.canPlan && !sto.deeds.some(d => d.engraved);
     const engIdx = pendingOrderIdx(g, o => o.type === 'engrave' && o.region === r.id);
-    html += `<div class="deeds">${sto.deeds.map(d => {
+    html += sec('Deeds', `<div class="deeds">${sto.deeds.map(d => {
       const D = DEEDS[d.id];
       const o: Order = { type: 'engrave', region: r.id, deed: d.id };
       const why = canEng ? g.orderWhy(o) : null;
-      const eng = canEng && engIdx < 0 ? `<button class="mini eng" data-a="engrave" data-deed="${esc(d.id)}"${why ? ` aria-disabled="true"${tip(`⊘ ${shortWhy(why)}`)}` : tip(`Engrave: never replaced · ${costText(orderCost(g.st, o, you!))}`)}>✎</button>` : '';
-      return `<span class="deed ${d.engraved ? 'engraved' : ''}"${tip(`${D?.desc.split('.')[0] ?? ''}`)}><i>${ic(icFor('deed', d.id, D?.icon))}</i><b>${esc(d.name)}</b><small>T${d.turn}</small>${eng}</span>`;
-    }).join('')}${engIdx >= 0 ? '<span class="deed pend">✎ engraving</span>' : ''}</div>`;
+      const eng = canEng && engIdx < 0 ? `<button class="eng" data-a="engrave" data-deed="${esc(d.id)}" aria-label="Engrave ${esc(d.name)}"${why ? ` aria-disabled="true"${tip(`⊘ ${shortWhy(why)}`)}` : tip(`Engrave: never replaced · ${costText(orderCost(g.st, o, you!))}`)}>${ic('engrave')}</button>` : '';
+      return `<span class="deed ${d.engraved ? 'engraved' : ''}"${tip(`${D?.desc.split('.')[0] ?? ''}`)}>${ic(icFor('deed', d.id, D?.icon))}<span>${esc(d.name)}</span><small>T${d.turn}</small>${eng}</span>`;
+    }).join('')}${engIdx >= 0 ? `<span class="deed pend">${ic('engrave')} engraving</span>` : ''}</div>`);
   }
-  // owners history: who held it, when
-  if (sto.owners.length > 1) {
-    html += `<div class="owners"${tip('Hands it passed through')}>${sto.owners.slice(-6).map(o => `<span style="--pc:${esc(g.color(o.p))}"${tip(`${g.pname(o.p)} · T${o.turn} · ${o.how}`)}><i></i>T${o.turn}</span>`).join('<b>›</b>')}</div>`;
+  const marks = MARKS.filter(([k]) => sto[k] > 0).map(([k, , t]) => `<span${tip(t)}>${ic(icFor('mark', k))}<b>${sto[k]}</b></span>`).join('');
+  html += sec('Ledger', marks ? `<div class="marks">${marks}</div>` : '');
+  const led = (sto.ledger ?? []).slice(-3).reverse();
+  html += sec('Chronicle', led.length ? `<div class="wchron">${led.map(e => `<p><span>T${e.turn}</span>${esc(e.text)}</p>`).join('')}</div>` : '');
+  if (sto.owners.length > 1) html += sec('Hands', `<div class="hands">${sto.owners.slice(-5).map(o => `<span style="--pc:${esc(g.color(o.p))}"${tip(`${g.pname(o.p)} · T${o.turn} · ${o.how}`)}><i></i>T${o.turn}</span>`).join('<b>›</b>')}</div>`);
+  return html;
+}
+
+// ------------------------------------------------------------------ fleet card: face prompts and the Story tab
+/** "the Unbroken · Veteran": the epithets and rank under a fleet's name. */
+export function fleetEpi(g: GameScreen, f: Fleet): string {
+  if (!on(g) || f.owner < 0) return '';
+  const ep = (f.epithets ?? []).slice(-1)[0];
+  const brand = f.oathbreaker ? `<span class="brand"${tip(`Broke: ${f.oathbreaker.vow}`)}>Oathbreaker</span>` : '';
+  const rank = f.banner ? rankName(f.commander.rank) : 'Picket';
+  return `${ep ? `<em>${esc(ep)}</em> · ` : ''}<span class="rk">${esc(rank)}</span>${brand}`;
+}
+/** The vow as a quoted line on the art ("Guard Ninefold" · 4/6), or a vow waiting for the seal. */
+export function vowQuote(g: GameScreen, f: Fleet): string {
+  const st = g.st;
+  const pv = f.owner === g.you ? pendingFree(g, 'vow', x => x.fleet === f.id) : undefined;
+  if (f.vow) {
+    const v = f.vow, S = SR(st);
+    const prog = v.kind === 'never_retreat' ? `${v.progress ?? 0}/${S.vowNeverRetreatWins} wins` : v.kind === 'guard' ? `${v.progress ?? 0}/${S.vowGuardTurns} turns` : v.kind === 'relic' && v.carrying ? 'carrying' : 'sworn';
+    return `<span class="vow"${tip(`${VOWS[v.kind].name}: ${VOW_SHORT[v.kind]}`)}>“${esc(vowText(st, v))}”<small>vow · ${esc(prog)}</small></span>`;
   }
-  // raze, right after a capture
-  if (you !== null && r.owner === you && g.canPlan) {
-    const pend = pendingFree(g, 'raze', x => x.region === r.id);
-    const pendO = pendingOrderIdx(g, o => o.type === 'raze' && o.region === r.id);
-    if (pend || pendO >= 0) html += `<div class="soulrow raze pend"><i>${ic('raze')}</i><b>Razing</b>${pend && !g.live ? '<button class="mini" data-a="unraze">↶</button>' : ''}</div>`;
-    else if (!razeBlock(st, you, r.id, true)) html += `<button class="razebtn" data-a="raze" data-free="1"${tip('Loot it now: dev −1, they swear vengeance')}><i>${ic('raze')}</i><b>Raze</b><small>free</small></button>`;
-    else if (!razeBlock(st, you, r.id, false)) html += `<button class="razebtn" data-a="raze"${tip('Loot it: dev −1, they swear vengeance')}><i>${ic('raze')}</i><b>Raze</b><small>1 order</small></button>`;
+  if (pv) return `<span class="vow pend">“${esc(VOWS[pv.vow].name)}”<small>sworn at seal</small></span>`;
+  return '';
+}
+/** A pending Honour takes the fleet card's face: two big cards. */
+export function honourPrompt(g: GameScreen, f: Fleet): string {
+  if (!on(g) || f.owner !== g.you || !f.pendingHonour?.options.length) return '';
+  const picked = pendingFree(g, 'honour', x => x.fleet === f.id);
+  const pickedId = picked ? (typeof picked.pick === 'number' ? f.pendingHonour.options[picked.pick] : picked.pick) : null;
+  const cards = f.pendingHonour.options.map(id => {
+    const b = BOONS[id];
+    return `<button class="pick ${pickedId === id ? 'on' : ''}" data-a="honour" data-pick="${esc(id)}"${g.canPlan ? '' : ' aria-disabled="true"'}>${ic(icFor('boon', id, b?.icon ?? '❖'))}<b>${esc(b?.name ?? id)}</b><small>${esc(BOON_SHORT[id] ?? '')}</small></button>`;
+  }).join('');
+  return `<div class="prompt honour"><div class="ph"><span>${ic('honour')} Honour · ${esc(rankName(f.commander.rank))}</span><small>${pickedId ? 'chosen · at seal' : 'free · choose one'}</small></div><div class="picks">${cards}</div></div>`;
+}
+/** Limping home: the route and the turns left (the Rally bet is in the Gambit). */
+export function limpLine(g: GameScreen, f: Fleet): string {
+  if (!f.limping) return '';
+  const st = g.st, L = f.limping;
+  const to = st.regions[L.to]?.name ?? '?';
+  const rt = limpRoute(st, f);
+  const n = f.route?.path.length ?? rt?.path.length ?? 0;
+  const sp = Math.max(1, fleetSpeed(st, f));
+  const eta = n ? `${Math.max(1, Math.ceil(n / sp))}${g.live ? '⏱' : 't'}` : 'here';
+  return `<div class="route limp"${tip('Limping home: cannot attack, dies if caught')}>${ic('limping')}<span><b>Limping home</b> → ${esc(to)} · ${eta}</span></div>`;
+}
+/** The fleet's Story tab: commander and record, boons / banes / scars (named), the vow, the saga, rename. */
+export function fleetStory(g: GameScreen, f: Fleet): string {
+  const st = g.st, c = f.commander;
+  const sec = (h: string, body: string) => body ? `<section><h4>${h}</h4>${body}</section>` : '';
+  let html = sec('Commander', `<p class="line"><b>${esc(c.name)}</b> <small>· ${esc(rankName(c.rank))} · ${c.deeds.wins}W ${c.deeds.losses}L · ${c.deeds.kills} kills</small></p>${c.traits.length ? `<div class="soulrow">${c.traits.map(t => `<span class="sp trait"${tip(CMD_TRAITS[t]?.desc ?? '')}>${esc(CMD_TRAITS[t]?.name ?? t)}</span>`).join('')}</div>` : ''}`);
+  if (on(g) && f.banner) {
+    const chips: string[] = [];
+    for (const b of f.banner.boons) chips.push(`<span class="sp boon"${tip(BOON_SHORT[b] ?? '')}>${ic(icFor('boon', b, BOONS[b]?.icon))}${esc(BOONS[b]?.name ?? b)}</span>`);
+    for (const h of f.honours ?? []) chips.push(`<span class="sp boon honour"${tip(`Honour: ${BOON_SHORT[h.id] ?? ''}`)}>${ic(icFor('boon', h.id, BOONS[h.id]?.icon ?? '❖'))}${esc(BOONS[h.id]?.name ?? h.id)}</span>`);
+    for (const b of boonsOf(st, f).filter(b => !f.banner!.boons.includes(b) && !(f.honours ?? []).some(h => h.id === b))) chips.push(`<span class="sp boon haven"${tip('A Haven\'s gift')}>${ic(icFor('boon', b, BOONS[b]?.icon))}${esc(BOONS[b]?.name ?? b)}</span>`);
+    for (const b of f.banner.banes) chips.push(`<span class="sp bane"${tip(`${BANE_SHORT[b] ?? ''}${b === 'grudgebound' && f.banner!.grudgeVs != null ? ` (${g.pname(f.banner!.grudgeVs)})` : ''}`)}>${ic(icFor('bane', b, BANES[b]?.icon))}${esc(BANES[b]?.name ?? b)}</span>`);
+    for (const x of f.scars ?? []) chips.push(`<span class="sp scar"${tip(SCAR_SHORT[x.id] ?? '')}>${ic(icFor('scar', x.id, SCARS[x.id]?.icon))}${esc(SCARS[x.id]?.name ?? x.id)}</span>`);
+    if ((f.sulkUntil ?? -1) >= st.turn) chips.push(`<span class="sp bane"${tip('Boons fail this turn')}>${ic('bolt')}Sulking</span>`);
+    html += sec('Boons, banes &amp; scars', chips.length ? `<div class="soulrow">${chips.join('')}</div>` : '');
+    // the vow: sworn (with its progress on the face), waiting for the seal, or the picker
+    if (f.owner === g.you && g.canPlan && !f.vow && !pendingFree(g, 'vow', x => x.fleet === f.id)) html += sec('Vow', `${vowOpen === f.id ? vowPicker(g, f) : `<button class="mini wide" data-a="vowpick">${ic('vow')} Swear a vow</button>`}`);
+    else if (pendingFree(g, 'vow', x => x.fleet === f.id) && !f.vow) html += sec('Vow', `<p class="line">${ic('vow')} ${esc(VOWS[pendingFree(g, 'vow', x => x.fleet === f.id)!.vow].name)} <small>· sworn at seal</small>${g.canPlan && !g.live ? ' <button class="mini" data-a="unvow" aria-label="Take the vow back">↶</button>' : ''}</p>`);
   }
+  const beats = (f.saga ?? []).slice(-3).reverse();
+  html += sec('Saga', beats.length ? `<div class="wchron">${beats.map(b => `<p><span>T${b.turn}</span>${esc(b.text)}</p>`).join('')}</div><button class="mini wide" data-a="record">${ic('chronicle')} Full record</button>` : (f.history.length ? `<div class="wchron">${f.history.slice(-3).reverse().map(x => `<p>${esc(x)}</p>`).join('')}</div>` : ''));
+  if (f.owner === g.you && g.canPlan) html += sec('Name', `<input data-rename value="${esc(g.pendingName(f))}" maxlength="40" aria-label="Fleet name">`);
   return html;
 }
 
@@ -309,6 +422,7 @@ export function soulAction(g: GameScreen, a: string, data: DOMStringMap): boolea
       else g.addOrder({ type: 'raze', region: r.id });
       return true;
     case 'unraze': dropFree(g, x => x.type === 'raze' && x.region === r.id); return true;
+    case 'keep': kept.add(`${g.st.turn}:${r.id}`); g.renderAll(); return true;
   }
   return false;
 }

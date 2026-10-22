@@ -18,11 +18,20 @@ async function run(tag, phone) {
     ? { viewport: { width: 393, height: 852 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' }
     : { viewport: { width: 1440, height: 900 }, acceptDownloads: true });
   const page = await ctx.newPage();
+  await page.routeWebSocket(/\?token=/, () => {});   // ignore Vite hot reloads (other files changing mid-run)
   page.on('pageerror', e => errors.push(`${tag}: ${e.message} ${e.stack?.split('\n')[1] ?? ''}`));
   page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(`${tag}: ${m.text()}`); });
   const shot = n => page.screenshot({ path: `${out}/${tag}-${n}.png` });
   const tap = async sel => { await page.waitForSelector(sel, { timeout: 5000 }); if (phone) await page.tap(sel, { timeout: 5000 }); else await page.click(sel, { timeout: 5000 }); };
   const ev = (fn, arg) => page.evaluate(fn, arg);
+
+  /** Open a card verb (a world's Raise / Improve / Story, a fleet's Orders / Story): on a phone this also opens the full sheet. */
+  const verb = async sel => { await page.waitForSelector(sel, { timeout: 15000 }); await ev(sel => document.querySelector(sel)?.click(), sel); await page.waitForTimeout(300); };
+  /** Raise into a new banner: step the Into selector until it says so. */
+  const intoNew = async () => {
+    await verb('.card [data-a=tab][data-t=raise]');
+    for (let i = 0; i < 6 && await ev(() => !!document.querySelector('.card [data-a=intonext]') && !/New banner/.test(document.querySelector('.card [data-a=intonext]').textContent)); i++) { await ev(() => document.querySelector('.card [data-a=intonext]').click()); await page.waitForTimeout(150); }
+  };
   const plan = () => ev(() => window.tc.screen.plan);
   /** Test-only state edit on the local save, then a fresh view. */
   const edit = (fn, arg) => page.evaluate(([src, a]) => { const s = window.tc.screen; const f = new Function('s', 'st', 'a', src); f(s, s.src.save.state, a); s.src.refresh(); s.onSourceChange('view'); }, [fn, arg]);
@@ -43,8 +52,7 @@ async function run(tag, phone) {
   // ---------------------------------------------------------------- founding ritual (build into a new banner)
   await ev(id => { const s = window.tc.screen; s.select({ kind: 'region', id }); s.focus(s.st.regions[id].site); }, cap);
   await page.waitForTimeout(600);
-  await tap('[data-a=into][data-id=new]');
-  await page.waitForTimeout(200);
+  await intoNew();
   await shot('02-build-into');
   await tap('[data-a=build][data-cls=frigate]');
   await page.waitForSelector('[data-found]');
@@ -68,7 +76,7 @@ async function run(tag, phone) {
   // quick found (defaults)
   await ev(id => { const s = window.tc.screen; s.select({ kind: 'region', id }); }, cap);
   await page.waitForTimeout(300);
-  await tap('[data-a=into][data-id=new]');
+  await intoNew();
   await tap('[data-a=build][data-cls=corvette]');
   await page.waitForSelector('[data-found]');
   await tap('[data-f=quick]');
@@ -95,7 +103,8 @@ async function run(tag, phone) {
   check(p.free.some(f => f.type === 'dispatch' && /Throne/.test(f.text)), `${tag}: dispatch filed as a free action`);
   await shot('06-herald-filed');
   await tap('.hb[data-h=close]');
-  await page.waitForTimeout(350);
+  // its leave animation runs on frames: poll (a loaded machine draws a frame or two a second)
+  await page.waitForFunction(() => !document.querySelector('.herald-ov'), null, { timeout: 8000 }).catch(() => {});
   check(!(await ev(() => !!document.querySelector('.herald-ov'))), `${tag}: Herald dismisses to the board`);
 
   // ---------------------------------------------------------------- honour choice on a fleet
@@ -114,6 +123,7 @@ async function run(tag, phone) {
   await edit(`const f = st.fleets.find(x => x.id === a); while (f.ships.length < 3) f.ships.push({ ...structuredClone(f.ships[0]), id: 9000 + f.ships.length, name: 'Split Test ' + f.ships.length, cls: 'frigate' }); st.rules.soul = { ...st.rules.soul, bannersBase: 12 };`, fid);
   await ev(id => { const s = window.tc.screen; s.select({ kind: 'fleet', id }); }, fid);
   await page.waitForTimeout(300);
+  await verb('.card [data-a=ftab][data-t=orders]');
   await tap('[data-a=split]');
   await page.waitForSelector('[data-found]', { timeout: 5000 });
   await page.waitForTimeout(350);
@@ -126,6 +136,7 @@ async function run(tag, phone) {
   // ---------------------------------------------------------------- vow
   await ev(id => { const s = window.tc.screen; s.select({ kind: 'fleet', id }); }, fid);
   await page.waitForTimeout(250);
+  await verb('.card [data-a=ftab][data-t=story]');
   await tap('[data-a=vowpick]');
   await page.waitForTimeout(250);
   await shot('08-vow-picker');
@@ -136,12 +147,14 @@ async function run(tag, phone) {
   // the fleet record (full saga)
   await ev(id => { const s = window.tc.screen; s.select({ kind: 'fleet', id }); }, fid);
   await page.waitForTimeout(200);
+  await verb('.card [data-a=ftab][data-t=story]');
   if (await page.$('[data-a=record]')) { await tap('[data-a=record]'); await page.waitForTimeout(400); await shot('09-record'); await page.keyboard.press('Escape'); await page.waitForTimeout(250); }
 
   // ---------------------------------------------------------------- retire (Storied fleet at an own world)
   await edit(`const f = st.fleets.find(x => x.id === a); f.commander.rank = 4; f.region = st.players[f.owner].capital; f.route = null;`, fid);
   await ev(id => { const s = window.tc.screen; s.select({ kind: 'fleet', id }); s.focus(s.st.regions[s.fleet(id).region].site); }, fid);
   await page.waitForTimeout(500);
+  await verb('.card [data-a=ftab][data-t=orders]');
   check(!!(await page.$('[data-a=retire]')), `${tag}: Retire offered to a Storied fleet`);
   if (await ev(() => window.tc.screen.plan.orders.some(o => !o))) {
     await tap('[data-a=retire]');

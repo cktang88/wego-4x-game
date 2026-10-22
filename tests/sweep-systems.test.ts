@@ -125,7 +125,7 @@ describe('sweep: contested systems', () => {
 
 describe('sweep: citizens cap', () => {
   it('at the hard cap the Develop block does not suggest a Station (it would not raise it)', () => {
-    const { s, r } = scene();
+    const { s, r } = scene(31, { world: { enabled: false } });   // Stations: old rules
     r.bodies = [{ kind: 'habitable', q: 'rich', name: 'Vel II' }, { kind: 'moon', name: 'Nyx' }];
     r.star = 'yellow';
     expect(citizenCap(s, r)).toBe(s.rules.systems.maxCitizens);

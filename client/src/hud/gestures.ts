@@ -8,7 +8,7 @@ import { MAX_JOINERS, orderCost, costText } from '../../../shared/sim/orders.ts'
 import { blueprintFor } from '../../../shared/sim/empire.ts';
 import { esc, uiScale } from '../ui/dom.ts';
 import { intentFor, targetMap, commitIntent, isLane, VERB_COLOR, type DragSrc, type Intent } from './verbs.ts';
-import { cardAction, splitIds } from './card.ts';
+import { cardAction, splitIds, openWorldTab } from './card.ts';
 import { offerCharge } from './signature.ts';
 import { shortWhy, safeInsets } from './util.ts';
 import { glyphHtml, ic } from '../art/icons.ts';
@@ -531,8 +531,8 @@ export class Gestures {
     if (!R) return;
     this.closeRing();
     if (a.startsWith('tray:')) {
-      g.select({ kind: 'region', id: R.target.id });
-      requestAnimationFrame(() => g.hud.h.card.querySelector(`[data-tray="${a.slice(5)}"]`)?.scrollIntoView({ block: 'nearest' }));
+      // the world card opens on the verb: Build → Raise, Develop → Improve
+      openWorldTab(g, R.target.id, a === 'tray:build' ? 'raise' : 'improve');
       return;
     }
     g.sel = R.target;

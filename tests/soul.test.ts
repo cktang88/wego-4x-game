@@ -482,8 +482,8 @@ describe('soul: worlds with a story', () => {
     expect(orderCost(t, { type: 'build', region: cap, cls: 'frigate', fleet: null }, 0).industry!).toBeLessThan(plain);
   });
 
-  it('epithets follow the strongest mark; deeds max 2 and one can be engraved', () => {
-    const s = game();
+  it('epithets follow the strongest mark; deeds max 2 and one can be engraved (old rules: the simplified world cuts Engrave)', () => {
+    const s = game(11, { world: { enabled: false } });
     const r = s.regions[s.players[0].capital];
     r.story!.blood = 4;
     expect(worldEpithet(s, r)).toBe('the Bloodied');

@@ -234,8 +234,8 @@ export const DEFAULT_RULES = {
   },
 };
 
-export type Rules = typeof DEFAULT_RULES & typeof EXTRA_DEFAULTS & typeof PLAYTEST_DEFAULTS & typeof SOUL_DEFAULTS & typeof SIGNATURE_DEFAULTS & typeof SYSTEMS_DEFAULTS;
-export function defaultRules(): Rules { return structuredClone({ ...DEFAULT_RULES, ...EXTRA_DEFAULTS, ...PLAYTEST_DEFAULTS, ...SOUL_DEFAULTS, ...SIGNATURE_DEFAULTS, ...SYSTEMS_DEFAULTS }); }
+export type Rules = typeof DEFAULT_RULES & typeof EXTRA_DEFAULTS & typeof PLAYTEST_DEFAULTS & typeof SOUL_DEFAULTS & typeof SIGNATURE_DEFAULTS & typeof SYSTEMS_DEFAULTS & typeof WORLD_DEFAULTS;
+export function defaultRules(): Rules { return structuredClone({ ...DEFAULT_RULES, ...EXTRA_DEFAULTS, ...PLAYTEST_DEFAULTS, ...SOUL_DEFAULTS, ...SIGNATURE_DEFAULTS, ...SYSTEMS_DEFAULTS, ...WORLD_DEFAULTS }); }
 
 export function isObj(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -253,10 +253,10 @@ export function mergeRules<T>(base: T, over: unknown): T {
 }
 
 /** Layers whose absence from a game's rules means "off": the sim plays a game saved before they existed without them. */
-export const OPT_IN_LAYERS = ['soul', 'signature'] as const;
+export const OPT_IN_LAYERS = ['soul', 'signature', 'world'] as const;
 /**
  * Rules of a saved game, upgraded for this build: every knob a newer version added is filled from the defaults,
- * except that a whole layer the save predates (no `soul` / `signature` group) stays off instead of switching on
+ * except that a whole layer the save predates (no `soul` / `signature` / `world` group) stays off instead of switching on
  * mid-game (old fleets have no banners, old houses no Fate...). Use this, not mergeRules(defaultRules(), saved),
  * when loading a save.
  */
@@ -619,5 +619,26 @@ export const SYSTEMS_DEFAULTS = {
     callingGates: true,          // Granary/Refinery/Oracle/Arsenal/Cenotaph need the right bodies or history
     cenotaphBattles: 2,          // Cenotaph: battles fought here
     ledgerKeep: 12,              // ledger entries kept per system
+  },
+};
+
+// ---------------------------------------------------------------- the simplified world (docs/SIMPLIFY.md §5, stage B)
+// Fewer per-system decisions: Open the Gates is cut (B1), civil / military slots become per-track caps and no new
+// Stations are built (B3), and Engrave is cut (B4). B2 (cutting Develop) is NOT here: Develop stays, as a Works member.
+// An opt-in layer (OPT_IN_LAYERS): a save without a `world` group keeps today's rules exactly. Every removed option
+// is rejected by the validators the AI already calls (wpostureBlock, projectBlock / systemsBlock, validateOrder), so
+// the AI adapts without new code. The Academy's price is unchanged: SIMPLIFY.md only asks for a review, no flag.
+export const WORLD_DEFAULTS = {
+  world: {
+    enabled: true,
+    gatesPosture: false,         // B1: Open the Gates is gone (false = cut)
+    slots: false,                // B3: no civil / military slots; per-track caps instead (true = today's slots)
+    worksCap: 3,                 // B3: Works members (Mine, Trade Hub, Extractor, Academy): at most this many kinds,
+                                 //     and at most one per productive body (belt, barren, habitable, gas, or a vein)
+    wallsCap: 3,                 // B3: Walls members (Fortress, Battery, Planetary Shield)...
+    chokeWalls: 1,               //     ...+this at a chokepoint
+    outpostCap: 3,               // B3: Outpost members (Depot, Sensor Array, Warp Gate)
+    station: false,              // B3: no new Stations (built ones keep their +1 citizens cap)
+    engrave: false,              // B4: no Engrave order
   },
 };

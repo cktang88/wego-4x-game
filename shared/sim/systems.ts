@@ -6,7 +6,7 @@
 //
 // Everything here is off (old behaviour) when the rules have no `systems` group, when it is disabled, or
 // when the map was generated before systems existed (no star on the Throne): see sysOn.
-import { SYSTEMS_DEFAULTS } from '../config/rules.ts';
+import { SYSTEMS_DEFAULTS, WORLD_DEFAULTS } from '../config/rules.ts';
 import { BELT_NAMES, BODY_TAGS, BODY_TAG_ORDER, GIANT_NAMES, HAB_ADJ, MOON_NAMES, ORBITAL, RUIN_NAMES, type BodyKind, type BodyQuality, type StarKind, type SystemRole } from '../config/systems.ts';
 import { Rng, hashString } from './rng.ts';
 import type { Body, Feature, GameEvent, GameState, LedgerEntry, PlayerId, Region, RegionId, RegionKind } from './types.ts';
@@ -115,6 +115,49 @@ function chokepoints(s: GameState): Set<RegionId> {
   return out;
 }
 
+// ------------------------------------------------------------------ the simplified world (docs/SIMPLIFY.md §5): tracks
+export type WorldRules = typeof WORLD_DEFAULTS.world;
+const wcache = new WeakMap<object, WorldRules>();
+/** Is the simplified-world layer on? Needs a `world` rules group (a save without one keeps today's rules). */
+export const worldOn = (s: GameState): boolean => !!s.rules.world && s.rules.world.enabled !== false;
+/** The world knobs with defaults for anything missing (only meaningful while worldOn). */
+export function WD(s: GameState): WorldRules {
+  const r = s.rules.world as WorldRules | undefined;
+  if (!r) return WORLD_DEFAULTS.world;
+  let c = wcache.get(r);
+  if (!c) { c = { ...WORLD_DEFAULTS.world, ...r }; wcache.set(r, c); }
+  return c;
+}
+/** B3: slots replaced by per-track caps. */
+export const slotsCut = (s: GameState): boolean => worldOn(s) && WD(s).slots === false;
+/** B3: no new Stations. */
+export const stationCut = (s: GameState): boolean => worldOn(s) && WD(s).station === false;
+
+/** The four Improve tracks and their members (today's projects), in the order the picker takes them. Develop and
+ *  Station are Works / extra members the UI lists too, but they never count against a track's cap. */
+export type Track = 'works' | 'yard' | 'walls' | 'outpost';
+export const TRACKS: readonly Track[] = ['works', 'yard', 'walls', 'outpost'];
+export const TRACK_MEMBERS: Record<Track, readonly string[]> = {
+  works: ['extractor', 'mine', 'tradehub', 'academy'],
+  yard: ['shipyard'],
+  walls: ['fortress', 'battery', 'pshield'],
+  outpost: ['depot', 'sensor', 'gate'],
+};
+export const trackOf = (key: string): Track | null => TRACKS.find(t => TRACK_MEMBERS[t].includes(key)) ?? null;
+/** Bodies that can carry a Works building: belts, barren worlds, habitable worlds, gas giants, and any body with a vein. */
+export const productiveBodies = (r: Region): number =>
+  (r.bodies ?? []).filter(b => b.kind === 'belt' || b.kind === 'barren' || b.kind === 'habitable' || b.kind === 'gas' || !!b.vein).length;
+/** How many kinds of a track's members are built here (a level-up never counts twice). */
+export const trackUsed = (r: Region, t: Track): number => TRACK_MEMBERS[t].filter(k => (r.buildings[k] ?? 0) > 0).length;
+/** B3 caps: the most kinds of members each track may hold here (Yard: its levels, as ever). */
+export function trackCap(s: GameState, r: Region, t: Track): number {
+  const W = WD(s);
+  if (t === 'works') return Math.min(W.worksCap, productiveBodies(r) + ((r.buildings.station ?? 0) > 0 ? 1 : 0));
+  if (t === 'walls') return W.wallsCap + (sysAt(s, r) && isChokepoint(s, r.id) ? W.chokeWalls : 0);
+  if (t === 'outpost') return W.outpostCap;
+  return 3;
+}
+
 export interface Slots { civil: number; civilUsed: number; mil: number; milUsed: number }
 /** Civil slots come from bodies (+1 for a Station); military/logistics slots are `milSlots` (+1 at chokepoints). */
 export function slotsOf(s: GameState, r: Region): Slots | null {
@@ -149,17 +192,26 @@ export function systemCostMult(s: GameState, r: Region | undefined, key: string)
 export function systemsBlock(s: GameState, key: string, r: Region): string | null {
   if (!sysAt(s, r)) return key === 'station' ? 'not in these rules' : null;
   const Y = SY(s);
+  const noSt = stationCut(s);
   if (key === 'develop') {
     const cap = citizenCap(s, r)!;
-    return r.dev >= cap ? `citizens at the cap (${r.dev}/${cap})${(r.buildings.station ?? 0) || cap >= Y.maxCitizens ? '' : ': a Station raises it'}` : null;
+    return r.dev >= cap ? `citizens at the cap (${r.dev}/${cap})${noSt || (r.buildings.station ?? 0) || cap >= Y.maxCitizens ? '' : ': a Station raises it'}` : null;
   }
-  if (key === 'station') return (r.buildings.station ?? 0) > 0 ? 'already has a Station' : null;
+  if (key === 'station') return noSt ? 'no new Stations in these rules' : (r.buildings.station ?? 0) > 0 ? 'already has a Station' : null;
   if (key === 'mine' && !r.bodies.some(b => b.kind === 'belt' || b.kind === 'barren') && !r.vein)
     return r.bodies.some(b => b.kind === 'gas') ? 'gas giants have no surface to mine' : 'no belt, barren world or vein to mine';
   if (key === 'tradehub' && !r.bodies.some(b => b.kind === 'habitable' || b.kind === 'gas')) return 'a Trade Hub needs a habitable world or a gas giant';
-  if (key === 'shipyard' && r.dev < Y.shipyardCitizens && !(r.buildings.station ?? 0)) return `a Shipyard needs ${Y.shipyardCitizens} citizens or a Station (${r.dev} now)`;
+  if (key === 'shipyard' && r.dev < Y.shipyardCitizens && !(r.buildings.station ?? 0)) return `a Shipyard needs ${Y.shipyardCitizens} citizens${noSt ? '' : ' or a Station'} (${r.dev} now)`;
   if (key === 'academy' && r.dev < Y.academyCitizens) return `an Academy needs ${Y.academyCitizens} citizens (${r.dev} now)`;
   if ((r.buildings[key] ?? 0) > 0) return null;   // a level-up uses the slot it already has
+  if (slotsCut(s)) {
+    // B3: the track's cap instead of a slot (the Yard track is capped by the Shipyard's own max)
+    const t = trackOf(key);
+    if (!t || t === 'yard') return null;
+    const used = trackUsed(r, t), cap = trackCap(s, r, t);
+    if (used < cap) return null;
+    return t === 'works' ? `no Works site left (${used}/${cap}): one per productive body` : `${t === 'walls' ? 'Walls' : 'Outpost'} track full (${used}/${cap})`;
+  }
   const sl = slotsOf(s, r)!;
   if (isCivil(key) && sl.civilUsed >= sl.civil) return `no free civil slot (${sl.civilUsed}/${sl.civil})${(r.buildings.station ?? 0) ? '' : ': a Station adds one'}`;
   if (isMilitary(key) && sl.milUsed >= sl.mil) return `no free military slot (${sl.milUsed}/${sl.mil})`;
@@ -333,7 +385,7 @@ export function systemInfo(s: GameState, rid: RegionId, p?: PlayerId) {
  * The planner then offers the Station instead of a project it can't start.
  */
 export function stationUnblocks(s: GameState, key: string, r: Region): boolean {
-  if (!sysAt(s, r) || (r.buildings.station ?? 0) > 0 || r.kind === 'lane' || key === 'station') return false;
+  if (!sysAt(s, r) || stationCut(s) || (r.buildings.station ?? 0) > 0 || r.kind === 'lane' || key === 'station') return false;
   if (!systemsBlock(s, key, r)) return false;
   r.buildings.station = 1;
   try { return !systemsBlock(s, key, r); } finally { delete r.buildings.station; }

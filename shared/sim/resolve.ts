@@ -30,6 +30,7 @@ import { fightRounds, hostile, wouldFight, engagementAt, newReport, disengage, t
 import { EDICTS } from './edicts.ts';
 import { fleetSpeed, strengthBand, findPath } from './graph.ts';
 import { canAfford, orderCost, pay, validateOrder, ORDER_INFO, MAX_JOINERS } from './orders.ts';
+import { isTrack, trackOrder, TRACK_MEMBERS } from './tracks.ts';
 import { Rng } from './rng.ts';
 import { maxGarrison, newFleet, newShip } from './setup.ts';
 import type { TickOpts, BattleReport, Engagement, Doctrine, Fleet, FoundSpec, FreeAction, GameEvent, GameState, Order, PlayerId, Region, RegionId, Signal, Submission, TurnResult, VowKind, Posture, WorldPosture, FateUse } from './types.ts';
@@ -1138,7 +1139,16 @@ export function cleanOrder(s: GameState, o: unknown): Order | null {
     case 'engrave': return rid(o.region) && typeof o.deed === 'string' && Object.hasOwn(DEEDS, o.deed) ? { type: 'engrave', region: o.region, deed: o.deed } : null;
     case 'raze': return rid(o.region) ? { type: 'raze', region: o.region } : null;
     case 'develop':
-      if (!rid(o.region) || typeof o.project !== 'string' || !Object.hasOwn(s.rules.projects, o.project)) return null;
+      if (!rid(o.region) || typeof o.project !== 'string') return null;
+      // stage C (docs/SIMPLIFY.md §5): a track name resolves here, once, to the building its next level buys for the
+      // region's owner (only the owner can develop there), so everything downstream sees a concrete project. A track
+      // with nothing legal keeps its first member, which then fails validation with the reason, as any bad order does.
+      if (isTrack(o.project)) {
+        const r = s.regions[o.region], p = r.owner;
+        const c = p !== null && p >= 0 ? trackOrder(s, p, r.id, o.project) : null;
+        return { type: 'develop', region: o.region, project: c?.order?.type === 'develop' ? c.order.project : c?.key ?? TRACK_MEMBERS[o.project][0] };
+      }
+      if (!Object.hasOwn(s.rules.projects, o.project)) return null;
       return { type: 'develop', region: o.region, project: o.project };
     case 'fortify': case 'excavate':
       return isId(o.fleet) ? { type: o.type, fleet: o.fleet } : null;

@@ -1,5 +1,6 @@
-// Signature mechanics through the UI (docs/SIGNATURE.md): fleet posture selector (disabled reasons, bets), the Charge
-// offer after a dragged Seize, world stances, Fate (arm + confirm, HUD coins, one per turn), map marks (posture,
+// Signature mechanics through the UI (docs/SIGNATURE.md) on the v3 cards (docs/WORLD-CARD.md §4.5, §7): the Gambit
+// control (absent on turn 1, plan-aware chip text, opened with [data-a=gambit]: posture bet cards with disabled reasons
+// and bet lines), the Charge offer after a dragged Seize, world bets (Levies) in the world's Gambit, Fate (arm + confirm, HUD coins, one per turn), map marks (posture,
 // dug in, exposed, ambush), CALLED IT / CAUGHT OUT stamps and Fate banners in the replay, the battle viewer's
 // first-strike / Twist visuals, and the same actions in LIVE (queueFree). Desktop 1440x900 + iPhone 15 Pro.
 // node scripts/signature-e2e.mjs [outdir] [base] [desk|phone]
@@ -19,12 +20,26 @@ async function run(tag, phone) {
     ? { viewport: { width: 393, height: 852 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' }
     : { viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
+  await page.routeWebSocket(/\?token=/, () => {});   // ignore Vite hot reloads (other files changing mid-run)
   page.on('pageerror', e => errors.push(`${tag}: ${e.message} ${e.stack?.split('\n')[1] ?? ''}`));
   page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(`${tag}: ${m.text()}`); });
   const shot = n => page.screenshot({ path: `${out}/${tag}-${n}.png` });
-  const tap = async sel => { await page.waitForSelector(sel, { timeout: 5000 }); if (phone) await page.tap(sel, { timeout: 5000 }); else await page.click(sel, { timeout: 5000 }); };
+  const tap = async sel => { await page.waitForSelector(sel, { timeout: 15000 }); if (phone) await page.tap(sel, { timeout: 15000 }); else await page.click(sel, { timeout: 15000 }); };
   const ev = (fn, arg) => page.evaluate(fn, arg);
   const plan = () => ev(() => window.tc.screen.plan);
+  /** Open (or close) the selected card's Gambit; returns the chip text read before the change. */
+  const gambit = async (want = true) => {
+    await page.waitForSelector('.card [data-a=gambit]', { timeout: 15000 });
+    const st = await ev(() => { const b = document.querySelector('.card [data-a=gambit]'); return { open: b.getAttribute('aria-expanded') === 'true', text: b.textContent }; });
+    // a slow machine renders late: toggle until the chip says it is in the wanted state
+    for (let i = 0; i < 4; i++) {
+      const open = await ev(() => document.querySelector('.card [data-a=gambit]')?.getAttribute('aria-expanded') === 'true');
+      if (open === want) break;
+      await ev(() => document.querySelector('.card [data-a=gambit]')?.click());
+      await page.waitForTimeout(400);
+    }
+    return st.text;
+  };
   const edit = (fn, arg) => page.evaluate(([src, a]) => { const s = window.tc.screen; const f = new Function('s', 'st', 'a', src); f(s, s.src.save.state, a); s.src.refresh(); s.onSourceChange('view'); }, [fn, arg]);
   const start = async mode => {
     await page.goto(base);
@@ -42,7 +57,7 @@ async function run(tag, phone) {
   const f0 = await ev(() => { const s = window.tc.screen; return s.st.fleets.find(f => f.owner === s.you && f.ships.length).id; });
   await ev(id => window.tc.screen.select({ kind: 'fleet', id }), f0);
   await page.waitForTimeout(300);
-  check(!(await page.$('[data-posture-row]')), `${tag}: no posture selector on turn 1`);
+  check(!(await page.$('.card .gambit')), `${tag}: no Gambit on a fleet card on turn 1`);
   check(await ev(() => !!document.querySelector('[data-k=fate] .coins')), `${tag}: Fate coins in the HUD`);
   // a few turns played by the AI for us
   const me = await ev(() => window.tc.screen.you);
@@ -61,9 +76,12 @@ async function run(tag, phone) {
   check(info.turn >= 3, `${tag}: reached turn ${info.turn}`);
   await ev(id => { const s = window.tc.screen; s.select({ kind: 'fleet', id }); s.focus(s.st.regions[s.fleet(id).region].site); }, info.f);
   await page.waitForTimeout(600);
-  check(!!(await page.$('[data-posture-row]')), `${tag}: posture selector from turn 3`);
+  check(!!(await page.$('.card .gambit')), `${tag}: the Gambit shows from turn 3`);
+  const chip0 = await gambit(true);
+  check(/Gambit/i.test(chip0) && /\?|steady/.test(chip0), `${tag}: the Gambit chip reads the plan ("${chip0.trim()}")`);
+  check(await ev(() => document.querySelectorAll('.card .gopen .bet').length >= 4), `${tag}: the open Gambit shows the bet cards`);
   check(await ev(() => document.querySelector('[data-a=posture][data-p=charge]')?.getAttribute('aria-disabled') === 'true'), `${tag}: Charge disabled without a Seize`);
-  await shot('01-posture-row');
+  await shot('01-gambit-open');
   await tap('[data-a=posture][data-p=guarded]');
   await page.waitForTimeout(250);
   let p = await plan();
@@ -75,20 +93,38 @@ async function run(tag, phone) {
   if (info.seize !== null) {
     if (!phone) {
       await ev(() => window.tc.screen.deselect());
-      const [fx, fy] = await ev(id => { const s = window.tc.screen; const p = s.map.toScreen(s.lastFleetPos.get(id)); return [p.x, p.y]; }, info.f);
-      const [tx, ty] = await ev(id => { const s = window.tc.screen; const p = s.map.toScreen(s.st.regions[id].site); return [p.x, p.y]; }, info.seize);
+      let [fx, fy] = await ev(id => { const s = window.tc.screen; const p = s.map.toScreen(s.lastFleetPos.get(id)); return [p.x, p.y]; }, info.f);
+      let [tx, ty] = await ev(id => { const s = window.tc.screen; const p = s.map.toScreen(s.st.regions[id].site); return [p.x, p.y]; }, info.seize);
       await page.mouse.move(fx, fy); await page.mouse.down(); await page.mouse.move(fx + 15, fy + 10, { steps: 3 }); await page.mouse.move(tx, ty, { steps: 10 });
       await page.waitForTimeout(250);
       await shot('03-drag-seize');
       await page.mouse.up();
-      await page.waitForTimeout(350);
+      await page.waitForTimeout(600);
+      // a drag is timing-bound: on a loaded machine (a frame or two a second) retry it until the seize lands
+      for (let i = 0; i < 3 && !(await ev(id => window.tc.screen.plan.orders.some(o => o?.type === 'seize' && o.fleet === id), info.f)); i++) {
+        await ev(() => window.tc.screen.deselect());
+        [fx, fy] = await ev(id => { const s = window.tc.screen; const p = s.map.toScreen(s.lastFleetPos.get(id)); return [p.x, p.y]; }, info.f);
+        [tx, ty] = await ev(id => { const s = window.tc.screen; const p = s.map.toScreen(s.st.regions[id].site); return [p.x, p.y]; }, info.seize);
+        await page.mouse.move(fx, fy); await page.mouse.down(); await page.mouse.move(fx + 15, fy + 10, { steps: 3 }); await page.mouse.move(tx, ty, { steps: 10 }); await page.mouse.up();
+        await page.waitForTimeout(600);
+      }
       p = await plan();
       check(p.orders.some(o => o?.type === 'seize' && o.fleet === info.f), `${tag}: seize dropped`);
       // Guarded can't seize: the drop is still allowed; the posture row now says why
       await ev(() => { const s = window.tc.screen; s.plan.free = s.plan.free.filter(x => x.type !== 'posture'); s.savePlan(); s.renderAll(); });
-      // re-drop to get the offer with a Steady fleet
-      await ev(() => { const s = window.tc.screen; s.plan.orders = s.plan.orders.map(o => (o?.type === 'seize' ? null : o)); s.savePlan(); s.renderAll(); });
-      await page.mouse.move(fx, fy); await page.mouse.down(); await page.mouse.move(fx + 15, fy + 10, { steps: 3 }); await page.mouse.move(tx, ty, { steps: 10 }); await page.mouse.up();
+      // re-drop to get the offer with a Steady fleet (from where the token stands now: selection re-lays the tokens)
+      await ev(() => { const s = window.tc.screen; s.plan.orders = s.plan.orders.map(o => (o?.type === 'seize' ? null : o)); s.savePlan(); s.deselect(); });
+      await page.waitForTimeout(200);
+      [fx, fy] = await ev(id => { const s = window.tc.screen; const p = s.map.toScreen(s.lastFleetPos.get(id)); return [p.x, p.y]; }, info.f);
+      // a drag is timing-bound: on a loaded machine retry it until the seize lands
+      for (let i = 0; i < 3; i++) {
+        [fx, fy] = await ev(id => { const s = window.tc.screen; const p = s.map.toScreen(s.lastFleetPos.get(id)); return [p.x, p.y]; }, info.f);
+        [tx, ty] = await ev(id => { const s = window.tc.screen; const p = s.map.toScreen(s.st.regions[id].site); return [p.x, p.y]; }, info.seize);
+        await page.mouse.move(fx, fy); await page.mouse.down(); await page.mouse.move(fx + 15, fy + 10, { steps: 3 }); await page.mouse.move(tx, ty, { steps: 10 }); await page.mouse.up();
+        await page.waitForTimeout(600);
+        if (await ev(id => window.tc.screen.plan.orders.some(o => o?.type === 'seize' && o.fleet === id), info.f)) break;
+        await ev(() => window.tc.screen.deselect());
+      }
       await page.waitForSelector('.chargeoffer', { timeout: 3000 }).catch(() => {});
       await page.waitForTimeout(250);
       await shot('04-charge-offer');
@@ -98,6 +134,11 @@ async function run(tag, phone) {
       await ev(([id, t]) => { const s = window.tc.screen; s.commit(s.intent({ fleet: id }, t, null, 'seize')); }, [info.f, info.seize]);
       await ev(id => window.tc.screen.select({ kind: 'fleet', id }), info.f);
       await page.waitForTimeout(250);
+      await ev(() => { const s = window.tc.screen; s.plan.free = s.plan.free.filter(x => x.type !== 'posture'); s.savePlan(); s.renderAll(); });
+      await gambit(false);
+      const chip2 = await ev(() => document.querySelector('.card .gchip')?.textContent ?? '');
+      check(/Seizing .+: Charge\?/.test(chip2), `${tag}: the chip offers the bet the plan implies ("${chip2.trim()}")`);
+      await gambit(true);
       await tap('[data-a=posture][data-p=charge]');
     }
     await page.waitForTimeout(250);
@@ -108,11 +149,13 @@ async function run(tag, phone) {
   // ---------------------------------------------------------------- Fate: arm, confirm, one per turn
   await ev(id => { const s = window.tc.screen; s.select({ kind: 'fleet', id }); }, info.f);
   await page.waitForTimeout(250);
+  await gambit(true);
   await tap('[data-a=fate][data-use=laststand]');
   await page.waitForTimeout(150);
-  check(await ev(() => !!document.querySelector('.fz.armed')), `${tag}: Fate asks to confirm`);
+  check(await ev(() => !!document.querySelector('.card .bet.fate.armed')), `${tag}: Fate asks to confirm`);
   await shot('05-fate-armed');
-  await tap('[data-a=fate][data-use=laststand]');
+  // the confirm must land inside the 4s arm window: a slow tap (seconds on a loaded machine) re-arms instead
+  await ev(() => document.querySelector('.card [data-a=fate][data-use=laststand]')?.click());
   await page.waitForTimeout(300);
   p = await plan();
   check(p.free.some(x => x.type === 'fate' && x.use === 'laststand' && x.fleet === info.f), `${tag}: Last Stand spent (free action)`);
@@ -121,6 +164,7 @@ async function run(tag, phone) {
   if (info.f2 !== null) {
     await ev(id => { const s = window.tc.screen; s.select({ kind: 'fleet', id }); }, info.f2);
     await page.waitForTimeout(250);
+    await gambit(true);
     check(await ev(() => document.querySelector('[data-a=fate][data-use=twist]')?.getAttribute('aria-disabled') === 'true'), `${tag}: a second Fate this turn is refused`);
     // Ambush on a fleet that stays put
     if (!(await ev(() => document.querySelector('[data-a=posture][data-p=ambush]')?.getAttribute('aria-disabled')))) { await tap('[data-a=posture][data-p=ambush]'); await page.waitForTimeout(200); }
@@ -130,6 +174,9 @@ async function run(tag, phone) {
   const cap = await ev(() => { const s = window.tc.screen; return s.st.players[s.you].capital; });
   await ev(id => { const s = window.tc.screen; s.select({ kind: 'region', id }); s.focus(s.st.regions[id].site); }, cap);
   await page.waitForTimeout(500);
+  const wchip = await gambit(true);
+  check(/Gambit/i.test(wchip), `${tag}: the capital shows its Gambit ("${wchip.trim()}")`);
+  check(!(await page.$('[data-a=wposture][data-p=gates]')), `${tag}: Open the Gates is not offered (cut in these rules)`);
   await tap('[data-a=wposture][data-p=levies]');
   await page.waitForTimeout(250);
   p = await plan();
@@ -208,13 +255,15 @@ async function run(tag, phone) {
   const lf = await ev(() => { const s = window.tc.screen; return s.st.fleets.find(f => f.owner === s.you && f.ships.length && !f.route).id; });
   await ev(id => { const s = window.tc.screen; s.select({ kind: 'fleet', id }); }, lf);
   await page.waitForTimeout(400);
+  await gambit(true);
   await tap('[data-a=posture][data-p=guarded]');
   await page.waitForTimeout(300);
   check(await ev(id => { const s = window.tc.screen; return (s.st.live.free[s.you] ?? []).some(x => x.type === 'posture' && x.fleet === id && x.posture === 'guarded') || s.fleet(id)?.posture === 'guarded'; }, lf), `${tag}: LIVE posture queued`);
   await ev(id => { const s = window.tc.screen; s.select({ kind: 'fleet', id }); }, lf);
   await page.waitForTimeout(200);
+  await gambit(true);
   await tap('[data-a=fate][data-use=twist]');
-  await tap('[data-a=fate][data-use=twist]');
+  await ev(() => document.querySelector('.card [data-a=fate][data-use=twist]')?.click());
   await page.waitForTimeout(300);
   check(await ev(id => { const s = window.tc.screen; return (s.st.live.free[s.you] ?? []).some(x => x.type === 'fate' && x.use === 'twist') || s.fleet(id)?.fate?.use === 'twist'; }, lf), `${tag}: LIVE Fate queued`);
   await shot('12-live');

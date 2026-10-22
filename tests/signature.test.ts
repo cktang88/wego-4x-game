@@ -414,8 +414,8 @@ describe('world postures', () => {
     expect(pev(t).find(e => e.posture === 'scorch')!.outcome).toBe('caught');
     expect(t.regions[cap].dev).toBe(dev - 1);
   });
-  it('Open the Gates: a pact ally repairs as at its own yard; a non-ally arriving finds the garrison holding fire', () => {
-    const { s, x, y } = stage();
+  it('Open the Gates (old rules: the simplified world cuts it): a pact ally repairs as at its own yard; a non-ally arriving finds the garrison holding fire', () => {
+    const { s, x, y } = stage(31, { world: { enabled: false } });
     x.owner = 1; x.garrison = 20;
     s.pacts.push({ a: 1, b: 2, until: 99 });
     const ally = fleetAt(s, 2, x.id, ['frigate']);
@@ -430,7 +430,7 @@ describe('world postures', () => {
     expect(firstRound(t2, x.id).some(z => z.from === -x.id - 1)).toBe(false);
   });
   it('world postures: own systems only, one per system per turn', () => {
-    const s = game();
+    const s = game(31, { world: { enabled: false } });
     const cap = s.players[0].capital;
     expect(wpostureBlock(s, 1, cap, 'levies')).toMatch(/not your/);
     expect(wpostureBlock(s, 0, cap, 'nope')).toMatch(/unknown/);

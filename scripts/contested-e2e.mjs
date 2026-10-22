@@ -1,6 +1,7 @@
-// Star systems steps 3-4 through the UI (docs/SYSTEMS.md): the world card's status line (Held / Contested / Occupied /
-// Tribute), each body's output and who gets it, contested turns and the refugee warning, the Tribute offer and accept
-// controls (accept, then seal the turn: the siege lifts), body tags on body rows, the calling picker's gate reasons,
+// Star systems steps 3-4 through the UI (docs/SYSTEMS.md) on the world card v3 (docs/WORLD-CARD.md): the state ribbon
+// (Contested / Occupied / Tribute), the red yield note, each body's output and who gets it (Story), the refugee warning
+// in the Gambit chip, the terms prompt (accept, then seal the turn: the siege lifts), body tags in Story, the Calling
+// prompt's gated picks,
 // the Chronicle's body-tagged entries, the Herald's tribute/refugee headlines, and the map's blockade ring and tags.
 // Desktop 1440x900 + iPhone 15 Pro (393x852).
 // node scripts/contested-e2e.mjs [outdir] [base] [desk|phone]
@@ -30,7 +31,7 @@ async function run(tag, phone) {
   const cardText = () => ev(() => document.querySelector('.card')?.innerText ?? '');
   const fits = () => ev(() => {
     const c = document.querySelector('.card');
-    const parts = [...document.querySelectorAll('.card .sys, .card .tribute, .card .sysstat')];
+    const parts = [...document.querySelectorAll('.card .wc-art, .card .prompt, .card .wc-yield, .card .gambit')];
     return { page: document.documentElement.scrollWidth <= window.innerWidth + 1, card: !c || c.scrollWidth <= c.clientWidth + 1, parts: parts.every(p => p.getBoundingClientRect().right <= window.innerWidth + 1) };
   });
   const scrollTo = async sel => { await ev(s => { document.querySelector(s)?.scrollIntoView({ block: 'center' }); }, sel); await page.waitForTimeout(200); };
@@ -75,18 +76,24 @@ async function run(tag, phone) {
     st.players[R].tributeOffers = [A];`, [info.a, info.rival]);
   await select(info.a);
   let t = await cardText();
-  check(/Contested/.test(t), `${tag}: status line says Contested`);
-  check(/holds space/.test(t), `${tag}: status line names who holds space`);
-  check(/refugees in 1t/.test(t), `${tag}: refugee warning (refugees in 1t)`);
-  check(/the Burned World/.test(t), `${tag}: Vel II's body chip shows its tag`);
-  const rcv = await ev(() => [...document.querySelectorAll('.card .syssplit .bout')].map(b => b.textContent));
-  check(rcv.length >= 2 && rcv.some(x => /½/.test(x)) && await ev(() => !!document.querySelector('.card .syssplit .rcv.lost .ic-close')), `${tag}: the split line shows each body's output split (${rcv.join(' | ')})`);
-  check(/offers terms/.test(t) && !!(await ev(() => document.querySelector('.card [data-a=tribute-accept]'))), `${tag}: the Tribute offer with an Accept button`);
+  const rib = await ev(() => document.querySelector('.card .wc-art .ribbon')?.textContent ?? '');
+  check(/Contested/.test(rib) && await ev(() => !!document.querySelector('.card .ribbon.war')), `${tag}: the ribbon says Contested (${rib})`);
+  check(/holds space/.test(rib), `${tag}: the ribbon names who holds space`);
+  check(await ev(() => !!document.querySelector('.card .wc-yield small.lost')) && /blockade/.test(t), `${tag}: the yield line carries the red blockade note`);
+  check(/refugees in 1t/.test(await ev(() => document.querySelector('.card .gchip')?.textContent ?? '')), `${tag}: the Gambit chip carries the refugee warning (refugees in 1t)`);
+  check(/offers terms/i.test(t) && !!(await ev(() => document.querySelector('.card .prompt.terms [data-a=tribute-accept]'))), `${tag}: the terms prompt takes the face with an Accept button`);
+  await ev(() => document.querySelector('.card [data-a=tab][data-t=story]')?.click());
+  await page.waitForTimeout(300);
+  check(/the Burned World/.test(await cardText()), `${tag}: Story names Vel II's tag`);
+  const rcv = await ev(() => [...document.querySelectorAll('.card .syssplit .bsplit')].map(b => b.textContent));
+  check(rcv.length >= 2 && rcv.some(x => /½/.test(x)) && await ev(() => !!document.querySelector('.card .syssplit .rcv.lost .ic-close')), `${tag}: Story shows each body's output split (${rcv.join(' | ')})`);
+  await ev(() => document.querySelector('.card [data-a=tab][data-t=improve]')?.click());
+  await page.waitForTimeout(200);
   const f1 = await fits();
   check(f1.page && f1.card && f1.parts, `${tag}: card fits the screen (${JSON.stringify(f1)})`);
   check(await ev(() => [...document.querySelectorAll('.notes *, [data-el=notes] *')].some(e => /Terms for/.test(e.textContent ?? '')) || true), `${tag}: notification chip (checked loosely)`);
   await shot('1-contested-card');
-  if (phone) { await scrollTo('.card .tribute'); await shot('1b-contested-tribute'); }
+  if (phone) { await scrollTo('.card .prompt.terms'); await shot('1b-contested-tribute'); }
 
   // accept the terms (a free action), seal the turn: the siege lifts, the ledger and Herald record it
   await ev(() => document.querySelector('.card [data-a=tribute-accept]')?.click());
@@ -107,7 +114,8 @@ async function run(tag, phone) {
   check(after.herald, `${tag}: the Herald prints a tribute headline`);
   await select(info.a);
   t = await cardText();
-  check(/Tribute →/.test(t) && /t left/.test(t), `${tag}: status line says Tribute → … (turns left)`);
+  check(/Tribute →.*\dt/.test(await ev(() => document.querySelector('.card .ribbon')?.textContent ?? '')), `${tag}: the ribbon says Tribute → … (turns left)`);
+  check(/to /.test(await ev(() => document.querySelector('.card .wc-yield small')?.textContent ?? '')), `${tag}: the yield note says what goes to them`);
   await shot('3-tribute-card');
 
   // ---- B: just taken by us: Occupied, 2 turns left; and a pending calling with a gated option
@@ -119,12 +127,12 @@ async function run(tag, phone) {
     r.story.pendingCalling = { options: ['refinery', 'proving'], since: st.turn, owner: s.you, gated: [{ id: 'granary', why: 'needs a habitable world' }, { id: 'cenotaph', why: 'needs 2 battles fought here (0 so far)' }] };`, info.b);
   await select(info.b);
   t = await cardText();
-  check(/Occupied/.test(t) && /2t left/.test(t), `${tag}: status line says Occupied, 2t left`);
-  check(/needs a habitable world/.test(t), `${tag}: the calling picker shows a gated option with its reason`);
-  check(await ev(() => !!document.querySelector('.card .bigpick.gated[aria-disabled=true]')), `${tag}: the gated calling can't be picked`);
+  check(/Occupied.*2t/.test(await ev(() => document.querySelector('.card .ribbon')?.textContent ?? '')), `${tag}: the ribbon says Occupied, 2t`);
+  check(/needs a habitable world/.test(t) && /what will/i.test(t), `${tag}: the Calling prompt takes the face and shows a gated option with its reason`);
+  check(await ev(() => !!document.querySelector('.card .prompt.calling .pick.gated[aria-disabled=true]')), `${tag}: the gated calling can't be picked`);
   const f2 = await fits();
   check(f2.page && f2.card && f2.parts, `${tag}: occupied card fits (${JSON.stringify(f2)})`);
-  await scrollTo('.card .choice');
+  await scrollTo('.card .prompt.calling');
   await shot('4-occupied-calling');
 
   // ---- C: a rival system our warships contest: Offer terms
@@ -136,14 +144,14 @@ async function run(tag, phone) {
     st.fleets.push(f);`, [info.c, info.rival]);
   await select(info.c);
   t = await cardText();
-  check(/Offer terms/.test(t), `${tag}: a rival system we besiege offers "Offer terms"`);
-  check(/you hold space|holds space/.test(t), `${tag}: the rival's card shows who holds space`);
+  check(/offer terms/i.test(t), `${tag}: a rival system we besiege offers "Offer terms"`);
+  check(/holds space/.test(await ev(() => document.querySelector('.card .ribbon')?.textContent ?? '')), `${tag}: the rival's card ribbon shows who holds space`);
   await ev(() => document.querySelector('.card [data-a=tribute-offer]')?.click());
   await page.waitForTimeout(300);
   check(/Terms offered/.test(await cardText()), `${tag}: offer pending in the plan`);
   const f3 = await fits();
   check(f3.page && f3.card && f3.parts, `${tag}: offer card fits (${JSON.stringify(f3)})`);
-  await scrollTo('.card .tribute');
+  await scrollTo('.card .prompt.offer');
   await shot('5-offer-terms');
 
   // ---- the map: blockade ring + tags around the capital's neighbourhood (operational zoom)

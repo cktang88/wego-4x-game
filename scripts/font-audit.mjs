@@ -206,15 +206,14 @@ for (const vp of VPS) {
   const fid = await ev(() => { const s = window.tc.screen; const f = s.st.fleets.filter(f => f.owner === s.you && f.ships.length).sort((a, b) => b.ships.length - a.ships.length)[0]; s.select({ kind: 'fleet', id: f.id }); return f.id; });
   await page.waitForTimeout(400);
   await surf('09-fleet-card');
-  if (await page.$('.card [data-a=more]')) { await tap('.card [data-a=more]'); await surf('10-fleet-more'); }
+  if (await page.$('.card [data-a=ftab][data-t=story]')) { await ev(() => document.querySelector('.card [data-a=ftab][data-t=story]').click()); await surf('10-fleet-story'); await ev(() => document.querySelector('.card [data-a=ftab][data-t=orders]')?.click()); }
   const cap = await ev(() => { const s = window.tc.screen; const c = s.st.players[s.you].capital; s.select({ kind: 'region', id: c }); s.focus(s.st.regions[c].site); return c; });
   await page.waitForTimeout(600);
   await surf('11-world-card');
-  await ev(() => { const t = document.querySelector('.card [data-tray=build]'); t?.scrollIntoView({ block: 'center' }); });
-  await surf('12-build-tray');
-  if (await page.$('[data-a=into][data-id=new]')) {
-    await tap('[data-a=into][data-id=new]');
-    await page.waitForTimeout(200);
+  // the three verbs: Raise (locks open), Improve, Story
+  for (const [t, n] of [['improve', '12b-improve'], ['story', '12c-story'], ['raise', '12-build-tray']]) { await ev(t => document.querySelector(`.card [data-a=tab][data-t=${t}]`)?.click(), t); if (t === 'raise') await ev(() => document.querySelector('.card [data-a=lockx]')?.click()); await surf(n); }
+  for (let i = 0; i < 5 && await ev(() => !!document.querySelector('.card [data-a=intonext]') && !/New banner/.test(document.querySelector('.card [data-a=intonext]').textContent)); i++) { await ev(() => document.querySelector('.card [data-a=intonext]').click()); await page.waitForTimeout(100); }
+  {
     if (await page.$('[data-a=build][data-cls=frigate]')) {
       await tap('[data-a=build][data-cls=frigate]');
       await page.waitForSelector('[data-found]', { timeout: 5000 }).catch(() => {});

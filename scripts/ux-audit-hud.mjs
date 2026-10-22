@@ -279,7 +279,8 @@ for (const vp of VPS) {
   const fid = await ev(() => { const s = window.tc.screen; return s.st.fleets.filter(f => f.owner === s.you && f.ships.length).sort((a, b) => b.ships.length - a.ships.length)[0].id; });
   await select('fleet', fid);
   await surf('06-fleet');
-  if (await page.$('.card [data-a=more]')) { await ev(() => document.querySelector('.card [data-a=more]').click()); await surf('07-fleet-more'); await ev(() => document.querySelector('.card [data-a=more]')?.click()); }
+  // the fleet card's Story verb (commander, boons, saga, rename), then back to Orders
+  if (await page.$('.card [data-a=ftab][data-t=story]')) { await ev(() => document.querySelector('.card [data-a=ftab][data-t=story]').click()); await surf('07-fleet-story'); await ev(() => document.querySelector('.card [data-a=ftab][data-t=orders]')?.click()); }
   // drag-preview card (desktop hover over a neighbour)
   if (!isTouch) {
     const xy = await ev(fid => { const s = window.tc.screen; const f = s.fleet(fid); const n = s.st.regions[f.region].neighbors[0]; const p = s.map.toScreen(s.st.regions[n].site); const r = s.el.canvas.getBoundingClientRect(); return [p.x + r.left, p.y + r.top]; }, fid);
@@ -291,14 +292,21 @@ for (const vp of VPS) {
   const cap = await ev(() => { const s = window.tc.screen; return s.st.players[s.you].capital; });
   await select('region', cap);
   await surf('09-world', 500);
-  await ev(() => document.querySelector('.card [data-tray=build]')?.scrollIntoView({ block: 'center' }));
-  await surf('10-world-build', 150);
-  await ev(() => document.querySelector('.card [data-tray=develop]')?.scrollIntoView({ block: 'end' }));
-  await surf('10b-world-develop', 150);
-  // founding sheet
-  if (await page.$('[data-a=into][data-id=new]')) {
-    await ev(() => document.querySelector('[data-a=into][data-id=new]').click());
-    await page.waitForTimeout(150);
+  // the world card's three verbs (Raise with its locks open, Improve with a track's buildings open, Story)
+  await ev(() => document.querySelector('.card [data-a=tab][data-t=raise]')?.click());
+  await ev(() => document.querySelector('.card [data-a=lockx]')?.click());
+  await surf('10-world-build', 200);
+  await ev(() => document.querySelector('.card [data-a=lockx]')?.click());
+  await ev(() => document.querySelector('.card [data-a=tab][data-t=improve]')?.click());
+  await ev(() => document.querySelector('.card [data-a=trkx][data-track=works]')?.click());
+  await surf('10b-world-develop', 200);
+  await ev(() => document.querySelector('.card [data-a=trkx][data-track=works]')?.click());
+  await ev(() => document.querySelector('.card [data-a=tab][data-t=story]')?.click());
+  await surf('10c-world-story', 200);
+  await ev(() => document.querySelector('.card [data-a=tab][data-t=raise]')?.click());
+  // founding sheet (Into: step the selector to a new banner)
+  for (let i = 0; i < 5 && await ev(() => !!document.querySelector('.card [data-a=intonext]') && !/New banner/.test(document.querySelector('.card [data-a=intonext]').textContent)); i++) { await ev(() => document.querySelector('.card [data-a=intonext]').click()); await page.waitForTimeout(100); }
+  if (await page.$('.card [data-a=build][data-cls=frigate]')) {
     await ev(() => document.querySelector('[data-a=build][data-cls=frigate]')?.click());
     await page.waitForSelector('[data-found]', { timeout: 4000 }).catch(() => {});
     await surf('11-founding');
@@ -348,16 +356,19 @@ for (const vp of VPS) {
     await edit(`const f = st.fleets.find(x => x.id === a); f.pendingHonour = { options: ['iron', 'medics'], since: st.turn }; f.commander.rank = Math.max(f.commander.rank, 3);`, f2);
     await select('fleet', f2);
     await surf('21-fleet-honour', 450);
-    await ev(() => document.querySelector('.card')?.scrollTo(0, 99999));
+    await ev(() => document.querySelector('.card .wc-body')?.scrollTo(0, 99999));
     await surf('21b-fleet-honour-end', 150);
     await edit(`const f = st.fleets.find(x => x.id === a); f.pendingHonour = null;`, f2);
     await select('fleet', f2);
+    await ev(() => { const b = document.querySelector('.card [data-a=gambit]'); if (b && b.getAttribute('aria-expanded') !== 'true') b.click(); });
+    await page.waitForTimeout(150);
     await ev(() => document.querySelector('.card [data-a=fate]')?.click());
     await surf('22-fleet-fate-armed', 300);
-    await ev(() => document.querySelector('.card [data-a=more]')?.click());
-    await ev(() => document.querySelector('.card')?.scrollTo(0, 99999));
+    await ev(() => document.querySelector('.card [data-a=gambit]')?.click());
+    await ev(() => document.querySelector('.card [data-a=ftab][data-t=story]')?.click());
+    await ev(() => document.querySelector('.card .wc-body')?.scrollTo(0, 99999));
     await surf('23-fleet-more-later', 200);
-    await ev(() => document.querySelector('.card [data-a=more]')?.click());
+    await ev(() => document.querySelector('.card [data-a=ftab][data-t=orders]')?.click());
   }
   // a limping, scarred fleet
   const f3 = await ev(() => { const s = window.tc.screen; return s.st.fleets.filter(f => f.owner === s.you && f.ships.length)[1]?.id ?? null; });
@@ -370,7 +381,7 @@ for (const vp of VPS) {
   await edit(`const r = st.regions[a]; r.story = r.story ?? { toil: 0, blood: 0, siege: 0, relic: 0, loss: 0, owners: [], epithet: null, calling: null, pendingCalling: null, tenureFrom: 1, deeds: [] }; r.story.pendingCalling = { options: ['arsenal', 'cenotaph'], since: st.turn, owner: r.owner };`, cap);
   await select('region', cap);
   await surf('25-world-calling', 450);
-  await ev(() => document.querySelector('.card')?.scrollTo(0, 99999));
+  await ev(() => document.querySelector('.card .wc-body')?.scrollTo(0, 99999));
   await surf('25b-world-calling-end', 150);
   // contested + tribute on our capital's neighbour
   const nb = await ev(() => { const s = window.tc.screen, st = s.st; const c = st.regions[st.players[s.you].capital]; return c.neighbors.find(n => st.regions[n].kind === 'colony') ?? c.neighbors[0]; });
@@ -383,7 +394,8 @@ for (const vp of VPS) {
     st.players[R].tributeOffers = [A];`, [nb, rival]);
   await select('region', nb);
   await surf('26-world-contested', 450);
-  await ev(() => document.querySelector('.card')?.scrollTo(0, 99999));
+  await ev(() => { const b = document.querySelector('.card [data-a=gambit]'); if (b && b.getAttribute('aria-expanded') !== 'true') b.click(); });
+  await ev(() => document.querySelector('.card .wc-body')?.scrollTo(0, 99999));
   await surf('26b-world-contested-end', 150);
   // a rival world (seize odds)
   const rcap = await ev(r => window.tc.screen.st.players[r].capital, rival);

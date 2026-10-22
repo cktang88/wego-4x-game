@@ -53,7 +53,7 @@ describe('sweep: world postures', () => {
 
   it('a border clash is not the assault the Levies were called for (nor the wrong guests at open Gates)', () => {
     for (const kind of ['levies', 'gates'] as const) {
-      const s = game(); clearMap(s);
+      const s = game(31, { world: { enabled: false } }); clearMap(s);   // Gates: old rules (the simplified world cuts it)
       const { x, y } = pair(s)!;
       x.owner = 1; x.garrison = 20; y.garrison = 0;
       const a = fleetAt(s, 0, y.id, ['frigate']);
