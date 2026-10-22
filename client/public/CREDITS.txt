@@ -50,6 +50,18 @@ Metal 009    https://ambientcg.com/view?id=Metal009
 Metal 011    https://ambientcg.com/view?id=Metal011
 Paper 003    https://ambientcg.com/view?id=Paper003
 Leather 030  https://ambientcg.com/view?id=Leather030
+Metal 048 B  https://ambientcg.com/view?id=Metal048B
+
+NEBULA DUST DETAIL (art layer)
+------------------------------
+Lagoon Nebula (M8), Hubble Space Telescope. Credit: NASA, ESA.
+https://images.nasa.gov/details/GSFC_20171208_Archive_e001955
+Licence: CC BY 4.0. Used greyscale and filtered as a texture detail map.
+
+BLUE NOISE
+----------
+Christoph Peters, "Free blue noise textures", CC0.
+https://momentsingraphics.de/BlueNoise.html
 
 
 FONTS

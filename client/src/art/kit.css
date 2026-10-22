@@ -1,0 +1,281 @@
+/* ============================================================================
+   Three Crowns: the component kit (docs/ART-BIBLE.md section 5).
+   Every control is a physical object on the war table, lit by ONE warm lamp at the upper left:
+     plate  = blued-steel plate with a brass rim (secondary buttons, cards, sheets)
+     brass  = an engraved brass plate (the primary action)
+     wax    = a sealing-wax disc (danger and irreversible: "Seal the turn")
+     enamel = a domed enamel token on a metal bezel (replaces every "pill")
+     slip   = a vellum slip (tooltips, notes)
+     rule   = an engraved line, never a 1px grey border
+   Bevel scheme (all objects): highlight on the TOP-LEFT inner edge, shadow on the BOTTOM-RIGHT inner edge,
+   cast shadow DOWN-RIGHT. Radii: 3px machined (plates, tabs), 7px (cards, sheets), 50% (tokens, seals). Nothing else.
+   Prefix .k- so this can ship alongside theme.css and replace it component by component.
+   ============================================================================ */
+:root {
+  /* materials */
+  --k-ink: #07080c; --k-soot: #0e0f13; --k-umbra: #16171c;
+  --k-steel-950: #121318; --k-steel-900: #1b1d23; --k-steel-800: #262932; --k-steel-700: #353945; --k-steel-500: #5b6170; --k-steel-300: #9aa1ae;
+  --k-brass-900: #3a2810; --k-brass-700: #6b4a1c; --k-brass-500: #a87a35; --k-brass-400: #c8964a; --k-brass-300: #dcb46c; --k-brass-200: #efd59a; --k-brass-100: #fbedc8;
+  --k-vellum: #e9dcbc; --k-vellum-shade: #c9b48a; --k-vellum-deep: #9c845a;
+  --k-wax: #8e1f1f; --k-wax-hi: #c2453a; --k-wax-lo: #4a0d0e;
+  /* text */
+  --k-ivory: #ece3cf; --k-parchment: #c4b89c; --k-faded: #958a74; --k-engraved: #d9b26a; --k-ink-text: #2a1d10; --k-ink-faded: #6b5638;
+  /* factions (enamel) */
+  --k-azure: #2f6ea6; --k-azure-hi: #7fb3dc; --k-azure-lo: #163556;
+  --k-crimson: #a3303a; --k-crimson-hi: #dc6a66; --k-crimson-lo: #4f1117;
+  --k-gilded: #c79a2c; --k-gilded-hi: #f0cf72; --k-gilded-lo: #5e4410;
+  --k-warden: #6e58a0; --k-warden-hi: #ab95d8; --k-warden-lo: #2b2046;
+  /* semantic */
+  --k-good: #86c08f; --k-good-enamel: #3f7a4c; --k-bad: #e2725d; --k-bad-enamel: #9a3427;
+  --k-warn: #e4ab4a; --k-warn-enamel: #8f6418; --k-info: #9bbbd9; --k-info-enamel: #36597d; --k-fate: #f1d488;
+  /* type */
+  --k-display: 'Cinzel', 'Trajan Pro', Georgia, serif;
+  --k-prose: 'IM Fell English', 'Iowan Old Style', Georgia, serif;
+  --k-ui: 'Alegreya Sans', 'Gill Sans', 'Segoe UI', system-ui, sans-serif;
+  --k-black: 'UnifrakturMaguntia', 'Cinzel', serif;
+  /* the bevel scheme */
+  --k-bevel: inset 1px 1px 0 rgba(255, 238, 205, 0.16), inset -1px -1px 0 rgba(0, 0, 0, 0.55);
+  --k-bevel-brass: inset 1px 1px 0 rgba(255, 252, 230, 0.7), inset -1px -1px 0 rgba(70, 40, 6, 0.6), inset 0 -0.35em 0.6em -0.3em rgba(80, 45, 5, 0.45);
+  --k-cast: 0 1px 0 rgba(0, 0, 0, 0.65), 0.15em 0.4em 0.9em -0.3em rgba(0, 0, 0, 0.75);
+  --k-cast-lift: 0 1px 0 rgba(0, 0, 0, 0.65), 0.3em 0.9em 1.6em -0.5em rgba(0, 0, 0, 0.8);
+  --k-press: inset 1px 2px 4px rgba(0, 0, 0, 0.6), inset -1px -1px 0 rgba(255, 238, 205, 0.06);
+  /* faces */
+  --k-steel-face: linear-gradient(162deg, #383c47 0%, #252830 38%, #17191e 100%);
+  --k-steel-face-hi: linear-gradient(162deg, #424754 0%, #2b2e37 38%, #1b1d23 100%);
+  --k-brass-face: linear-gradient(172deg, #f7e2a6 0%, #dcb05e 22%, #b8863a 55%, #8a5f22 100%);
+  --k-brass-rim: linear-gradient(150deg, #f4dc9c 0%, #b88a45 35%, #5e4116 70%, #a87a35 100%);
+  --k-steel-rim: linear-gradient(150deg, #8a909c 0%, #4a4f5a 40%, #1d1f25 75%, #5b6170 100%);
+  /* film of grain over every face (static SVG turbulence: one decode, no requests) */
+  --k-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  --k-brushed: url("/tex/metal-brushed.webp");
+  --k-grime: url("/tex/brass-grime.webp");
+  --k-paper: url("/tex/parchment.webp");
+  --k-leather: url("/tex/leather.webp");
+  /* motion */
+  --k-ease-heavy: cubic-bezier(0.22, 0.9, 0.25, 1);
+  --k-ease-strike: cubic-bezier(0.3, 1.35, 0.45, 1);
+  --k-ease-out: cubic-bezier(0.55, 0, 0.75, 0.2);
+  --k-t-tick: 90ms; --k-t-press: 120ms; --k-t-settle: 260ms; --k-t-sheet: 340ms; --k-t-ceremony: 900ms;
+}
+
+/* ------------------------------------------------------------------ type */
+.k-display { font-family: var(--k-display); font-weight: 700; letter-spacing: 0.08em; color: var(--k-ivory); text-shadow: 0 1px 0 #000, 0 0 1px rgba(0, 0, 0, 0.8); }
+.k-engraved { font-family: var(--k-display); font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; font-size: 0.78em; color: var(--k-engraved);
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.7), 0 1px 0 rgba(255, 230, 170, 0.12); }
+.k-prose { font-family: var(--k-prose); color: var(--k-parchment); line-height: 1.45; }
+.k-num { font-family: var(--k-ui); font-weight: 700; font-variant-numeric: lining-nums tabular-nums; font-feature-settings: 'lnum' 1, 'tnum' 1; letter-spacing: 0.01em; }
+.k-rule { height: 2px; border: 0; margin: 0.75em 0;
+  background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.7) 12%, rgba(0, 0, 0, 0.7) 88%, transparent) 0 0 / 100% 1px no-repeat,
+              linear-gradient(90deg, transparent, rgba(220, 180, 108, 0.45) 12%, rgba(220, 180, 108, 0.45) 88%, transparent) 0 1px / 100% 1px no-repeat; }
+
+/* ------------------------------------------------------------------ buttons */
+.k-btn {
+  --face: var(--k-steel-face); --rim: var(--k-brass-rim);
+  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 0.45em;
+  min-height: 2.75rem; padding: 0 1.15em; border: 1px solid transparent; border-radius: 3px;
+  font: 700 0.95rem/1 var(--k-display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--k-brass-200);
+  background: var(--k-grain) 0 0 / 160px, var(--face) padding-box, var(--rim) border-box;
+  background-blend-mode: soft-light, normal, normal;
+  box-shadow: var(--k-bevel), var(--k-cast);
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 220, 160, 0.08);
+  isolation: isolate;
+  cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent;
+  transition: transform var(--k-t-press) var(--k-ease-heavy), box-shadow var(--k-t-press) var(--k-ease-heavy), filter var(--k-t-tick) linear;
+}
+/* the metal's grain: a texture overlay BEHIND the content (z -1 in the isolated plate), at low strength.
+   Never put a detail map straight into the background stack: at full contrast it reads as wood or static. */
+.k-btn::before, .k-card::after, .k-sheet::after { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
+  background: var(--k-tex, var(--k-brushed)) 0 0 / var(--k-tex-size, 256px); mix-blend-mode: soft-light; opacity: var(--k-tex-a, 0.22); }
+/* the inner engraved line: plates have a second, finer rule inset 3px */
+.k-btn::after { content: ''; position: absolute; inset: 3px; border-radius: 1px; pointer-events: none;
+  box-shadow: inset 1px 1px 0 rgba(0, 0, 0, 0.45), inset -1px -1px 0 rgba(255, 230, 170, 0.1); }
+.k-btn:hover { filter: brightness(1.12); --face: var(--k-steel-face-hi); }
+.k-btn:focus-visible { outline: 2px solid var(--k-brass-200); outline-offset: 3px; }
+.k-btn:active { transform: translate(1px, 2px); box-shadow: var(--k-press), 0 0 0 rgba(0, 0, 0, 0); }
+.k-btn .ic { width: 1.15em; height: 1.15em; filter: drop-shadow(0 -1px 0 rgba(0, 0, 0, 0.7)); }
+
+/* primary: the engraved brass plate. Ink is ENGRAVED into the brass (dark, with a light lower lip). */
+.k-btn.primary {
+  --face: var(--k-brass-face); --rim: linear-gradient(150deg, #fff3c8, #8a5f22 60%, #3a2810);
+  color: #2a1a06; text-shadow: 0 1px 0 rgba(255, 245, 210, 0.55), 0 -1px 0 rgba(60, 35, 5, 0.25);
+  background: var(--k-grain) 0 0 / 160px, var(--face) padding-box, var(--rim) border-box;
+  background-blend-mode: soft-light, normal, normal;
+  --k-tex: var(--k-grime); --k-tex-size: 220px; --k-tex-a: 0.3;
+  box-shadow: var(--k-bevel-brass), var(--k-cast), 0 0 1.4em -0.4em rgba(255, 200, 120, 0.35);
+}
+.k-btn.primary::after { box-shadow: inset 1px 1px 0 rgba(90, 55, 10, 0.55), inset -1px -1px 0 rgba(255, 245, 210, 0.45); }
+.k-btn.primary:hover { filter: brightness(1.08) saturate(1.05); }
+.k-btn.primary:active { box-shadow: inset 1px 2px 5px rgba(70, 40, 6, 0.7), var(--k-cast); }
+
+/* danger: a cinnabar enamel plate with a blackened-iron rim (destructive, irreversible) */
+.k-btn.danger {
+  --face: radial-gradient(120% 140% at 28% 18%, #d0584a 0%, #9a3427 45%, #5a1710 100%); --rim: linear-gradient(150deg, #8a909c, #2a2c33 60%, #0c0d10);
+  color: #fde9d8; text-shadow: 0 -1px 0 rgba(40, 6, 2, 0.9);
+  background: var(--k-grain) 0 0 / 160px, var(--face) padding-box, var(--rim) border-box;
+  background-blend-mode: soft-light, normal, normal;
+  box-shadow: inset 1px 1px 0 rgba(255, 210, 190, 0.35), inset -1px -1px 0 rgba(40, 0, 0, 0.6), var(--k-cast);
+}
+/* disabled: unlit, tarnished; the engraving still reads (never just 40% opacity) */
+.k-btn:disabled, .k-btn[aria-disabled=true] {
+  --face: linear-gradient(162deg, #24262c, #18191d); --rim: linear-gradient(150deg, #4a4f5a, #1d1f25);
+  color: #6d6556; text-shadow: 0 1px 0 rgba(255, 255, 255, 0.04); filter: none; cursor: not-allowed;
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.04), inset -1px -1px 0 rgba(0, 0, 0, 0.5); transform: none;
+}
+.k-btn.ghost { --rim: linear-gradient(transparent, transparent); background: transparent; box-shadow: none; color: var(--k-brass-300); }
+.k-btn.ghost::after, .k-btn.ghost::before { display: none; }
+.k-btn.ghost:hover { color: var(--k-brass-100); text-shadow: 0 0 0.6em rgba(255, 210, 140, 0.4); }
+
+/* ------------------------------------------------------------------ the wax seal (Seal the turn) */
+.k-seal {
+  --wax: var(--k-wax);
+  position: relative; width: 4.25rem; height: 4.25rem; border: 0; border-radius: 50%; cursor: pointer; padding: 0;
+  display: grid; place-items: center; color: rgba(255, 220, 200, 0.85);
+  background:
+    radial-gradient(circle at 34% 30%, rgba(255, 190, 170, 0.55), transparent 32%),
+    radial-gradient(circle at 50% 50%, transparent 52%, rgba(0, 0, 0, 0.35) 53%, transparent 60%),
+    radial-gradient(circle at 46% 44%, color-mix(in srgb, var(--wax) 70%, #fff 10%), var(--wax) 55%, color-mix(in srgb, var(--wax) 50%, #000) 100%);
+  /* the irregular poured edge */
+  clip-path: polygon(50% 0%, 61% 3%, 72% 2%, 80% 9%, 90% 14%, 95% 25%, 99% 36%, 98% 48%, 100% 59%, 95% 70%, 92% 81%, 82% 88%, 73% 96%, 61% 98%, 50% 100%, 38% 97%, 27% 98%, 18% 90%, 9% 84%, 5% 72%, 1% 61%, 2% 49%, 0% 37%, 6% 27%, 9% 16%, 19% 10%, 28% 3%, 39% 2%);
+  filter: drop-shadow(0.15rem 0.35rem 0.35rem rgba(0, 0, 0, 0.7));
+  transition: transform var(--k-t-settle) var(--k-ease-strike), filter var(--k-t-tick);
+}
+.k-seal .ic, .k-seal svg { width: 2rem; height: 2rem; filter: drop-shadow(1px 1px 0 rgba(255, 170, 150, 0.35)) drop-shadow(-1px -1px 0 rgba(30, 0, 0, 0.7)); }
+.k-seal:hover { filter: drop-shadow(0.15rem 0.35rem 0.35rem rgba(0, 0, 0, 0.7)) brightness(1.12); }
+.k-seal:active { transform: scale(0.94) rotate(-4deg); }
+.k-seal.stamped { animation: k-stamp var(--k-t-ceremony) var(--k-ease-strike); }
+@keyframes k-stamp { 0% { transform: translateY(-1.2rem) scale(1.25); filter: drop-shadow(0.6rem 1.4rem 1rem rgba(0, 0, 0, 0.5)); } 40% { transform: none; } 55% { transform: scale(1.04, 0.96); } 100% { transform: none; } }
+
+/* ------------------------------------------------------------------ enamel tokens (replace pills) */
+.k-token {
+  --en: var(--k-steel-700); --en-hi: var(--k-steel-300);
+  display: inline-flex; align-items: center; gap: 0.35em; height: 1.9rem; padding: 0 0.7em 0 0.3em; border-radius: 3px;
+  font: 700 0.92rem/1 var(--k-ui); font-variant-numeric: lining-nums tabular-nums; color: var(--k-ivory);
+  background: var(--k-grain) 0 0 / 160px, var(--k-steel-face) padding-box, var(--k-steel-rim) border-box; background-blend-mode: soft-light, normal, normal;
+  border: 1px solid transparent; box-shadow: var(--k-bevel), 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+/* the enamel boss: a domed coin of colour set in a bezel */
+.k-token .boss { width: 1.35rem; height: 1.35rem; border-radius: 50%; display: grid; place-items: center; flex: none; color: rgba(255, 245, 225, 0.92);
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--en-hi) 80%, #fff), var(--en) 55%, color-mix(in srgb, var(--en) 55%, #000) 100%);
+  box-shadow: 0 0 0 1.5px var(--k-brass-500), 0 0 0 2.5px rgba(0, 0, 0, 0.6), inset 0 -2px 3px rgba(0, 0, 0, 0.35); }
+.k-token .boss svg { width: 0.85rem; height: 0.85rem; filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5)); }
+.k-token .delta { font-size: 0.8em; color: var(--k-good); margin-left: 0.1em; }
+.k-token .delta.neg { color: var(--k-bad); }
+.k-token.good { --en: var(--k-good-enamel); --en-hi: var(--k-good); }
+.k-token.bad { --en: var(--k-bad-enamel); --en-hi: var(--k-bad); }
+.k-token.warn { --en: var(--k-warn-enamel); --en-hi: var(--k-warn); }
+.k-token.fate { --en: var(--k-brass-500); --en-hi: var(--k-fate); }
+.k-token.azure { --en: var(--k-azure); --en-hi: var(--k-azure-hi); }
+.k-token.crimson { --en: var(--k-crimson); --en-hi: var(--k-crimson-hi); }
+.k-token.gilded { --en: var(--k-gilded); --en-hi: var(--k-gilded-hi); }
+
+/* ------------------------------------------------------------------ tabs: engraved index tabs on a plate */
+.k-tabs { display: flex; gap: 2px; padding: 0 0.5rem; border-bottom: 2px solid transparent;
+  background: linear-gradient(90deg, transparent, rgba(220, 180, 108, 0.4), transparent) 0 100% / 100% 1px no-repeat; }
+.k-tab { position: relative; padding: 0.7rem 1rem 0.6rem; border: 0; border-radius: 3px 3px 0 0; cursor: pointer;
+  font: 700 0.8rem/1 var(--k-display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--k-faded);
+  background: linear-gradient(180deg, rgba(255, 240, 210, 0.04), transparent); box-shadow: inset 1px 1px 0 rgba(255, 238, 205, 0.05);
+  transition: color var(--k-t-tick), background var(--k-t-settle) var(--k-ease-heavy); }
+.k-tab:hover { color: var(--k-parchment); }
+.k-tab[aria-selected=true] { color: var(--k-brass-200); background: var(--k-steel-face-hi); box-shadow: var(--k-bevel), 0 -0.5em 1em -0.6em rgba(255, 210, 140, 0.25);
+  text-shadow: 0 -1px 0 #000; }
+/* the selected tab is joined to the plate: a brass lip, not an underline */
+.k-tab[aria-selected=true]::after { content: ''; position: absolute; left: 0.5rem; right: 0.5rem; bottom: -1px; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--k-brass-300), transparent); box-shadow: 0 0 0.6em rgba(255, 200, 120, 0.5); }
+
+/* ------------------------------------------------------------------ card: a riveted steel plate */
+.k-card {
+  position: relative; padding: 1rem 1.1rem; border-radius: 7px; border: 1px solid transparent; color: var(--k-ivory); isolation: isolate;
+  background: var(--k-grain) 0 0 / 160px, radial-gradient(120% 90% at 20% 0%, #2e313b 0%, #1d1f25 50%, #131418 100%) padding-box, var(--k-steel-rim) border-box;
+  background-blend-mode: soft-light, normal, normal;
+  box-shadow: var(--k-bevel), var(--k-cast-lift);
+  --k-tex-size: 300px; --k-tex-a: 0.16;
+}
+.k-card::before { /* inner engraved rule */ content: ''; position: absolute; inset: 5px; border-radius: 4px; pointer-events: none; z-index: -1;
+  box-shadow: inset 1px 1px 0 rgba(0, 0, 0, 0.5), inset -1px -1px 0 rgba(255, 230, 170, 0.08), 0 0 0 1px rgba(200, 150, 74, 0.14); }
+/* rivets: four brass domes, light from the upper left */
+.k-card.riveted { background-image: var(--k-grain), linear-gradient(transparent, transparent),
+    radial-gradient(circle at 40% 35%, #f4dc9c 0 1px, #a87a35 1.6px, #3a2810 2.6px, transparent 3px),
+    radial-gradient(circle at 40% 35%, #f4dc9c 0 1px, #a87a35 1.6px, #3a2810 2.6px, transparent 3px),
+    radial-gradient(circle at 40% 35%, #f4dc9c 0 1px, #a87a35 1.6px, #3a2810 2.6px, transparent 3px),
+    radial-gradient(circle at 40% 35%, #f4dc9c 0 1px, #a87a35 1.6px, #3a2810 2.6px, transparent 3px),
+    radial-gradient(120% 90% at 20% 0%, #2e313b 0%, #1d1f25 50%, #131418 100%), var(--k-steel-rim);
+  background-size: 160px, 300px, 8px 8px, 8px 8px, 8px 8px, 8px 8px, auto, auto;
+  background-position: 0 0, 0 0, 9px 9px, calc(100% - 9px) 9px, 9px calc(100% - 9px), calc(100% - 9px) calc(100% - 9px), 0 0, 0 0;
+  background-repeat: repeat, repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat;
+  background-origin: padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, border-box;
+  background-clip: padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, border-box;
+  background-blend-mode: soft-light, soft-light, normal, normal, normal, normal, normal, normal; }
+.k-card h3 { margin: 0 0 0.5rem; }
+/* faction card: the enamel is a shield on the plate's corner and a coloured rule, NOT a tinted glass card */
+.k-card[data-house] { --en: var(--k-steel-500); --en-hi: var(--k-steel-300); }
+.k-card[data-house=azure] { --en: var(--k-azure); --en-hi: var(--k-azure-hi); }
+.k-card[data-house=crimson] { --en: var(--k-crimson); --en-hi: var(--k-crimson-hi); }
+.k-card[data-house=gilded] { --en: var(--k-gilded); --en-hi: var(--k-gilded-hi); }
+.k-card[data-house] .k-house { color: var(--en-hi); }
+
+/* ------------------------------------------------------------------ vellum slip (tooltip) */
+.k-slip {
+  position: relative; max-width: 18rem; padding: 0.65rem 0.85rem 0.7rem; color: var(--k-ink-text);
+  font: 1rem/1.35 var(--k-prose);
+  background: var(--k-grain) 0 0 / 160px, radial-gradient(130% 120% at 30% 20%, #f3e8cc 0%, #e4d3ab 60%, #cdb588 100%);
+  background-blend-mode: multiply, normal; isolation: isolate;
+  /* deckled edge */
+  clip-path: polygon(0% 3%, 6% 0%, 14% 2%, 23% 0%, 34% 1%, 46% 0%, 58% 2%, 70% 0%, 82% 1%, 93% 0%, 100% 2%, 99% 20%, 100% 42%, 99% 64%, 100% 86%, 98% 100%, 86% 98%, 74% 100%, 61% 99%, 48% 100%, 35% 98%, 22% 100%, 10% 98%, 0% 100%, 1% 78%, 0% 56%, 1% 32%);
+  filter: drop-shadow(0.12rem 0.3rem 0.35rem rgba(0, 0, 0, 0.65));
+}
+.k-slip::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--k-paper) 0 0 / 520px; mix-blend-mode: multiply; opacity: 0.28; }
+.k-slip b { font-family: var(--k-display); font-size: 0.82em; letter-spacing: 0.08em; color: #4a2c10; }
+.k-slip .k-num { font-size: 0.9em; color: #3a2408; }
+
+/* ------------------------------------------------------------------ sheet: a leather-backed steel tray */
+.k-sheet {
+  position: relative; border-radius: 7px; padding: 1.1rem; color: var(--k-ivory);
+  background: var(--k-grain) 0 0 / 160px, linear-gradient(180deg, #1a120c, #0b0806) padding-box, var(--k-brass-rim) border-box;
+  background-blend-mode: soft-light, normal, normal; isolation: isolate;
+  border: 1px solid transparent; box-shadow: var(--k-bevel), 0 -0.5rem 2.5rem rgba(0, 0, 0, 0.7);
+  --k-tex: var(--k-leather); --k-tex-size: 360px; --k-tex-a: 0.35;
+}
+
+/* ------------------------------------------------------------------ slider: a brass groove and a knurled knob */
+.k-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 1.75rem; background: transparent; cursor: pointer; margin: 0; }
+.k-slider::-webkit-slider-runnable-track { height: 6px; border-radius: 3px;
+  background: linear-gradient(180deg, #050506, #22242a); box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 230, 170, 0.12); }
+.k-slider::-moz-range-track { height: 6px; border-radius: 3px; background: linear-gradient(180deg, #050506, #22242a); box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 230, 170, 0.12); }
+.k-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 1.35rem; height: 1.35rem; margin-top: calc(3px - 0.675rem); border-radius: 50%; border: 0;
+  background: repeating-conic-gradient(from 0deg, rgba(0, 0, 0, 0.22) 0 6deg, transparent 6deg 12deg), radial-gradient(circle at 35% 30%, #fff1c4, #c8964a 50%, #5e4116 100%);
+  box-shadow: 0 0 0 1px #2a1c08, 0.1rem 0.25rem 0.35rem rgba(0, 0, 0, 0.7), inset 1px 1px 0 rgba(255, 250, 220, 0.6); }
+.k-slider::-moz-range-thumb { width: 1.35rem; height: 1.35rem; border-radius: 50%; border: 0;
+  background: radial-gradient(circle at 35% 30%, #fff1c4, #c8964a 50%, #5e4116 100%); box-shadow: 0 0 0 1px #2a1c08, 0.1rem 0.25rem 0.35rem rgba(0, 0, 0, 0.7); }
+.k-slider:focus-visible { outline: 2px solid var(--k-brass-200); outline-offset: 2px; }
+
+/* ------------------------------------------------------------------ toggle: a lever switch in a steel bezel */
+.k-toggle { position: relative; display: inline-flex; align-items: center; gap: 0.7em; cursor: pointer; min-height: 2.75rem;
+  font: 600 0.95rem/1.2 var(--k-ui); color: var(--k-parchment); -webkit-tap-highlight-color: transparent; }
+.k-toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.k-toggle .lever { position: relative; flex: none; width: 2.9rem; height: 1.5rem; border-radius: 3px;
+  background: linear-gradient(180deg, #060607, #1f2126); box-shadow: inset 1px 1px 3px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 230, 170, 0.12), 0 0 0 1px #3a3e48; }
+/* the indicator lamp inside the slot: unlit amber glass → lit */
+.k-toggle .lever::before { content: ''; position: absolute; right: 0.4rem; top: 50%; width: 0.4rem; height: 0.4rem; margin-top: -0.2rem; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #6b5a40, #2a2016); box-shadow: inset 0 0 1px #000; transition: background var(--k-t-settle), box-shadow var(--k-t-settle); }
+.k-toggle .lever::after { content: ''; position: absolute; left: 2px; top: 2px; width: 1.45rem; height: calc(100% - 4px); border-radius: 2px;
+  background: repeating-linear-gradient(90deg, rgba(60, 35, 5, 0.25) 0 1px, transparent 1px 3px) 50% 50% / 40% 60% no-repeat, linear-gradient(170deg, #f4dc9c, #c8964a 45%, #6b4a1c);
+  box-shadow: inset 1px 1px 0 rgba(255, 250, 220, 0.7), inset -1px -1px 0 rgba(60, 35, 5, 0.6), 0.1rem 0.15rem 0.25rem rgba(0, 0, 0, 0.7);
+  transition: transform var(--k-t-settle) var(--k-ease-heavy); }
+.k-toggle input:checked + .lever::after { transform: translateX(calc(2.9rem - 1.45rem - 4px)); }
+.k-toggle input:checked + .lever::before { left: 0.4rem; right: auto; background: radial-gradient(circle at 35% 30%, #fff2c0, #f0b545 50%, #8a5a10); box-shadow: 0 0 0.45rem 0.1rem rgba(255, 190, 90, 0.75); }
+.k-toggle input:focus-visible + .lever { outline: 2px solid var(--k-brass-200); outline-offset: 2px; }
+
+/* ------------------------------------------------------------------ segmented: a row of engraved stops */
+.k-seg { display: inline-flex; border-radius: 3px; padding: 2px; gap: 2px; background: linear-gradient(180deg, #060607, #1a1b20);
+  box-shadow: inset 1px 1px 3px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 230, 170, 0.1); }
+.k-seg button { min-height: 2.25rem; padding: 0 0.9em; border: 0; border-radius: 2px; background: transparent; cursor: pointer; box-shadow: none;
+  font: 700 0.78rem/1 var(--k-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--k-faded); transition: color var(--k-t-tick); }
+.k-seg button:hover { color: var(--k-parchment); }
+.k-seg button[aria-pressed=true] { color: #2a1a06; text-shadow: 0 1px 0 rgba(255, 245, 210, 0.5);
+  background: var(--k-grain) 0 0 / 160px, var(--k-brass-face); background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel-brass); }
+
+/* ------------------------------------------------------------------ motion: reduced */
+@media (prefers-reduced-motion: reduce) {
+  .k-btn, .k-seal, .k-tab, .k-toggle .lever::after { transition: none; }
+  .k-seal.stamped { animation: none; }
+}

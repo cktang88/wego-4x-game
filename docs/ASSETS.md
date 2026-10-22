@@ -89,6 +89,23 @@ Every texture is from ambientCG (Lennart Demes), CC0. Each is the `<id>_1K-JPG_C
 
 Total: 333,554 bytes. Loaders and helpers are in `client/src/art/textures.ts`: `loadTexture`, `preloadTextures`, `textureNow`, `pattern`, `overlayDetail`, `texUrl` and `cssUrl`.
 
+### Added for the art layer (2026-10-22): `client/public/tex/`
+
+Used by the WebGL2 stage (`client/src/art/gl/`) and the component kit (`client/src/art/kit.css`). Licences were checked on each source on 2026-10-22. One asset is CC BY 4.0 rather than CC0, because its attribution is simple and is recorded here and in `client/public/CREDITS.txt`.
+
+| file | source | author / credit | page | licence | processing | bytes |
+|---|---|---|---|---|---|---|
+| nebula-dust.webp | Hubble, "Hubble reveals heart of Lagoon Nebula" (M8), NASA image library id `GSFC_20171208_Archive_e001955` (~large) | **NASA, ESA** | https://images.nasa.gov/details/GSFC_20171208_Archive_e001955 | NASA material is public domain; ESA/Hubble images are **CC BY 4.0** (credit "NASA, ESA") | greyscale, 7px median filter (removes the stars), high-pass (subtract a 60px Gaussian), 1% autocontrast, mean shifted to 50% grey, 1024×512, WebP q72. It is a detail map only: the shader samples it with mirrored repeat as dust in the gas. It is never shown as a photo. | 36,638 |
+| bluenoise-128.png | "Free blue noise textures", `128_128/LDR_LLL1_0.png` | Christoph Peters | https://momentsingraphics.de/BlueNoise.html | CC0 (LICENSE.txt in the archive) | unchanged, greyscale PNG (lossless: grain and dither need exact values) | 16,580 |
+| metal-brushed-normal.webp | derived from `metal-brushed.webp` (ambientCG Metal 009) | Lennart Demes (ambientCG) | https://ambientcg.com/view?id=Metal009 | CC0 | tangent-space normal map from the brushed height (0.8px blur, wrapped central differences, strength 2.2), 512², WebP q82. ambientCG's own NormalGL for Metal009 is nearly flat (σ ≈ 1/255), so it was not usable. | 38,530 |
+| brass-grime.webp | Metal 048 B (dirty gold, fingerprints): `Roughness` map | Lennart Demes (ambientCG) | https://ambientcg.com/view?id=Metal048B | CC0 | detail map: 512², 0.5% autocontrast, mean shifted to 50% grey, WebP q70 (tarnish on brass plates, soft-light ~0.3) | 52,640 |
+
+Considered and not added:
+
+- **Photographic nebula backdrops** (Hubble or JWST colour images): they would be a photo in a painted world. NASA imagery is used only as the greyscale dust detail above. JWST images from STScI are co-credited NASA/ESA/CSA, so check the CSA terms before any use.
+- **Painted brush-stroke texture packs:** none found with a verifiable CC0 licence. The painterly breakup comes from the shader's domain warp instead.
+- **ambientCG Paper 006** (beige) and **Fabric 030:** the existing `parchment.webp` and `felt.webp` already cover them.
+
 ## Verification
 
 ```
