@@ -310,7 +310,8 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     if (!pushLimiter.take(clientIp(req))) return json(res, 429, { error: 'slow down' });
     const b = await body(req);
     if (what === 'subscribe') {
-      const seats = seatsFromTokens(b.games).map(x => ({ game: x.g.id, seat: x.seat }));
+      // only games still being played can send word; finished ones would crowd running games out of the binding cap
+      const seats = seatsFromTokens(b.games).filter(x => x.g.state.winner === null).map(x => ({ game: x.g.id, seat: x.seat }));
       const sub = push.subscribe(b.subscription, seats, { quiet: b.quiet, live: b.live });
       if (!sub) return json(res, 400, { error: 'that is not a push subscription this server can use' });
       return json(res, 200, { ok: true, games: sub.seats.map(x => x.game), quiet: sub.quiet, live: sub.live });

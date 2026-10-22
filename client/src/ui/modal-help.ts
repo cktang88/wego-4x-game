@@ -27,6 +27,8 @@ interface Card { ic: string; t: string; b: string[] }
 
 function cards(st: GameState, tab: string): Card[] {
   const R = st.rules, V = R.victory, E = R.empire, S = R.soul;
+  // the simplified world (rules.world): track caps, no Stations / Engrave / Open the Gates; old saves keep the old cards
+  const W = R.world && R.world.enabled !== false ? R.world : null;
   switch (tab) {
     case 'orders': return [
       { ic: '➤', t: 'Five orders', b: [`<b>${R.orders.perTurn} orders</b> a turn, however big your empire.`, 'Everyone plans in secret; all orders resolve together.', 'Order in the strip never matters: one step per turn.'] },
@@ -47,7 +49,7 @@ function cards(st: GameState, tab: string): Card[] {
       { ic: '⚑', t: 'Banners', b: [`Fleets fly banners: ${S?.bannersBase ?? 3}, +${S?.bannersPerCrown ?? 1} per Crown held.`, 'Founding: a sigil, a name, boons paid for with banes.', 'Scout-only fleets are pickets: no banner.'] },
       { ic: '✠', t: 'Vows', b: ['Swear one vow: a bonus while you keep it.', 'Keep it: an epithet. Break it: <b>Oathbreaker</b>, forever.'] },
       { ic: '❖', t: 'Ranks & honours', b: ['Commanders rank up by fighting: choose 1 of 2 honours.', `Storied and Legend fleets can <b>retire</b>: a Haven deed.`] },
-      { ic: '◈', t: 'Worlds remember', b: [`At development ${S?.callingAtDev ?? 3} a world takes a <b>Calling</b>.`, `It grows with tenure: ${(S?.tenureTiers ?? [3, 6, 10]).join(', ')} turns held.`, `Captured: dormant ${S?.dormantTurns ?? 3} turns. Retake in ${S?.liberateWithin ?? 5}: Liberated.`, 'Deeds are earned; <b>engrave</b> one to keep it.'] },
+      { ic: '◈', t: 'Worlds remember', b: [`At development ${S?.callingAtDev ?? 3} a world takes a <b>Calling</b>.`, `It grows with tenure: ${(S?.tenureTiers ?? [3, 6, 10]).join(', ')} turns held.`, `Captured: dormant ${S?.dormantTurns ?? 3} turns. Retake in ${S?.liberateWithin ?? 5}: Liberated.`, W?.engrave === false ? 'Deeds are earned: up to two per world.' : 'Deeds are earned; <b>engrave</b> one to keep it.'] },
       { ic: '♨', t: 'Raze', b: ['Right after a capture you may <b>raze</b> a world.', 'Loot now, development −1; its old owner swears vengeance.'] },
       { ic: '✒', t: 'The Herald', b: ['A front page every turn, printed from the events.', 'Plant one <b>dispatch</b> a turn: a boast, a threat, a lie.', 'Blood-debts: kill a commander, and their house hits back harder.'] },
       { ic: '⚜', t: 'The Saga', b: ['At the end: every banner’s story, reigns, the fallen.', 'Copy it or save the image for the group chat.'] },
@@ -57,7 +59,7 @@ function cards(st: GameState, tab: string): Card[] {
       return [
         { ic: '⛉', t: 'Postures', b: ['Each turn, bet on your rival with a fleet’s <b>posture</b>.', 'Right: you win the moment. Wrong: you pay. Steady never bets.', 'Secret: rivals see it only beside you or by scan.'] },
         { ic: '⚔', t: 'The reads', b: ['<b>Charge</b> (with a Seize) beats Steady; <b>Guarded</b> beats Charge.', '<b>Ambush</b> beats Running; not coming beats Ambush.', 'Nobody came? Guarded digs in; Ambush is exposed.'] },
-        { ic: '⚑', t: 'World stances', b: ['<b>Levies</b>: a siege is coming. <b>Scorch</b>: you’ll lose it.', '<b>Gates</b>: an ally needs a yard. Wrong bets cost output.'] },
+        { ic: '⚑', t: 'World stances', b: ['<b>Levies</b>: a siege is coming. <b>Scorch</b>: you’ll lose it.', W?.gatesPosture === false ? 'Wrong bets cost output.' : '<b>Gates</b>: an ally needs a yard. Wrong bets cost output.'] },
         { ic: '✪', t: 'Fate', b: [`${G?.fateStart ?? 3} tokens a game; ${G?.fatePerTurn ?? 1} a turn; spent in public.`, '<b>Last Stand</b>, <b>Twist</b>, <b>Hyperjump</b>, <b>Rally</b>, <b>Surge</b>.', `Far behind (${G?.fateComebackGap ?? 10}+ ♛)? One more, once.`] },
         { ic: '✓', t: 'In the replay', b: ['<b>CALLED IT</b> when a read pays; <b>CAUGHT OUT</b> when it backfires.', 'Gold flares: a first strike. Violet swirl: a Twist of Fate.'] },
       ];
@@ -67,8 +69,8 @@ function cards(st: GameState, tab: string): Card[] {
       { ic: '⚑', t: 'Laws', b: [`Enact: 1 order + ${E.lawCost}✦. Switching sides costs double.`, `${E.lawSlotsStart} slot, +1 at turn ${E.lawSlotTurns.join(', ')}, +1 with Bureaucracy.`, 'Revoking is free.'] },
       { ic: '➤', t: 'Ships', b: ['Each class carries one <b>module</b>; new ships get it.', `<b>Refit</b> at a shipyard upgrades a fleet: ⚙${E.refitIndustryPerShip} per ship.`] },
       ...(R.systems?.enabled !== false && st.regions[0]?.star ? [
-        { ic: '☉', t: 'Star systems', b: ['Each world is a system: a star and up to 3 bodies.', `<b>Citizens</b> cap comes from bodies + star (max ${R.systems.maxCitizens}).`, `A quiet <b>Core</b> grows a citizen every ${R.systems.growthEvery} turns.`, 'Civil slots come from bodies; a <b>Station</b> adds one.'] },
-        { ic: '⛯', t: 'Gates & slots', b: [`Shipyard: ${R.systems.shipyardCitizens} citizens or a Station. Academy: ${R.systems.academyCitizens}.`, `Military slots: ${R.systems.milSlots}, +${R.systems.chokeSlots} at chokepoints.`, `Waystations (≤${R.systems.waystationCitizens} citizen): forts and depots −${Math.round(R.systems.waystationDiscount * 100)}%.`, 'A black hole stops every fleet entering it.'] },
+        { ic: '☉', t: 'Star systems', b: ['Each world is a system: a star and up to 3 bodies.', `<b>Citizens</b> cap comes from bodies + star (max ${R.systems.maxCitizens}).`, `A quiet <b>Core</b> grows a citizen every ${R.systems.growthEvery} turns.`, W && !W.slots ? `<b>Works</b>: up to ${W.worksCap} kinds, one per productive body.` : 'Civil slots come from bodies; a <b>Station</b> adds one.'] },
+        { ic: '⛯', t: W && !W.slots ? 'Yards & tracks' : 'Gates & slots', b: [`Shipyard: ${R.systems.shipyardCitizens} citizens${W?.station === false ? '' : ' or a Station'}. Academy: ${R.systems.academyCitizens}.`, W && !W.slots ? `<b>Walls</b> ${W.wallsCap} (+${W.chokeWalls} at chokepoints); <b>Outpost</b> ${W.outpostCap}.` : `Military slots: ${R.systems.milSlots}, +${R.systems.chokeSlots} at chokepoints.`, `Waystations (≤${R.systems.waystationCitizens} citizen): forts and depots −${Math.round(R.systems.waystationDiscount * 100)}%.`, 'A black hole stops every fleet entering it.'] },
         ...(R.systems.contested !== false ? [
           { ic: '⛓', t: 'Contested', b: ['An enemy warship in your system: <b>contested</b>, no growth.', `Whoever holds space takes the <b>orbitals</b> (gas giant, belt, Station): an attacker plunders ${Math.round((R.systems.plunderShare ?? 0.5) * 100)}%.`, `Lose space and the <b>surface</b> is blockaded: ⚙¢ ${Math.round((R.systems.blockadeIndustry ?? 0.5) * 100)}%, no ✦.`, `Every ${R.systems.refugeeTurns ?? 3} contested turns a citizen flees as <b>refugees</b>.`] },
           { ic: '⚖', t: 'Occupied & Tribute', b: [`Just taken from a house: <b>Occupied</b>, ${Math.round((R.systems.occupiedShare ?? 0.5) * 100)}% for ${R.systems.occupiedTurns ?? 3} turns.`, 'A capture’s lost citizen flees to its old owner.', `A besieger may <b>offer terms</b>: accept next turn, pay ⅓ for ${R.systems.tributeTurns ?? 5} turns, the siege lifts.`, 'Attacking it after: <b>Oathbreaker</b>.'] },

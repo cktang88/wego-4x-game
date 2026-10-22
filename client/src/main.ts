@@ -68,7 +68,7 @@ function route() {
   pending = null;
   // modal dialogs, battle viewers and toasts live on <body>: don't let them leak into the next screen
   // (the Herald and the Saga too: left open on Back, they covered the lobby and kept acting on the old game)
-  document.querySelectorAll('.overlay, .bv-overlay, .toast, .tooltip, .herald-ov, .saga-ov, .mdl-root').forEach(e => { if (!app.contains(e)) e.remove(); });
+  document.querySelectorAll('.overlay, .bv-overlay, .toast, .tooltip, .herald-ov, .saga-ov, .mdl-root, .tcl-ov, .ksel-list').forEach(e => { if (!app.contains(e)) e.remove(); });
   document.title = 'Three Crowns';
   app.innerHTML = '';
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
@@ -78,6 +78,15 @@ function route() {
   lobby();
 }
 window.addEventListener('hashchange', route);
+// a turn notification clicked while this tab is not controlled by the service worker (sw.js can't navigate it)
+try {
+  navigator.serviceWorker?.addEventListener('message', e => {
+    const d = e.data as { type?: unknown; url?: unknown } | null;
+    if (d?.type !== 'tc-open' || typeof d.url !== 'string') return;
+    try { const u = new URL(d.url, location.href); if (u.origin === location.origin && u.hash !== location.hash) location.hash = u.hash; } catch { /* */ }
+  });
+  navigator.serviceWorker?.startMessages();
+} catch { /* no service workers here */ }
 
 function openLocal(key: string) {
   const raw = store.get(key);

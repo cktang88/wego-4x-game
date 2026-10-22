@@ -58,6 +58,21 @@ export const ui = {
   histKey: '',
 };
 
+/**
+ * The drafts in `ui` (chat, sworn pact words, which research node is open, whose empire a spectator reads) belong to
+ * one seat of one game: in hotseat the next player must not find the last player's half-typed pact words for them
+ * (a curtain leak), and a new game must not inherit the old one's. Call with the seat's key before rendering.
+ */
+let uiOwner = '';
+export function uiFor(key: string) {
+  if (key === uiOwner) return;
+  const first = !uiOwner;
+  uiOwner = key;
+  if (first) return;
+  ui.chatDraft = ''; ui.chatTo = ''; ui.pactWords = {}; ui.tech = null; ui.empPid = null; ui.chatOpen = false; ui.chatSeen = 0;
+  ui.chronOpen.clear(); ui.prevTech.clear(); ui.prevLaw.clear();
+}
+
 export interface Ctx {
   g: Host;
   name: ModalName;

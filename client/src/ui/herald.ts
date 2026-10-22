@@ -70,6 +70,7 @@ export function openHerald(g: GameScreen, turn?: number) {
   el.innerHTML = `<div class="herald-back" data-h="close"></div><article class="herald" role="dialog" aria-modal="true" aria-label="The Herald" lang="en"></article>`;
   document.body.appendChild(el);
   open = { el, turn: ed.turn };
+  useDraft(g);
   audio.ui('page');
   render(g, ed);
   requestAnimationFrame(() => el.classList.add('show'));
@@ -104,8 +105,19 @@ export function openHerald(g: GameScreen, turn?: number) {
 /** A headline with its story (the sim may add body, byline and dateline; old saves have none). */
 type Story = Headline & { body?: string; byline?: string; dateline?: string };
 
+// the unfiled draft and its signing choice belong to one seat of one game: in hotseat, the next player must not
+// find the last player's half-written lie in the box (a curtain leak), nor carry it into another game
 let draft = '';
 let asWho: 'house' | 'source' = 'house';
+let draftOf = '';
+const drafts = new Map<string, { draft: string; asWho: 'house' | 'source' }>();
+function useDraft(g: GameScreen) {
+  const k = `${g.gameKey()}:${g.you ?? 's'}`;
+  if (k === draftOf) return;
+  if (draftOf) drafts.set(draftOf, { draft, asWho });
+  const d = drafts.get(k);
+  draft = d?.draft ?? ''; asWho = d?.asWho ?? 'house'; draftOf = k;
+}
 const max = (g: GameScreen) => SR(g.st).dispatchMax ?? 140;
 const edNow = (g: GameScreen) => editions(g).find(e => e.turn === open?.turn) ?? editions(g)[editions(g).length - 1];
 

@@ -71,7 +71,7 @@ function show(sel: HTMLSelectElement) {
     }
   });
   const outside = (e: Event) => { if (!list.contains(e.target as Node) && e.target !== sel) close(false); };
-  const away = () => close(false);
+  const away = (e?: Event) => { if (e?.type === 'scroll' && list.contains(e.target as Node)) return; close(false); };
   setTimeout(() => document.addEventListener('pointerdown', outside, true));
   window.addEventListener('resize', away);
   window.addEventListener('scroll', away, true);
@@ -91,8 +91,17 @@ export function enhanceSelects(root: ParentNode) {
       sel.focus({ preventScroll: true });
       if (open?.sel === sel) close(); else show(sel);
     });
-    // touch: the tap's mousedown is synthesised after touchend; claim the tap first so the native picker never opens
-    sel.addEventListener('touchend', e => { e.preventDefault(); sel.focus({ preventScroll: true }); if (open?.sel === sel) close(); else show(sel); }, { passive: false });
+    // touch: the tap's mousedown is synthesised after touchend; claim the tap first so the native picker never opens.
+    // A swipe that merely starts on the plate scrolls the page: it must not open the list.
+    let t0: { x: number; y: number } | null = null;
+    sel.addEventListener('touchstart', e => { const t = e.touches[0]; t0 = e.touches.length === 1 && t ? { x: t.clientX, y: t.clientY } : null; }, { passive: true });
+    sel.addEventListener('touchmove', e => { const t = e.touches[0]; if (t0 && t && Math.hypot(t.clientX - t0.x, t.clientY - t0.y) > 10) t0 = null; }, { passive: true });
+    sel.addEventListener('touchend', e => {
+      const tap = t0 !== null && e.cancelable;
+      t0 = null;
+      if (!tap) return;
+      e.preventDefault(); sel.focus({ preventScroll: true }); if (open?.sel === sel) close(); else show(sel);
+    }, { passive: false });
     sel.addEventListener('keydown', e => {
       if (e.key === 'Enter' || e.key === ' ' || (e.altKey && e.key === 'ArrowDown') || e.key === 'F4') { e.preventDefault(); show(sel); }
     });

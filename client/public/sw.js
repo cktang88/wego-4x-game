@@ -8,6 +8,12 @@ self.addEventListener('activate', e => { e.waitUntil(self.clients.claim()); });
 
 const DEFAULT = { title: 'The Herald', body: 'The table waits for your seal.', tag: 'three-crowns', url: '/', game: '', kind: 'turn' };
 
+/** A same-origin path (browsers read '/\\host' as '//host'), else '/'. */
+function ownUrl(u) {
+  if (typeof u !== 'string' || !u.startsWith('/')) return '/';
+  try { const x = new URL(u, self.location.origin); return x.origin === self.location.origin ? x.pathname + x.search + x.hash : '/'; } catch { return '/'; }
+}
+
 function parse(e) {
   if (!e.data) return DEFAULT;
   try {
@@ -17,7 +23,7 @@ function parse(e) {
       body: typeof p.body === 'string' ? p.body.slice(0, 300) : DEFAULT.body,
       tag: typeof p.tag === 'string' ? p.tag.slice(0, 120) : DEFAULT.tag,
       // only ever open our own pages
-      url: typeof p.url === 'string' && p.url.startsWith('/') && !p.url.startsWith('//') ? p.url : '/',
+      url: ownUrl(p.url),
       game: typeof p.game === 'string' ? p.game.slice(0, 40) : '',
       kind: typeof p.kind === 'string' ? p.kind : 'turn',
     };
@@ -51,15 +57,19 @@ self.addEventListener('push', e => {
 
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  const url = new URL(e.notification.data?.url || '/', self.location.origin).href;
+  const url = new URL(ownUrl(e.notification.data?.url), self.location.origin).href;
   e.waitUntil((async () => {
     const tabs = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const same = tabs.find(c => c.url === url) ?? tabs.find(c => new URL(c.url).origin === self.location.origin);
-    if (same) {
-      if (same.url !== url && 'navigate' in same) { try { await same.navigate(url); } catch { /* cross-origin or not controlled */ } }
-      return same.focus();
-    }
-    return self.clients.openWindow(url);
+    if (!same) return self.clients.openWindow(url);
+    // focus first: the click's permission to raise a window does not outlast the awaits below
+    const focused = await same.focus().catch(() => same);
+    if (same.url === url) return focused;
+    let moved = null;
+    if ('navigate' in same) { try { moved = await same.navigate(url); } catch { /* not controlled by this worker */ } }
+    // an uncontrolled tab can't be navigated from here: the page moves itself (main.ts listens for tc-open)
+    if (!moved) same.postMessage({ type: 'tc-open', url });
+    return focused;
   })());
 });
 

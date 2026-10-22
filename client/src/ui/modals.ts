@@ -11,7 +11,7 @@
 import '../modals.css';
 import type { GameScreen } from '../game.ts';
 import { battleViewerOpen } from '../render/battle.ts';
-import { type Ctx, type Host, type ModalName, ui, esc } from './modal-util.ts';
+import { type Ctx, type Host, type ModalName, ui, uiFor, esc } from './modal-util.ts';
 import { EMPIRE_TABS, empireHead, empireBody, empireAfter, empireAct } from './modal-empire.ts';
 import { scoreHead, scoreBody, scoreAct, sendChat } from './modal-score.ts';
 import { CHRON_FILTERS, chronicleHead, chronicleBody, chronicleAct } from './modal-chronicle.ts';
@@ -149,6 +149,8 @@ function bodyHtml(o: Open, c: Ctx): string {
 function render(force = false) {
   const o = cur;
   if (!o) return;
+  const gk = (o.g as Host & { gameKey?(): string }).gameKey?.();
+  if (gk !== undefined) uiFor(`${gk}:${o.g.you ?? 's'}`);
   const c = ctx(o);
   o.root.dataset.modal = o.name;
   o.root.dataset.tab = c.tab;
