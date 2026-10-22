@@ -19,6 +19,7 @@ import { fatePill, fatePop } from './signature.ts';
 import { ic, icFor } from '../art/icons.ts';
 import { audio } from '../audio/audio.ts';
 import { openSoundSettings, soundIcon } from '../audio/hooks.ts';
+import { canVibrate, haptic, hapticsOn, setHaptics } from '../fx/haptics.ts';
 
 type ModalName = 'empire' | 'score' | 'chronicle' | 'help';
 interface ModalsModule {
@@ -179,12 +180,13 @@ export class Hud {
     const html = st.players.map(p => {
       const s = meta.seats[p.id];
       const rt = g.replay && !g.replay.preview && g.replay.result.turn === st.turn - 1 ? g.replay.result.turn : null;
-      const vp = rt !== null ? p.vp - p.vpLog.filter(v => v.turn === rt).reduce((a, v) => a + v.amount, 0) : p.vp;
+      // during the reveal: where the house stood before this turn; during the count-up: the coins landed so far
+      const vp = g.vpShown.get(p.id) ?? (rt !== null ? p.vp - p.vpLog.filter(v => v.turn === rt).reduce((a, v) => a + v.amount, 0) : p.vp);
       const frac = Math.max(0, Math.min(1, vp / Math.max(1, target)));
       const sealed = !g.live && s?.submitted && st.winner === null;
       const oath = (p.oathbreaker ?? []).length;
       return `<div class="pcrest ${p.id === g.you ? 'you' : ''} ${p.eliminated ? 'out' : ''} ${oath ? 'oath' : ''}" style="--pc:${esc(p.color)}" data-crest="${p.id}"${tip(`${p.name}: ${p.vp} of ${target} victory points (♛)${leader === p.id ? ' · in the lead' : ''}${sealed ? ' · orders sealed' : ''}${oath ? ' · Oathbreaker' : ''}`)}>
-        <span class="cb"><b class="vp" data-num="vp-${p.id}">${vp}</b>${oath ? '<i class="crack" aria-label="Oathbreaker"></i>' : ''}</span>${leader === p.id ? '<i class="lead" aria-label="In the lead">♛</i>' : ''}${sealed ? '<i class="sealed" aria-label="Orders sealed">✓</i>' : ''}
+        <span class="cb"><b class="vp" data-vp="${p.id}">${vp}</b>${oath ? '<i class="crack" aria-label="Oathbreaker"></i>' : ''}</span>${leader === p.id ? '<i class="lead" aria-label="In the lead">♛</i>' : ''}${sealed ? '<i class="sealed wax" aria-label="Orders sealed"></i>' : ''}
         <span class="nm">${s?.online && g.src.kind === 'remote' ? '<i class="on"></i>' : ''}${esc(shortName(p.name, 1))}</span><i class="vpbar"><i style="width:${(frac * 100).toFixed(1)}%"></i></i></div>`;
     }).join('');
     g.setHtml(this.h.crests, `<button class="crests" aria-label="Score: victory points of each player">${html}</button>`);
@@ -268,6 +270,7 @@ export class Hud {
         ${item('signals', '◎', `Signals ${g.showSignals ? 'on' : 'off'}`)}
         ${(() => { const m = audio.getSettings().muted; return item('sound', soundIcon(m), `Sound ${m ? 'off' : 'on'}`, `${m ? ' class="off"' : ''} aria-pressed="${!m}"${tip('Mute or unmute · Shift+M')}`); })()}
         ${item('soundset', soundIcon(false), 'Sound settings')}
+        ${canVibrate() && g.root.classList.contains('touch') ? item('haptics', ic('bolt'), `Haptics ${hapticsOn() ? 'on' : 'off'}`, `${hapticsOn() ? '' : ' class="off"'} aria-pressed="${hapticsOn()}"`) : ''}
         ${g.phone ? item('legend', '?', 'Map key') : ''}
         ${item('help', ic('help'), 'Help')}
         ${g.you !== null ? item('teach', ic('replay'), 'Teach again') : ''}
@@ -291,6 +294,7 @@ export class Hud {
     if (x === 'reveal') { if (e.type === 'change' && g.src instanceof LocalSource) g.src.setReveal((m as HTMLInputElement).checked); return; }
     if (e.type !== 'click') return;
     if (x === 'signals') { g.toolbar('signals'); return; }
+    if (x === 'haptics') { setHaptics(!hapticsOn()); haptic('slot'); if (this.pop) this.showPop(this.pop.kind, this.pop.anchor); return; }
     if (x === 'sound') {
       audio.unlock();
       if (!audio.toggleMute()) audio.ui('click');

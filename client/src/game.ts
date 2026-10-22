@@ -34,6 +34,15 @@ import { FATE_USES, POSTURES, WORLD_POSTURES } from '../../shared/config/content
 import { maybeHerald, openHerald, heraldOpen, closeHerald } from './ui/herald.ts';
 import { openSaga, sagaOpen, closeSaga } from './ui/saga.ts';
 import { audio } from './audio/audio.ts';
+import { direct, flopArrows, SOUL_STAMP, type Beat } from './fx/director.ts';
+import { ReplayClock, reduced as reducedFx } from './fx/motion.ts';
+import { Stage } from './fx/stage.ts';
+import { sealRitual, SEAL_MS } from './fx/seal.ts';
+import { Reckoning } from './fx/summary.ts';
+import { vpChanges, turnEntries, type VpEntry } from './fx/vp.ts';
+import { nearMissLine } from './fx/nearmiss.ts';
+import { crowning } from './fx/crowning.ts';
+import { haptic } from './fx/haptics.ts';
 // the chrome theme and the Soul layer's styles load after every other sheet (shell.css, modals.css)
 import './theme.css';
 import './soul.css';
@@ -46,7 +55,6 @@ export type Lens = 'political' | 'supply' | 'economy' | 'military';
 export const LENSES: Lens[] = ['political', 'supply', 'economy', 'military'];
 
 interface ReplayFleet { id: number; owner: number; ships: number; region: number; alpha: number; name: string }
-interface Beat { dur: number; events: GameEvent[] }
 interface Replay {
   result: TurnResult;
   beats: Beat[];
@@ -65,6 +73,19 @@ interface Replay {
   preview: boolean;
   /** battles shown so far in this replay (result chips) */
   seen: number[];
+  /** the latest turn, freshly resolved (seals, the inhale, the Reckoning); not a Preview, a re-watch or a LIVE tick */
+  fresh: boolean;
+  /** the beat whose side effects (sounds, staged acts, hit-pauses) have run; they wait while paused or curtained */
+  begun: number;
+  /** seats in the order they sealed (Act I) */
+  sealOrder: number[];
+  /** Act II: every visible move of the turn, drawn as arrows; and when the flop began (replay clock) */
+  flop: { owner: number; from: number; to: number }[];
+  flopAt: number | null;
+  /** the one battle that gets the big treatment (slow motion on its decisive volley), if any */
+  big: number | null;
+  /** real time before which the reveal waits (the seal ritual still playing: a local game resolves at once) */
+  holdUntil: number;
 }
 
 export class GameScreen {
@@ -129,12 +150,32 @@ export class GameScreen {
   hoverSlot: number | null = null;
   /** onboarding: a ghost arrow to draw (region ids) */
   teachArrow: { from: number; to: number } | null = null;
+  // ---- reward moments (client/src/fx)
+  /** the replay's clock: hit-pauses and slow motion bend it, never backwards */
+  clock = new ReplayClock();
+  /** the staged acts over the board (seals, battle holds, titles) */
+  stage!: Stage;
+  /** the VP count-up and the Reckoning ribbon */
+  reck!: Reckoning;
+  /** a crest's VP during the count-up (null/absent: the real value) */
+  vpShown = new Map<number, number>();
+  /** LIVE: VP log entries already counted up, per house */
+  private vpSeen: number[] | null = null;
+  /** when each seat was seen to seal this turn (AIs first, -1); unseen seals count as last */
+  private sealSeen = new Map<number, number>();
+  private sealTurn = -1;
+  private lastSealOrder: number[] = [];
+  /** the seal ritual is playing: a hotseat hand-off waits for it; the first act waits too */
+  sealingUntil = 0;
+  sealDoneAt = 0;
   private lastPlanKey = '';
   private ro: ResizeObserver | null = null;
   private timers = new Set<number>();
   private memo: { supSrc?: GameState; cut?: Set<number> | null; unsup?: Set<number>; visSrc?: number[]; vis?: Set<number>; laySrc?: Fleet[]; layPx?: number; lay?: Map<number, Pt> } = {};
 
   constructor(parent: HTMLElement, public src: GameSource, public onExit: () => void) {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this;
     resetUiFx();
     this.root = h('div', { class: 'game shell' });
     parent.appendChild(this.root);
@@ -143,6 +184,17 @@ export class GameScreen {
     this.map = new MapRenderer(this.el.canvas as HTMLCanvasElement);
     this.plan = this.freshPlan();
     this.hud = new Hud(this);
+    this.stage = new Stage(this.root);
+    this.reck = new Reckoning({
+      get st() { return self.st; }, get you() { return self.you; }, layer: this.stage.layer,
+      toClient: p => { const q = self.map.toScreen(p), r = self.el.canvas.getBoundingClientRect(); return r.width ? { x: q.x + r.left, y: q.y + r.top } : null; },
+      mapRect: () => self.el.canvas.getBoundingClientRect(),
+      crest: p => self.hud.h.crests.querySelector<HTMLElement>(`[data-crest="${p}"]`),
+      setShown: (p, v) => { if (v === null) self.vpShown.delete(p); else self.vpShown.set(p, v); },
+      ribbonTop: () => { const t = self.hud.h.res.getBoundingClientRect(), c = self.hud.h.crests.getBoundingClientRect(), k = self.hud.h.turn.getBoundingClientRect(); return Math.max(t.bottom, c.bottom, k.bottom, 0) + 10; },
+      get phone() { return self.phone; },
+      busy: () => !!self.sel || self.covered() || !self.hud.h.card.classList.contains('hidden'),
+    });
     this.gest = new Gestures(this);
     src.onChange = k => this.onSourceChange(k);
     if (src instanceof LocalSource) src.onHandoff = seat => this.handoff(seat);
@@ -181,6 +233,8 @@ export class GameScreen {
     this.src.close();
     this.curtain?.remove();
     this.teach?.destroy();
+    this.reck.destroy();
+    this.stage.destroy();
     this.gest.destroy();
     this.hud.destroy();
     this.tipEl?.remove();
@@ -281,7 +335,7 @@ export class GameScreen {
   get st(): GameState { return this.src.view.state; }
   get you(): number | null { return this.src.view.you; }
   get submitted(): boolean { return !!this.src.mySubmission; }
-  get canPlan(): boolean { return this.you !== null && (this.live || !this.submitted) && this.st.winner === null && !this.st.players[this.you].eliminated; }
+  get canPlan(): boolean { return this.you !== null && (this.live || !this.submitted) && this.st.winner === null && !this.st.players[this.you].eliminated && performance.now() >= this.sealingUntil; }
   /** LIVE mode (real time, banked orders) instead of WEGO turns. */
   get live(): boolean { return !!this.st.live; }
   /** A replay that takes over the map (WEGO turn, Preview); a LIVE tick's short animation doesn't. */
@@ -296,6 +350,7 @@ export class GameScreen {
     if (!noSnap) this.snapshot();
     if (fa.type === 'merge' || fa.type === 'doctrine' || fa.type === 'rename' || fa.type === 'halt') this.plan.free = this.plan.free.filter(x => !(x.type === fa.type && x.fleet === fa.fleet));
     this.plan.free.push(fa);
+    if (fa.type === 'posture' || fa.type === 'wposture') haptic('posture');
     this.savePlan();
   }
   /** Remember the plan for Ctrl+Z (WEGO). */
@@ -519,6 +574,7 @@ export class GameScreen {
       if (err) { toast(`⊘ ${shortWhy(err)}`); return false; }
       this.src.liveOrder?.(o);
       audio.ui('order');
+      haptic('slot');
       this.flashOrder = performance.now();
       this.afterAction();
       return true;
@@ -539,6 +595,7 @@ export class GameScreen {
     this.replacing = null;
     this.savePlan();
     audio.ui('order');
+    haptic('slot');
     this.afterAction();
     return true;
   }
@@ -625,9 +682,10 @@ export class GameScreen {
   onSourceChange(k: string) {
     if (k === 'chat') { if (!this.hud.chatVisible()) this.unreadChat++; this.renderAll(); return; }
     if (k === 'error') { toast(this.src.lastError); return; }
-    if (k === 'meta') { this.renderAll(); return; }
+    if (k === 'meta') { this.trackSeals(); this.renderAll(); return; }
     // full view
     backfillRules(this.st);
+    this.trackSeals();
     if (this.you !== null) this.lastYou = this.you;
     audio.me = this.you ?? this.mySeat();
     if (!this.map.fitted && this.map.w > 0) {
@@ -677,6 +735,8 @@ export class GameScreen {
         if (!first && interesting && !this.replay && !document.hidden) { this.startReplay(last); const r = this.replay as { speed: number } | null; if (r) r.speed = Math.max(this.replaySpeed, 3); this.pulseFx(true); }
         else if (!this.replay) this.pulseFx();
       }
+      // LIVE: victory points land at a cycle's end: the coins fly (no ribbon; the minute loop stays light)
+      this.liveCoins(last ?? null);
     } else if (last && last.turn > this.lastSeenTurn && this.st.turn > 1) {
       this.lastSeenTurn = last.turn;
       try { localStorage.setItem(seenKey, String(last.turn)); } catch { /* */ }
@@ -685,7 +745,7 @@ export class GameScreen {
       // empire news (bought before pulse I) opens the replay; spectators already get the real events
       const known = new Set(last.events.filter(e => e.k === 'tech' || e.k === 'law').map(e => JSON.stringify([e.k, (e as { owner: number }).owner, e.k === 'tech' ? e.tech : e.law])));
       const extra = news.filter(e => !known.has(JSON.stringify([e.k, e.owner, e.k === 'tech' ? e.tech : e.law])));
-      this.startReplay(extra.length ? { ...last, events: [...extra, ...last.events] } : last);
+      this.startReplay(extra.length ? { ...last, events: [...extra, ...last.events] } : last, false, true);
       // hotseat: don't play the replay behind the curtain
       if (this.replay && this.curtain) this.replay.playing = false;
     }
@@ -706,6 +766,38 @@ export class GameScreen {
   }
   /** The seat this screen last played (a finished game's view is the revealed spectator one). */
   lastYou: number | null = null;
+  /**
+   * Who sealed when (Act I cracks the seals in that order). Seen from the seats' "submitted" flags as they change:
+   * AI seats seal at once; a seal the screen never saw (the one that made the turn resolve) counts as the last.
+   */
+  trackSeals() {
+    const seats = this.src.meta?.seats ?? [];
+    const turn = this.st.turn;
+    if (turn !== this.sealTurn) {
+      if (this.sealTurn >= 0) {
+        const known = [...this.sealSeen.entries()].sort((a, b) => a[1] - b[1] || a[0] - b[0]).map(x => x[0]);
+        const rest = this.st.players.map(p => p.id).filter(id => !known.includes(id));
+        this.lastSealOrder = [...known, ...rest];
+      }
+      this.sealTurn = turn;
+      this.sealSeen.clear();
+    }
+    const now = performance.now();
+    seats.forEach((x, i) => {
+      if (x.submitted && !this.sealSeen.has(i)) this.sealSeen.set(i, x.kind === 'ai' ? -1 : now + i * 1e-3);
+      else if (!x.submitted) this.sealSeen.delete(i);
+    });
+  }
+  /** LIVE: new VP log entries since the last look fly in as coins. */
+  liveCoins(result: TurnResult | null) {
+    const logs = this.st.players.map(p => p.vpLog ?? []);
+    const seen = this.vpSeen;
+    this.vpSeen = logs.map(l => l.length);
+    if (!seen || seen.length !== logs.length || document.hidden || this.st.winner !== null) return;
+    const entries = new Map<number, VpEntry[]>(this.st.players.map((p, i) => [p.id, logs[i].slice(Math.min(seen[i], logs[i].length))]));
+    if (![...entries.values()].some(l => l.length)) return;
+    this.reck.start(vpChanges(this.st, entries, result), null, { ribbon: false });
+  }
   lastSeenTick = -1;
   /** LIVE tick: a soft ripple sweeps across the map from your capital (or the centre), and battles pulse, so the world feels alive. */
   pulseFx(rippleOnly = false) {
@@ -744,6 +836,8 @@ export class GameScreen {
     if (this.replay?.preview) { this.replay = null; this.fx = []; this.previewing = false; this.map.resetAnim(); }
     // numbers that count between values would flash the previous player's resources
     resetUiFx();
+    // nor may the previous player's count-up, ribbon or staged acts linger for the next one
+    this.reck.finish(true); this.reck.dismiss(); this.stage.clear(); this.vpShown.clear();
     // (and the Charge? offer floating over the region the previous player just chose to seize)
     document.querySelectorAll('.overlay:not(.curtain), .bv-overlay, .chargeoffer').forEach(x => x.remove());
     closeHerald(); closeSaga();
@@ -756,10 +850,8 @@ export class GameScreen {
       o.remove();
       if (this.curtain === o) this.curtain = null;
       if (this.replay) {
-        this.replay.playing = true; this.replay.last = performance.now();
-        // the beat that started behind the curtain was kept quiet: voice it now
-        const b = this.replay.beats[this.replay.i];
-        if (b && !this.replay.preview && !this.live) audio.onGameEvents(b.events, { stagger: 0.04, delay: 0.2 });
+        // the beat that started behind the curtain was kept quiet: frame() begins it (sounds, staged acts) now
+        this.replay.playing = true; this.replay.last = this.clock.now;
       }
       this.renderAll();
       this.maybeShowVictory();
@@ -855,8 +947,20 @@ export class GameScreen {
       this.undoStack = [];
       // a running Preview shows this plan: never let it play on (hotseat: behind the next player's curtain)
       if (this.replay?.preview) this.endReplay();
-      audio.ui('seal');
-      this.src.submit(structuredClone(this.plan));
+      // the seal ritual: wax drips, the signet presses (the bell), the seal flies to your crest
+      const seat = this.you!;
+      const crest = this.hud.h.crests.querySelector<HTMLElement>(`[data-crest="${seat}"]`);
+      const btn = this.hud.h.primary.querySelector<HTMLElement>('[data-submit]') ?? this.hud.h.primary;
+      const r = btn.getBoundingClientRect();
+      this.sealDoneAt = sealRitual(this.stage.layer, { seat, color: this.color(seat) }, r.width ? r : null, crest?.getBoundingClientRect() ?? null);
+      const plan = structuredClone(this.plan);
+      // hotseat: the next player's curtain would hide the ritual (and the board must not change under it): the
+      // hand-off waits for it; the orders can't change meanwhile (canPlan)
+      if (this.src instanceof LocalSource && this.src.humans.length > 1 && !reducedFx()) {
+        this.sealingUntil = performance.now() + SEAL_MS;
+        this.renderAll();
+        this.later(() => { this.sealingUntil = 0; if (!this.src.mySubmission) this.src.submit(plan); }, SEAL_MS - 60);
+      } else this.src.submit(plan);
       if (this.src.kind === 'remote' && 'Notification' in window && Notification.permission === 'default') void Notification.requestPermission();
     };
     if (used < this.plan.orders.length && !now) {
@@ -889,41 +993,40 @@ export class GameScreen {
     this.renderAll();
   }
 
-  startReplay(result: TurnResult, preview = false) {
+  /**
+   * Play a turn's result on the map. The replay director (fx/director.ts) paces it in five acts; `fresh` marks the
+   * turn that just resolved (Act I's seals, the room's inhale, the Reckoning at the end), not a re-watch.
+   */
+  startReplay(result: TurnResult, preview = false, fresh = false) {
     const st = this.st;
     const fleets = new Map<number, ReplayFleet>();
     for (const f of result.startFleets) fleets.set(f.id, { id: f.id, owner: f.owner, ships: f.ships.length, region: f.region, alpha: 1, name: f.name });
-    const beats: Beat[] = [];
-    const push = (dur: number, e: GameEvent) => { beats.push({ dur, events: [e] }); };
-    for (const e of result.events) {
-      if (e.k === 'move') {
-        const c = beats[beats.length - 1] as Beat | undefined;
-        const f0 = c?.events[0];
-        if (c && f0 && f0.k === 'move' && f0.pulse === e.pulse && f0.step === e.step && !!f0.guard === !!e.guard) c.events.push(e);
-        else push(750, e);
-      } else if (e.k === 'pulse') { /* one-step turns: no pulse beats */ }
-      else if (e.k === 'battle' || e.k === 'clash') push(1100, e);
-      else if (e.k === 'retreat') push(600, e);
-      else if (e.k === 'capture' || e.k === 'excavate' || e.k === 'destroyed') push(650, e);
-      else if (e.k === 'build' || e.k === 'project' || e.k === 'betrayal' || e.k === 'pact' || e.k === 'refit') push(450, e);
-      else if (e.k === 'tech' || e.k === 'law') push(e.k === 'tech' && TECH[e.tech]?.tier === 4 ? 1100 : 600, e);
-      else if (e.k === 'rout') push(800, e);
-      else if (e.k === 'posture') { if (e.outcome !== 'none') push(950, e); }
-      else if (e.k === 'fate') push(900, e);
-      else if (e.k === 'soul') { if (SOUL_STAMP[e.kind] && e.region !== undefined) push(SOUL_STAMP[e.kind][2] ? 1000 : 750, e); }
-      else if (e.k === 'fail' || e.k === 'note' || e.k === 'blocked' || e.k === 'influence' || e.k === 'fortify' || e.k === 'scan') push(e.k === 'fail' ? 500 : 350, e);
-    }
-    if (!beats.length) return;
+    const liveTick = this.live && !preview;
+    fresh = fresh && !preview && !this.live;
+    const beats: Beat[] = direct(result, st, { you: this.you, live: liveTick, preview, seals: fresh && st.players.filter(p => !p.eliminated).length > 1 });
+    // nothing visible happened: no replay (a fresh turn still gets its Reckoning)
+    if (!beats.some(b => b.events.length)) { if (fresh) this.reckon(result); return; }
+    // the big treatment (slow motion on the decisive volley) goes to one battle at most: the main event if it was
+    // truly decided, else the highest-stakes battle that was
+    const decided = beats.filter(b => b.decisive && b.events[0]?.k === 'battle');
+    const big = liveTick || preview ? null : (decided.find(b => b.main) ?? decided[decided.length - 1])?.battle ?? null;
     // starting a replay while another runs (or a preview) replaces it cleanly
     const speed = this.replaySpeed;
     this.fx = [];
+    this.stage.clear();
+    this.clock.reset();
     this.previewing = preview;
     const owners = result.startOwners.length ? result.startOwners.slice() : st.regions.map(r => r.owner);
     // a live tick continues from what is on screen; a WEGO replay rewinds to the start of the turn (a cut, not an animation)
     this.replayCont = this.live && !preview && !this.replay;
     if (!this.replayCont) { this.map.resetAnim(); this.fleetOff.clear(); this.lastFleetPos.clear(); }
-    const liveTick = this.live && !preview;
-    this.replay = { result, beats, i: -1, prog: 0, last: performance.now(), playing: true, speed, fleets, owners, startLayout: new Map(), endLayout: new Map(), moving: new Set(), pulse: 0, preview, seen: [] };
+    // a new reveal: the last one's ribbon gives way
+    this.reck.finish(true); this.reck.dismiss();
+    this.replay = {
+      result, beats, i: -1, prog: 0, last: this.clock.now, playing: true, speed, fleets, owners, startLayout: new Map(), endLayout: new Map(), moving: new Set(), pulse: 0, preview, seen: [],
+      fresh, begun: -1, sealOrder: this.lastSealOrder.slice(), flop: liveTick || preview ? [] : flopArrows(result), flopAt: null, big,
+      holdUntil: fresh ? Math.min(this.sealDoneAt, performance.now() + 900) : 0,
+    };
     // a LIVE tick plays under whatever you're doing (every few seconds in blitz): keep your selection and
     // targeting; a click ends the tick's animation and goes through
     if (!liveTick) { this.sel = null; this.mode = null; this.targetSlot = null; this.hideTip(); this.gest.cancel(); }
@@ -937,17 +1040,14 @@ export class GameScreen {
     if (R.i >= R.beats.length) { this.endReplay(); return; }
     const beat = R.beats[R.i];
     R.prog = 0;
-    R.last = performance.now();
+    R.last = this.clock.now;
     R.moving.clear();
-    // each beat's events, as the replay reaches them. Not for a Preview (nothing happened), not behind the hotseat
-    // curtain (it would tell the next player what's coming), and not for LIVE ticks (onSourceChange voices them once)
-    if (!R.preview && !this.live && !this.curtain) audio.onGameEvents(beat.events, { stagger: 0.04, delay: R.i === 0 ? 0.45 : 0 });
     const st = this.st;
     const live = () => [...R.fleets.values()].filter(f => f.alpha > 0);
     R.startLayout = regionLayout(st, live().map(f => ({ id: f.id, region: f.region })), this.map.px(1));
     // start every token from where it is on screen, so beats (and live ticks) flow into each other without jumps
     for (const [id, p] of this.lastFleetPos) if (R.startLayout.has(id)) R.startLayout.set(id, p);
-    const now = performance.now();
+    const now = this.clock.now;
     const text: string[] = [];
     let focus: Pt | null = null;
     for (const e of beat.events) {
@@ -1035,22 +1135,105 @@ export class GameScreen {
     if (focus && !this.live && R.playing && !this.gest.busy && !this.curtain && !this.map.onScreen(focus, this.phone ? 70 : 110)) this.map.flyTo(focus, undefined, 750);
     void text;
     for (const e of beat.events) if (e.k === 'battle' && !R.seen.includes(e.battle)) R.seen.push(e.battle);
+    // a staged beat over a battle off-screen: bring it into view first
+    if (beat.kind === 'hold' && beat.battle !== undefined && !this.live && R.playing && !this.gest.busy && !this.curtain) {
+      const b = R.result.battles.find(x => x.id === beat.battle);
+      const site = b ? st.regions[b.region]?.site : undefined;
+      if (site && !this.map.onScreen(site, this.phone ? 90 : 140)) this.map.flyTo(site, undefined, 500);
+    }
+    // its side effects (sounds, staged acts, pauses) run once it actually plays: not while paused, not behind the curtain
+    if (R.playing && !this.curtain && performance.now() >= R.holdUntil) this.beginBeat();
     this.renderAll();
+  }
+
+  /**
+   * The moment a beat starts playing: its sounds (not for a Preview, where nothing happened, nor LIVE ticks, which
+   * onSourceChange voices once), the staged acts (seals, the flop, a battle's hold and title), the decisive volley's
+   * slow motion and push-in, CALLED IT's hit-pause, and your haptics.
+   */
+  beginBeat() {
+    const R = this.replay;
+    if (!R || R.begun === R.i) return;
+    R.begun = R.i;
+    const beat = R.beats[R.i];
+    if (!beat) return;
+    const st = this.st;
+    const k = 1 / Math.max(0.25, R.speed);
+    if (!R.preview && !this.live) audio.onGameEvents(beat.events, { stagger: 0.04, delay: R.i === 0 && !beat.kind ? 0.45 : 0 });
+    if (beat.kind === 'seals') {
+      const houses = st.players.filter(p => !p.eliminated).map(p => ({ seat: p.id, name: p.name, color: this.color(p.id) }));
+      this.stage.sealsAct(houses, R.sealOrder, beat.dur * k);
+      // the last seal: the room inhales before the reveal
+      if (R.fresh) audio.inhale();
+    } else if (beat.kind === 'flop') {
+      R.flopAt = this.clock.now;
+      audio.sfx('ui_page', { vol: 0.45, rate: 0.85 });
+    } else if (beat.kind === 'hold' && beat.battle !== undefined) {
+      const rep = R.result.battles.find(b => b.id === beat.battle);
+      const site = rep ? st.regions[rep.region]?.site : undefined;
+      if (rep && site) this.stage.hold(rep, site, o => this.color(o), o => this.pname(o), beat.dur * k);
+    } else if (beat.kind === 'title' && beat.label) {
+      this.stage.title(`…and at ${beat.label}.`, beat.dur * k);
+      audio.sfx('ui_banner', { vol: 0.55, rate: 0.9 });
+    }
+    // the decisive volley of the turn's big battle: slow motion (0.35× for 600 ms), the wreck pitched down, and the
+    // camera leaning in on the world, then back. Only on a volley that really decided it (fx/battlefacts.ts).
+    if (beat.decisive && beat.battle === R.big && beat.events[0]?.k === 'battle' && !reducedFx() && !this.live && !R.preview) {
+      const rep = R.result.battles.find(b => b.id === beat.battle);
+      const site = rep ? st.regions[rep.region]?.site : undefined;
+      const at = beat.dur * 0.42 * k;
+      this.clock.slow(0.35, 600, at);
+      audio.slowMo({ delay: at / 1000 });
+      if (site && !this.gest.busy && !this.curtain) {
+        const prev = { ...this.map.cam };
+        const z = Math.min(3, prev.z * (this.phone ? 1.35 : 1.6));
+        this.map.flyTo(site, z, Math.max(300, at + 80));
+        this.later(() => {
+          // back to where the camera was, unless the player took it meanwhile
+          if (this.replay === R && Math.abs(this.map.cam.z - z) < 1e-3 * z && !this.gest.busy) this.map.flyTo({ x: prev.x, y: prev.y }, prev.z, 700);
+        }, at + 600 + 220);
+      }
+    }
+    for (const e of beat.events) {
+      if (e.k === 'posture' && e.outcome !== 'none') {
+        // CALLED IT lands (the stamp's slam ends 12% into its 1.7 s) with a 120 ms hit-pause and a small thump
+        if (e.outcome === 'called') {
+          this.clock.hitPause(120, 204 * k);
+          this.later(() => { if (this.replay === R) this.stage.thump(this.el.stage, 3); }, 204 * k + 120);
+        }
+        if (this.you !== null && e.owner === this.you && !R.preview) haptic(e.outcome === 'called' ? 'called' : 'caught');
+        else if (this.you !== null && e.outcome === 'called' && e.with?.includes(this.you) && !R.preview) haptic('caught');
+      }
+      if (e.k === 'capture' && this.you !== null && e.by === this.you && !R.preview) haptic(st.regions[e.region]?.kind === 'crown' || st.regions[e.region]?.kind === 'throne' ? 'crown' : 'capture');
+    }
   }
 
   endReplay() {
     if (!this.replay) return;
-    const res = this.replay.result;
-    const wasPreview = this.replay.preview;
+    const R = this.replay;
+    const res = R.result;
+    const wasPreview = R.preview;
     this.replay = null;
     this.fx = [];
     this.previewing = false;
+    this.stage.clear();
+    this.clock.reset();
     if (wasPreview) this.map.resetAnim(); // owners/fleets snap back to the plan: not a capture
-    void res;
+    // the Reckoning: coins to the crests, the ribbon (a skip lands here too: nothing is lost by skipping)
+    if (R.fresh && !wasPreview) this.reckon(res);
     this.renderAll();
     this.maybeShowVictory();
     if (!wasPreview && this.st.winner === null) this.heraldCheck();
     if (this.autoPlay && this.src instanceof LocalSource && this.st.winner === null) this.later(() => { if (this.autoPlay && !this.replay) (this.src as LocalSource).advance(); }, 900);
+  }
+
+  /** The end of a fresh turn's reveal: VP coins fly to the crests and the ribbon sums the turn up. */
+  reckon(result: TurnResult) {
+    // the final turn's count happens on the banners of the crowning instead
+    if (this.st.winner !== null || this.live) return;
+    const changes = vpChanges(this.st, turnEntries(this.st, result.turn), result);
+    this.reck.start(changes, result, { ribbon: true, line: nearMissLine(this.st, result, this.you) });
+    this.renderAll();
   }
 
   /** A technology bought or a law enacted: its name rises over the owner's capital; a ★ gets the big banner. */
@@ -1125,16 +1308,21 @@ export class GameScreen {
   // ================================================================== frame
   frame() {
     const now = performance.now();
+    // the replay runs on its own clock (hit-pauses, slow motion); everything else on real time
+    const vnow = this.replay ? this.clock.step(now) : now;
     const st = this.st;
     let owners = st.regions.map(r => r.owner);
     let fleets: FleetDraw[] = [];
     if (this.replay) {
       const R = this.replay;
+      // a beat that began paused or behind the curtain gets its moment once it plays
+      const waiting = now < R.holdUntil;
+      if (R.playing && R.begun !== R.i && !this.curtain && !waiting) this.beginBeat();
       const beat = R.beats[R.i];
       // clamp dt so a backgrounded tab doesn't skip a whole beat on return
-      const dt = Math.min(250, Math.max(0, now - R.last));
-      R.last = now;
-      if (R.playing && beat) {
+      const dt = Math.min(250, Math.max(0, vnow - R.last));
+      R.last = vnow;
+      if (R.playing && beat && !waiting) {
         R.prog += dt * R.speed / beat.dur;
         if (R.prog >= 1) this.nextBeat();
       }
@@ -1214,6 +1402,17 @@ export class GameScreen {
       for (const o of this.queue) this.orderArrows(o, -1, plannedArrows, false);
     }
     if (!this.replay && this.you !== null && !this.live) this.plan.orders.forEach((o, i) => { if (o) this.orderArrows(o, i, plannedArrows, this.hoverSlot === i); });
+    // the reveal's flop (Act II): every visible order arrow of every house, drawn at once, house by house in the
+    // order they sealed, held while the fleets move along them (Act III)
+    const R = this.replay;
+    if (R && R.flopAt !== null && R.flop.length && (R.beats[R.i]?.act ?? 9) <= 3) {
+      const order = R.sealOrder.length ? R.sealOrder : st.players.map(p => p.id);
+      for (const a of R.flop) {
+        const k = Math.max(0, order.indexOf(a.owner));
+        if (vnow - R.flopAt < k * (reducedFx() ? 0 : 170) || !st.regions[a.from] || !st.regions[a.to]) continue;
+        plannedArrows.push({ from: st.regions[a.from].site, to: st.regions[a.to].site, label: '', color: this.color(a.owner), kind: 'move' });
+      }
+    }
     // seize joiners: dashed tethers from your fleets that could still join a planned seize you are looking at
     if (!this.replay && this.canPlan && !this.live) for (const t of this.gest.tethers()) plannedArrows.push({ from: t.from, to: t.to, label: '+', color: '#ff9db0', dashed: true, kind: 'seize' });
     // onboarding ghost arrow
@@ -1226,13 +1425,14 @@ export class GameScreen {
       selectedRegion: this.sel?.kind === 'region' ? this.sel.id : null, hoverRegion: this.hoverRegion,
       highlight, plannedArrows, pathPreview: null,
       signals: this.replay ? [] : this.st.last?.signals ?? [], showSignals: this.showSignals,
-      fx: this.fx, now,
+      fx: this.fx, now: vnow,
       ...this.supplyOverlay(),
     };
     // UX v2 renderer inputs (docs/UX-V2.md §8): the drag arrow, the lens, a fanned stack, Space-peek
     Object.assign(input, { drag: this.blockingReplay ? null : this.gest.drawDrag(now), lens: this.lens, expanded: this.expanded, peek: this.peek, postures: this.replay ? null : postureMap(this) });
     this.map.draw(input);
-    this.fx = this.fx.filter(f => now - f.t0 < f.dur);
+    this.fx = this.fx.filter(f => vnow - f.t0 < f.dur);
+    this.stage.frame(p => this.map.toScreen(p));
     this.gest.afterDraw();
     this.teach?.frame();
     this.root.classList.toggle('targeting', !!this.mode || this.gest.isDragging());
@@ -1267,6 +1467,8 @@ export class GameScreen {
   // ================================================================== rendering
   renderAll() {
     if (this.sel?.kind === 'fleet' && !this.fleet(this.sel.id)) this.sel = null;
+    // the Reckoning ribbon never sits over a card's or a modal's controls
+    if (this.sel || this.hud.modalOpen()) this.reck.dismiss();
     this.hud.render();
     this.teach?.update();
     this.tipCheck();
@@ -1301,6 +1503,8 @@ export class GameScreen {
   get phone(): boolean { return window.matchMedia('(max-width: 700px), (max-height: 500px) and (max-width: 1000px)').matches; }
 
   select(s: { kind: 'region' | 'fleet'; id: number }) {
+    // the player moved on: the Reckoning ribbon gets out of the way of the card
+    this.reck.dismiss();
     const same = this.sel?.kind === s.kind && this.sel.id === s.id;
     this.sel = s;
     this.mode = null;
@@ -1393,7 +1597,9 @@ export class GameScreen {
     if (e.key === ' ') {
       if ((t?.tagName === 'BUTTON')) return;
       e.preventDefault();
+      // Space skips the reveal straight to the Reckoning; a second Space lands every coin at once
       if (this.replay && this.blockingReplay) { this.endReplay(); return; }
+      if (this.reck.counting && !e.repeat) { this.reck.finish(); this.renderAll(); return; }
       if (!this.peek) { this.peek = true; }
       return;
     }
@@ -1530,24 +1736,32 @@ export class GameScreen {
     if (document.querySelector('[data-victory]')) return;
     const st = this.st;
     const w = st.players[st.winner!];
-    // the winner heads the list even on a VP tie (tie-breaks are decided by the rules, not by seat order)
-    const ranks = st.players.slice().sort((a, b) => b.vp - a.vp || (b.id === w.id ? 1 : 0) - (a.id === w.id ? 1 : 0));
-    // a finished game is shown fully revealed (you === null): remember whose seat this screen was
-    // flourish (fx.css): light rays and embers in the winner's colour behind the card, a crown that drops in, ranks that rise in turn
-    const sparks = reducedMotion() ? '' : Array.from({ length: 18 }, (_, i) => `<i style="--x:${(i * 37) % 100}%;--d:${(i * 0.23) % 2.4}s;--s:${0.6 + ((i * 7) % 5) / 5}"></i>`).join('');
-    { const seat = this.mySeat(); audio.gameOver(seat === null || st.winner === seat); }
-    const o = overlay(`<div class="vic-rays" aria-hidden="true"></div><div class="vic-sparks" aria-hidden="true">${sparks}</div><div class="dialog vic-card" data-victory style="text-align:center"><div class="vic-crown" aria-hidden="true">♛</div><h1 class="vic-name" style="color:${w.color};font-size:1.875rem">${esc(w.name)}</h1><h2>${w.id === this.mySeat() ? 'Victory' : 'has won'}</h2>
-      <p class="dim">${esc(st.winReason)}</p>${ranks.map((p, i) => `<div class="vic-rank" style="color:${p.color};--i:${i}">${esc(p.name)}: ${p.vp} VP</div>`).join('')}
-      <p class="dim" style="margin-top:0.75rem">The whole map is now revealed. Browse the Chronicle to relive it.</p><div class="row" style="justify-content:center"><button data-x>Look around</button>${this.st.soul ? '<button class="primary" data-saga>⚜ The Saga</button>' : ''}<button ${this.st.soul ? '' : 'class="primary" '}data-l>Lobby</button></div></div>`);
-    o.classList.add('victory');
-    o.style.setProperty('--win', w.color);
-    // the winner's banner goes up over every region they hold, rippling out from their capital
+    // the ribbon, any count-up and a lingering banner give way to the ceremony
+    this.reck.finish(true); this.reck.dismiss();
+    this.el.banner?.classList.remove('show');
+    // the winner's banner goes up over every region they hold, rippling out from their capital (behind the ceremony)
     const now = performance.now();
     const cap = st.regions[w.capital]?.site ?? st.regions[0].site;
     for (const r of st.regions) if (r.owner === w.id) this.fx.push({ kind: 'capture', pos: r.site, color: w.color, t0: now + Math.hypot(r.site.x - cap.x, r.site.y - cap.y) * 0.6, dur: 1100 });
-    o.querySelector('[data-x]')!.addEventListener('click', () => o.remove());
-    o.querySelector('[data-saga]')?.addEventListener('click', () => { o.remove(); this.openSaga(); });
-    o.querySelector('[data-l]')!.addEventListener('click', () => { o.remove(); this.onExit(); });
+    // the crowning (fx/crowning.ts): the lamp swings to the winner's seat, the banners, the awards, then the Saga
+    crowning({
+      st, me: this.mySeat(), results: () => this.allResults(),
+      onLook: () => {}, onSaga: st.soul ? () => this.openSaga() : null, onLobby: () => this.onExit(),
+    });
+  }
+  /** Every turn's result this source can give (the awards read the whole game; incomplete is allowed, see awards.ts). */
+  allResults(): Promise<TurnResult[]> {
+    const src = this.src;
+    if (src instanceof LocalSource) {
+      // a LIVE game's tick history is capped: once it has been trimmed it no longer covers the whole game
+      const h = src.save.history;
+      return Promise.resolve(this.live && h.length >= 120 ? [] : h.slice());
+    }
+    if (this.live) return Promise.resolve([]);
+    const last = this.st.last?.turn ?? this.st.turn;
+    const turns = Array.from({ length: Math.max(0, last) }, (_, i) => i + 1);
+    const timeout = new Promise<null>(res => setTimeout(() => res(null), 6000));
+    return Promise.all(turns.map(t => Promise.race([src.history(t).catch(() => null), timeout]))).then(rs => rs.filter((r): r is TurnResult => !!r));
   }
 }
 
@@ -1606,9 +1820,4 @@ export function eventText(st: GameState, e: GameEvent, you: number | null): stri
 
 export { EDICTS };
 
-/** Soul-layer story beats worth a stamp in the replay: [stamp text, ink, banner (big moments)]. */
-const SOUL_STAMP: Record<string, [string, string, string?]> = {
-  broken: ['BROKEN', '#ff7a6a'], debt: ['BLOOD-DEBT', '#ff4f5e'], vengeance: ['VENGEANCE', '#ffb84d'], vow_kept: ['VOW KEPT', '#ffd86b'],
-  vow_broken: ['OATHBREAKER', '#ff4f5e'], liberated: ['LIBERATED', '#9de8ff'], razed: ['RAZED', '#ff8a3c'], coronation: ['CROWNED', '#ffd86b', '♛ A NEW REIGN'],
-  retired: ['RETIRED', '#e8d6a0'],
-};
+

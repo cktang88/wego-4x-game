@@ -421,6 +421,142 @@ export class AudioEngine {
     else if (shot.dmg > 0 && Math.random() < 0.35) this.sfx('bt_shield', { pan: o.pan, delay: d, vol: 0.6 });
   }
 
+  // ---------------------------------------------------------------- synthesized accents (the reward moments)
+  // Small Web Audio voices for moments the sample set has no sound for: the VP coin ladder, wax cracking, the
+  // room's inhale before the reveal, the slow-motion boom, a wax drip, and the quiet tick that stands in for a
+  // haptic where there is no vibration motor API (iOS). All go through the effects bus (volume, mute, limiter).
+  private noiseBuf: AudioBuffer | null = null;
+  private synthBus(): { ctx: AudioContext; out: GainNode } | null {
+    const ctx = this.ctx, buses = this.buses;
+    if (!ctx || !buses || this.settings.muted || this.settings.sfx <= 0 || ctx.state === 'closed') return null;
+    return { ctx, out: buses.sfx };
+  }
+  private noise(ctx: AudioContext): AudioBuffer {
+    if (this.noiseBuf) return this.noiseBuf;
+    const b = ctx.createBuffer(1, Math.round(ctx.sampleRate * 0.6), ctx.sampleRate);
+    const d = b.getChannelData(0);
+    let seed = 1234567;
+    for (let i = 0; i < d.length; i++) { seed = (seed * 16807) % 2147483647; d[i] = (seed / 2147483647) * 2 - 1; }
+    this.noiseBuf = b;
+    return b;
+  }
+  /** One partial: a sine (or other wave) with a pitch glide and an exponential decay. */
+  private tone(ctx: AudioContext, out: AudioNode, at: number, f0: number, f1: number, gain: number, dur: number, type: OscillatorType = 'sine', attack = 0.003) {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, at);
+    if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), at + dur * 0.9);
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain), at + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    o.connect(g).connect(out);
+    o.start(at); o.stop(at + dur + 0.05);
+    o.onended = () => { try { g.disconnect(); } catch { /* */ } };
+  }
+  /** A burst of filtered noise (a crack, a click, a breath). */
+  private hiss(ctx: AudioContext, out: AudioNode, at: number, dur: number, gain: number, freq: number, q = 1.2, type: BiquadFilterType = 'bandpass', sweepTo?: number, attack = 0.002) {
+    const s = ctx.createBufferSource(); s.buffer = this.noise(ctx);
+    const f = ctx.createBiquadFilter(); f.type = type; f.frequency.setValueAtTime(freq, at); f.Q.value = q;
+    if (sweepTo) f.frequency.exponentialRampToValueAtTime(sweepTo, at + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain), at + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    s.connect(f).connect(g).connect(out);
+    s.start(at, Math.random() * 0.3); s.stop(at + dur + 0.05);
+    s.onended = () => { try { g.disconnect(); } catch { /* */ } };
+  }
+
+  /**
+   * A gold coin landing on a crest, step `i` of the Balatro ladder: each coin a step higher on a major-pentatonic
+   * scale (so any run sounds resolved). `down`: a coin taken away (a broken pact), a falling minor note instead.
+   */
+  coin(i: number, o: { delay?: number; down?: boolean; vol?: number } = {}): void {
+    const b = this.synthBus(); if (!b) return;
+    const { ctx, out } = b;
+    const at = ctx.currentTime + Math.max(0, o.delay ?? 0);
+    const LADDER = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28, 31];
+    const semis = o.down ? -3 - Math.min(6, i) : LADDER[Math.min(LADDER.length - 1, Math.max(0, i))];
+    const f = 1046.5 * Math.pow(2, semis / 12);   // from C6
+    const v = 0.22 * (o.vol ?? 1);
+    // struck metal: a fundamental, an inharmonic ring and a short bright click
+    this.tone(ctx, out, at, f, o.down ? f * 0.84 : f, v, o.down ? 0.42 : 0.5);
+    this.tone(ctx, out, at, f * 2.76, f * 2.76, v * 0.32, 0.22);
+    this.tone(ctx, out, at, f * 5.4, f * 5.4, v * 0.1, 0.09);
+    this.hiss(ctx, out, at, 0.03, v * 0.5, 6000, 0.8, 'highpass');
+    // the recorded coin under it, tuned to the same step, for body
+    const buf = this.decoded.get('ui_coin');
+    if (buf) {
+      try {
+        const s = ctx.createBufferSource(); s.buffer = buf;
+        s.playbackRate.value = 0.82 * Math.pow(2, semis / 12);
+        const g = ctx.createGain(); g.gain.value = SFX.ui_coin.vol * 0.4 * (o.vol ?? 1);
+        s.connect(g).connect(out); s.start(at);
+        s.onended = () => { try { g.disconnect(); } catch { /* */ } };
+      } catch { /* */ }
+    } else void this.load('ui_coin');
+    dbg(o.down ? 'syn_coin_down' : `syn_coin_${i}`);
+  }
+  /** A wax seal cracking open (Act I of the reveal); `i` = which seal (each a little different). */
+  waxCrack(i = 0, o: { delay?: number } = {}): void {
+    const b = this.synthBus(); if (!b) return;
+    const { ctx, out } = b;
+    const at = ctx.currentTime + Math.max(0, o.delay ?? 0);
+    const k = 1 + ((i * 37) % 5) * 0.06;
+    this.hiss(ctx, out, at, 0.035, 0.42, 2600 * k, 1.6);
+    this.hiss(ctx, out, at + 0.018, 0.05, 0.22, 1500 * k, 1.1);
+    this.hiss(ctx, out, at + 0.05, 0.03, 0.12, 3800 * k, 2);
+    this.tone(ctx, out, at, 150 * k, 70, 0.28, 0.14);
+    dbg('syn_wax');
+  }
+  /** Wax dripping onto the strip before the signet presses. */
+  drip(i = 0, o: { delay?: number } = {}): void {
+    const b = this.synthBus(); if (!b) return;
+    const { ctx, out } = b;
+    const at = ctx.currentTime + Math.max(0, o.delay ?? 0);
+    this.tone(ctx, out, at, 760 - i * 60, 330, 0.09, 0.07);
+    this.hiss(ctx, out, at, 0.02, 0.05, 1800, 1.2);
+    dbg('syn_drip');
+  }
+  /**
+   * The last friend has sealed: the room inhales. Music and ambience dip, then swell a little past where they were
+   * and settle (≈ 900 ms), under a soft rising breath. `delay` in seconds.
+   */
+  inhale(o: { delay?: number } = {}): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.duckGain) return;
+    const at = ctx.currentTime + Math.max(0, o.delay ?? 0);
+    const g = this.duckGain.gain;
+    g.cancelScheduledValues(at);
+    g.setTargetAtTime(0.28, at, 0.06);
+    g.setTargetAtTime(1.22, at + 0.32, 0.16);
+    g.setTargetAtTime(1, at + 0.85, 0.3);
+    const b = this.synthBus();
+    if (b) { this.hiss(b.ctx, b.out, at + 0.05, 0.75, 0.05, 380, 0.9, 'bandpass', 1500, 0.45); this.tone(b.ctx, b.out, at + 0.2, 98, 131, 0.07, 0.8, 'sine', 0.35); }
+    dbg('syn_inhale');
+  }
+  /** The decisive volley in slow motion: a low boom, the wreck sound pitched down, the music held back. */
+  slowMo(o: { delay?: number; dur?: number } = {}): void {
+    const b = this.synthBus();
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const at = ctx.currentTime + Math.max(0, o.delay ?? 0);
+    const dur = o.dur ?? 0.6;
+    if (this.duckGain) { const g = this.duckGain.gain; g.cancelScheduledValues(at); g.setTargetAtTime(0.3, at, 0.05); g.setTargetAtTime(1, at + dur, 0.35); }
+    if (b) { this.tone(b.ctx, b.out, at, 72, 38, 0.42, dur + 0.5); this.hiss(b.ctx, b.out, at, dur, 0.08, 220, 0.7, 'lowpass', 90, 0.05); }
+    this.sfx('bt_destroyed', { rate: 0.58, pitchJitter: 0, delay: o.delay, vol: 0.9 });
+    dbg('syn_slowmo');
+  }
+  /** The quiet stand-in for a haptic on devices with no vibration API: a short, low wooden tick. */
+  tick(o: { strength?: number } = {}): void {
+    const b = this.synthBus(); if (!b) return;
+    const s = Math.max(0.3, Math.min(2, o.strength ?? 1));
+    this.tone(b.ctx, b.out, b.ctx.currentTime, 190, 120, 0.08 * s, 0.05 + 0.02 * s);
+    dbg('syn_tick');
+  }
+  /** A card dealt onto the table (the awards): the page sound, a step brighter each card. */
+  deal(i: number, o: { delay?: number } = {}): void { this.sfx('ui_page', { rate: 1 + Math.min(8, i) * 0.05, pitchJitter: 0.2, delay: o.delay, vol: 0.8 }); }
+
   /** The turn finished resolving (replay starts / new plan phase). */
   turnResolved(o: { delay?: number } = {}): void { this.sfx('game_turn', { delay: o.delay }); }
   /** End of game. Swaps to the theme after the sting. */

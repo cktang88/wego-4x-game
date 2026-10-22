@@ -1,0 +1,282 @@
+/* ============================================================================
+   The reward moments (client/src/fx): the seal ritual, the reveal's staged acts,
+   the VP count-up and the Reckoning ribbon, the crowning. All of it is a thing on
+   the war table: house wax with a pressed signet, a brass balance plate, gold
+   coins, a vellum ribbon, enamel banners on a brass rail under the lamp.
+   Light from the upper left. Reduced motion: no travel, only cross-fades.
+   ============================================================================ */
+
+/* ------------------------------------------------------------ the layer over the board */
+.dl-layer { position: absolute; inset: 0; pointer-events: none; z-index: 6; overflow: hidden; contain: layout style; }
+
+/* ------------------------------------------------------------ a wax seal (house wax, the signet pressed in) */
+.dl-wax { position: relative; display: inline-block; width: var(--sz, 4rem); height: var(--sz, 4rem); flex: none; }
+.dl-wax::before {
+  content: ''; position: absolute; inset: -7%;
+  border-radius: 48% 52% 45% 55% / 54% 46% 56% 44%;
+  background: radial-gradient(circle at 33% 27%, color-mix(in srgb, var(--wh) 70%, #fff 30%) 0%, color-mix(in srgb, var(--wx) 85%, var(--wh)) 30%, var(--wx) 52%, var(--wl) 100%);
+  box-shadow: 0.12rem 0.3rem 0.5rem -0.1rem rgba(4, 3, 2, 0.75), inset -0.15rem -0.2rem 0.25rem rgba(0, 0, 0, 0.45), inset 0.1rem 0.1rem 0.15rem rgba(255, 245, 225, 0.3);
+}
+.dl-wax-face {
+  position: absolute; inset: 15%; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle at 64% 70%, color-mix(in srgb, var(--wh) 35%, var(--wx)) 0%, var(--wx) 55%, color-mix(in srgb, var(--wx) 70%, #000) 100%);
+  /* a pressed recess: shadow on the upper-left inner edge, light on the lower-right */
+  box-shadow: inset 0.14rem 0.16rem 0.22rem rgba(0, 0, 0, 0.55), inset -0.08rem -0.08rem 0.1rem rgba(255, 240, 215, 0.28);
+}
+.dl-wax-sig { filter: drop-shadow(0.6px 0.7px 0 rgba(255, 240, 215, 0.3)); }
+
+/* ------------------------------------------------------------ Act I: the seals crack */
+.dl-seals { position: absolute; left: 50%; top: 20%; transform: translateX(-50%); display: flex; gap: 2rem; padding: 1.125rem 2.25rem 0.875rem; border-radius: 7px;
+  /* the seals lie on a dark leather salver with a brass rim, lit from the upper left */
+  background: radial-gradient(ellipse at 30% 20%, rgba(255, 217, 160, 0.1), rgba(255, 217, 160, 0) 60%), var(--k-grain), linear-gradient(162deg, #2a2420 0%, #1a1613 55%, #100d0b 100%);
+  box-shadow: 0 0 0 1px #a87a35, 0 0 0 2px rgba(7, 8, 12, 0.8), inset 1px 1px 0 rgba(255, 238, 205, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.6), 0.3em 0.9em 1.8em -0.4em rgba(0, 0, 0, 0.85);
+  animation: dl-tray-in 0.24s var(--k-ease-heavy) both; transition: opacity 0.26s ease-in, transform 0.26s ease-in; }
+@keyframes dl-tray-in { from { opacity: 0; transform: translate(-50%, -0.5rem); } }
+.dl-seals.out { opacity: 0; transform: translate(-50%, -0.5rem); }
+.dl-sealslot { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; animation: dl-seal-in 0.32s var(--k-ease-strike) both; }
+.dl-sealslot:nth-child(2) { animation-delay: 0.04s; } .dl-sealslot:nth-child(3) { animation-delay: 0.08s; }
+@keyframes dl-seal-in { from { opacity: 0; transform: scale(1.35) translateY(-0.5rem); } }
+.dl-sealslot > b { font-family: var(--k-display); font-size: 0.875rem; font-weight: 700; letter-spacing: 0.08em; color: var(--pc); text-shadow: 0 1px 0 #000, 0 0 0.5rem #000; }
+/* the split: two copies of the seal, each clipped to one side of a jagged crack */
+.dl-split { position: relative; display: inline-block; width: var(--sz, 4rem); height: var(--sz, 4rem); }
+.dl-split > .dl-wax { position: absolute; inset: 0; transition: transform 0.38s cubic-bezier(0.2, 0.8, 0.3, 1), opacity 0.4s ease-in 0.15s; }
+.dl-split > .l { clip-path: polygon(-12% -12%, 53% -12%, 45% 20%, 56% 40%, 46% 61%, 55% 80%, 48% 112%, -12% 112%); }
+.dl-split > .r { clip-path: polygon(53% -12%, 112% -12%, 112% 112%, 48% 112%, 55% 80%, 46% 61%, 56% 40%, 45% 20%); }
+.dl-split::after { content: ''; position: absolute; left: 50%; top: -4%; bottom: -4%; width: 2px; transform: translateX(-50%); opacity: 0;
+  background: linear-gradient(transparent, #fff1c8 30%, #ffd98a 70%, transparent); filter: blur(0.5px); box-shadow: 0 0 0.6rem #ffd98a; }
+.dl-split.cracked::after { animation: dl-crack-flash 0.32s ease-out both; }
+@keyframes dl-crack-flash { 0% { opacity: 0; } 25% { opacity: 1; } 100% { opacity: 0; } }
+.dl-split.cracked > .l { transform: translate(-0.4rem, 0.2rem) rotate(-13deg); opacity: 0.25; }
+.dl-split.cracked > .r { transform: translate(0.45rem, 0.35rem) rotate(11deg); opacity: 0.25; }
+
+/* ------------------------------------------------------------ Act IV: the hold before a battle */
+.dl-hold {
+  position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 0.625rem; padding: 0.375rem 0.75rem 0.4375rem; border-radius: 7px;
+  background: var(--k-grain), var(--k-steel-face); color: var(--k-ivory);
+  box-shadow: 0 0 0 1px #a87a35, 0 0 0 2px rgba(7, 8, 12, 0.7), var(--k-cast-lift), var(--k-bevel);
+  animation: dl-hold-in 0.22s var(--k-ease-strike) both; transition: opacity 0.35s ease-in; will-change: transform;
+}
+.dl-hold.out { opacity: 0; }
+@keyframes dl-hold-in { from { opacity: 0; scale: 0.85; } }
+.dl-side { display: inline-flex; align-items: center; gap: 0.3125rem; }
+.dl-side b { font-family: var(--font); font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.dl-gar { display: inline-flex; align-items: center; gap: 0.125rem; color: var(--k-brass-200); }
+.dl-gar b { font-size: 1rem; }
+.dl-side em { font-style: normal; font-size: 0.875rem; color: var(--ph); }
+.dl-pip { display: inline-block; width: 0.8125rem; height: 0.8125rem; border-radius: 50%; flex: none;
+  background: radial-gradient(circle at 34% 30%, color-mix(in srgb, var(--ph) 70%, #fff), var(--pc) 55%, color-mix(in srgb, var(--pc) 50%, #000)); box-shadow: 0 0 0 1px #c8964a, 0 1px 1px #000; }
+.dl-dial { position: relative; display: inline-block; width: 3.75rem; height: 2.125rem; }
+.dl-dial svg { width: 100%; height: 100%; overflow: visible; }
+.dl-needle { transform-box: view-box; transform-origin: 30px 31px; }
+.dl-dial .dl-swords { display: none; }
+.dl-swords.solo { font-size: 1rem; color: var(--k-brass-300); }
+
+/* ------------------------------------------------------------ the main event's title */
+.dl-title { position: absolute; left: 0; right: 0; top: 28%; display: flex; justify-content: center; }
+.dl-title span {
+  padding: 0.75rem 3rem; font-family: var(--k-prose); font-style: italic; font-size: 2.5rem; color: #f3e6c4; white-space: nowrap;
+  background: radial-gradient(ellipse closest-side, rgba(7, 8, 12, 0.7), rgba(7, 8, 12, 0));
+  text-shadow: 0 0.125rem 0 #000, 0 0 1.25rem rgba(7, 8, 12, 0.9), 0 0 2.5rem rgba(255, 200, 120, 0.22);
+  animation: dl-title-in 0.75s var(--k-ease-heavy) both;
+}
+.dl-title.out span { opacity: 0; transform: translateY(-0.375rem); transition: opacity 0.28s ease-in, transform 0.28s ease-in; }
+@keyframes dl-title-in { from { opacity: 0; letter-spacing: 0.22em; filter: blur(0.25rem); } }
+
+/* ------------------------------------------------------------ the seal ritual (over the primary button) */
+.dl-ritual { position: fixed; width: 0; height: 0; z-index: 30; pointer-events: none; }
+.dl-ritual .dl-pool { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); animation: dl-pool 0.3s cubic-bezier(0.2, 0.8, 0.3, 1) 0.12s both; }
+.dl-ritual .dl-pool .dl-wax-sig { opacity: 0; animation: dl-show 0.01s linear 0.26s forwards; }
+@keyframes dl-pool { from { transform: translate(-50%, -50%) scale(0.15, 0.1); opacity: 0.6; } 60% { transform: translate(-50%, -50%) scale(1.08, 0.95); opacity: 1; } }
+@keyframes dl-show { to { opacity: 1; } }
+.dl-drop { position: absolute; left: -0.25rem; top: -3.25rem; width: 0.5rem; height: 0.75rem; border-radius: 50% 50% 50% 50% / 62% 62% 38% 38%;
+  background: radial-gradient(circle at 35% 30%, #d8604f, #8e1f1f 60%, #4a0d0e); animation: dl-drop 0.2s cubic-bezier(0.55, 0, 0.9, 0.5) both; opacity: 0; }
+.dl-drop.d2 { animation-delay: 0.07s; left: 0.1rem; } .dl-drop.d3 { animation-delay: 0.13s; left: -0.45rem; }
+@keyframes dl-drop { 0% { opacity: 1; transform: translateY(-1.5rem) scale(0.8, 1.2); } 90% { opacity: 1; } 100% { opacity: 0; transform: translateY(3rem) scale(1.3, 0.5); } }
+.dl-signet { position: absolute; left: 0; top: 0; width: 3.25rem; height: 3.25rem; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: var(--k-brass-face); box-shadow: inset 0 0 0 0.125rem #6b4a1c, var(--k-bevel-brass), 0.2rem 0.6rem 1rem -0.2rem rgba(0, 0, 0, 0.8);
+  transform: translate(-50%, -170%) scale(1.3); opacity: 0; animation: dl-signet 0.56s cubic-bezier(0.5, 0, 0.3, 1) 0.06s both; }
+@keyframes dl-signet {
+  0% { opacity: 0; transform: translate(-50%, -190%) scale(1.3); }
+  25% { opacity: 1; transform: translate(-50%, -150%) scale(1.25); }
+  38% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  58% { opacity: 1; transform: translate(-50%, -52%) scale(1.02); }
+  100% { opacity: 0; transform: translate(-50%, -200%) scale(1.25); }
+}
+.dl-ritual.rm .dl-drop, .dl-ritual.rm .dl-signet { display: none; }
+.dl-ritual.rm .dl-pool { animation: dl-fade 0.25s ease-out both; }
+.dl-ritual.rm .dl-pool .dl-wax-sig { animation: none; opacity: 1; }
+@keyframes dl-fade { from { opacity: 0; } }
+
+/* ------------------------------------------------------------ the crests: rolling digits, a coin landing, the seal */
+.pcrest .vp.dl-roll-up { display: inline-block; animation: dl-roll-up 0.3s var(--k-ease-strike); }
+.pcrest .vp.dl-roll-down { display: inline-block; animation: dl-roll-down 0.3s var(--k-ease-strike); }
+@keyframes dl-roll-up { from { transform: translateY(85%); opacity: 0.1; } }
+@keyframes dl-roll-down { from { transform: translateY(-85%); opacity: 0.1; } }
+.pcrest.dl-hit .cb { animation: dl-crest-hit 0.38s ease-out; }
+@keyframes dl-crest-hit { 0% { transform: scale(1.16); filter: brightness(1.7) drop-shadow(0 0 0.375rem #ffd86b); } 100% { transform: scale(1); } }
+.pcrest .sealed.wax {
+  top: -0.25rem; right: 0.125rem; width: 0.9375rem; height: 0.9375rem; line-height: 0; font-size: 0; color: transparent;
+  border-radius: 48% 52% 45% 55% / 54% 46% 56% 44%;
+  background: radial-gradient(circle at 50% 52%, #7a1717 0 32%, transparent 34%), radial-gradient(circle at 33% 28%, #e2705e, #8e1f1f 55%, #4a0d0e);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.8), inset -1px -1px 1px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(20, 6, 4, 0.55);
+  animation: dl-wax-set 0.35s var(--k-ease-strike) both;
+}
+@keyframes dl-wax-set { from { transform: scale(1.8); opacity: 0; } }
+.phone .pcrest .sealed.wax { right: -0.1875rem; width: 0.8125rem; height: 0.8125rem; }
+
+/* ------------------------------------------------------------ VP coins */
+.dl-coin {
+  position: fixed; left: 0; top: 0; z-index: 30; width: 1.5rem; height: 1.5rem; border-radius: 50%; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle at 34% 28%, #fff7d4 0%, #f1d488 22%, #d2a24f 55%, #8a5f22 100%);
+  box-shadow: inset 0 0 0 0.09rem #7a5317, inset 0.08rem 0.08rem 0 0.14rem rgba(255, 248, 220, 0.45), 0 0.15rem 0.3rem rgba(0, 0, 0, 0.65), 0 0 0.75rem rgba(255, 205, 120, 0.5);
+  will-change: transform, opacity;
+}
+.dl-coin.big { width: 1.875rem; height: 1.875rem; }
+.dl-coin b { font-family: var(--font); font-size: 0.875rem; font-weight: 800; color: #3a2810; line-height: 1; }
+.dl-coin.neg { filter: saturate(0.4) brightness(0.75); }
+
+/* ------------------------------------------------------------ the Reckoning ribbon (vellum) */
+.dl-ribbon {
+  position: absolute; left: 50%; transform: translateX(-50%); pointer-events: auto; cursor: pointer;
+  max-width: min(42rem, calc(100% - 2rem)); padding: 0.5rem 2.25rem 0.5625rem; text-align: center; color: #2a1d10;
+  background: linear-gradient(180deg, rgba(244, 233, 204, 0.84), rgba(222, 204, 163, 0.9)), var(--k-paper) center / 30rem auto, #e3d3ad;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 1rem) 50%, 100% 100%, 0 100%, 1rem 50%);
+  filter: drop-shadow(0.15rem 0.45rem 0.6rem rgba(0, 0, 0, 0.6));
+  animation: dl-rib-in 0.5s var(--k-ease-heavy) both;
+}
+.dl-ribbon.out { animation: dl-rib-out 0.3s ease-in forwards; }
+@keyframes dl-rib-in { from { opacity: 0; transform: translate(-50%, -0.75rem) scaleX(0.7); } }
+@keyframes dl-rib-out { to { opacity: 0; transform: translate(-50%, -0.5rem); } }
+.dl-rib-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 0.25rem 0.625rem; font-family: var(--k-ui, var(--font)); font-size: 1rem; font-weight: 700; }
+.dl-rib-row small { font-size: 0.875rem; color: #6b5638; }
+.dl-rib-row .bad { color: #8f2a1f; }
+.dl-rib-row .quiet { font-weight: 500; color: #4e3b22; }
+.dl-vp { display: inline-flex; align-items: center; gap: 0.1875rem; font-size: 1.25rem; font-weight: 800; color: #6b4a1c; font-variant-numeric: tabular-nums; }
+.dl-vp .ic { color: #a87a35; filter: drop-shadow(0 1px 0 rgba(255, 245, 220, 0.6)); }
+.dl-vp.neg { color: #8f2a1f; }
+.dl-vp .dl-pip { width: 0.6875rem; height: 0.6875rem; }
+.dl-stamp { display: inline-block; font-family: var(--k-display); font-size: 0.875rem; font-weight: 800; letter-spacing: 0.06em; color: #7a5212;
+  border: 0.125rem solid currentColor; border-radius: 3px; padding: 0 0.3125rem; transform: rotate(-3deg); }
+.dl-stamp.bad { color: #8f2a1f; }
+.dl-dot { width: 0.3125rem; height: 0.3125rem; border-radius: 50%; background: rgba(107, 86, 56, 0.55); flex: none; }
+.dl-herald { margin: 0.1875rem 0 0; font-family: var(--k-prose); font-style: italic; font-size: 1rem; color: #3b2a16; line-height: 1.3; }
+.dl-ribbon.phone { padding: 0.4375rem 1.5rem 0.5rem; max-width: calc(100% - 1rem); width: max-content; }
+.dl-ribbon.phone .dl-herald { font-size: 0.9375rem; }
+
+/* ------------------------------------------------------------ the crowning */
+.overlay.crowning { background: transparent; padding: 0; overflow: hidden auto; align-items: flex-start; }
+.overlay.crowning > .dialog.cr-stage {
+  position: relative; z-index: 3; margin: auto; width: min(60rem, 100%); max-width: none; max-height: none; background: none; border: 0; box-shadow: none;
+  padding: 1.5rem 1rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; animation: none;
+}
+.overlay.crowning > .dialog.cr-stage::before, .overlay.crowning > .dialog.cr-stage::after { display: none; }
+.cr-room { position: fixed; inset: 0; background: radial-gradient(ellipse 75% 65% at 50% 42%, rgba(7, 8, 12, 0.5), rgba(7, 8, 12, 0.93) 78%); animation: cr-dim 0.7s ease-out both; }
+@keyframes cr-dim { from { opacity: 0; } }
+.cr-lamp { position: fixed; left: 50%; top: -0.25rem; width: 0; height: 0; transform-origin: 0 0; z-index: 2; pointer-events: none; }
+.cr-cord { position: absolute; left: -1px; top: 0; width: 2px; height: 3.25rem; background: linear-gradient(#1b1d23, #6b4a1c); }
+.cr-shade { position: absolute; left: -2.25rem; top: 3.1rem; width: 4.5rem; height: 2.125rem; background: var(--k-brass-face);
+  clip-path: polygon(32% 0, 68% 0, 100% 100%, 0 100%); filter: drop-shadow(0 0.25rem 0.375rem rgba(0, 0, 0, 0.7)); }
+.cr-shade::after { content: ''; position: absolute; left: 12%; right: 12%; bottom: 0; height: 0.3rem; border-radius: 50%; background: #fff3cf; box-shadow: 0 0 1rem 0.3rem rgba(255, 217, 160, 0.8); }
+.cr-cone { position: absolute; left: -7rem; top: 5.1rem; width: 14rem; height: calc(var(--len, 18rem) - 5.5rem); opacity: 0.35; transition: opacity 0.6s ease-out;
+  clip-path: polygon(42% 0, 58% 0, 100% 100%, 0 100%); background: linear-gradient(180deg, rgba(255, 228, 175, 0.32), rgba(255, 217, 160, 0.1) 70%, rgba(255, 217, 160, 0)); }
+.crowning.lit .cr-cone { opacity: 1; }
+.cr-pool { position: absolute; left: -9.5rem; top: calc(var(--len, 18rem) - 6.5rem); width: 19rem; height: 13rem; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 217, 160, 0.38), rgba(255, 217, 160, 0.12) 58%, rgba(255, 217, 160, 0)); opacity: 0.45; transition: opacity 0.6s ease-out; }
+.crowning.lit .cr-pool { opacity: 1; }
+.cr-head { text-align: center; opacity: 0; transform: translateY(0.5rem); transition: opacity 0.6s ease-out, transform 0.6s var(--k-ease-heavy); }
+.crowning.titled .cr-head { opacity: 1; transform: none; }
+.cr-title { margin: 0; font-family: var(--k-display); font-size: 2.25rem; font-weight: 800; color: var(--pc); letter-spacing: 0.06em; text-shadow: 0 0.125rem 0 #000, 0 0 1.5rem rgba(7, 8, 12, 0.9); }
+.cr-sub { margin: 0.125rem 0 0; font-family: var(--k-display); font-size: 1rem; letter-spacing: 0.3em; text-transform: uppercase; color: var(--k-engraved); }
+.cr-why { margin: 0.25rem 0 0; font-family: var(--k-prose); font-style: italic; font-size: 1rem; color: var(--k-parchment); }
+.cr-rail { width: min(50rem, 96%); height: 0.5rem; margin-top: 2.75rem; border-radius: 0.25rem; background: var(--k-brass-face); box-shadow: var(--k-bevel-brass), var(--k-cast); }
+.cr-seats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(0.5rem, 3vw, 2.5rem); width: min(48rem, 94%); margin-top: -0.125rem; }
+.cr-seat { position: relative; display: flex; flex-direction: column; align-items: center; min-width: 0; }
+.cr-banner { position: relative; width: min(11rem, 100%); transform-origin: 50% 0; transition: transform 2.6s cubic-bezier(0.45, 0, 0.3, 1), filter 2.6s ease-in-out; }
+.cr-pole { position: absolute; top: -0.25rem; left: 6%; right: 6%; height: 0.375rem; border-radius: 0.25rem; z-index: 1; background: var(--k-brass-face); box-shadow: var(--k-cast); }
+.cr-cloth {
+  display: flex; flex-direction: column; align-items: center; gap: 0.375rem; min-height: 13rem; padding: 1.125rem 0.5rem 2.5rem; text-align: center;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0) 16%, rgba(255, 255, 255, 0.06) 40%, rgba(0, 0, 0, 0) 64%, rgba(0, 0, 0, 0.36)),
+    var(--k-grain), linear-gradient(172deg, color-mix(in srgb, var(--ph) 45%, var(--pc)) 0%, var(--pc) 42%, var(--pl) 100%);
+  clip-path: polygon(0 0, 100% 0, 100% 86%, 50% 100%, 0 86%);
+}
+.cr-sig { display: block; margin-top: 0.25rem; filter: drop-shadow(0 0.125rem 0.125rem rgba(0, 0, 0, 0.55)); }
+.cr-name { font-family: var(--k-display); font-size: 1rem; font-weight: 700; color: #fbedc8; text-shadow: 0 1px 0 #000; line-height: 1.15; overflow-wrap: break-word; hyphens: auto; }
+.cr-vp { font-family: var(--font); font-size: 1.625rem; font-weight: 800; color: #fff4d6; font-variant-numeric: tabular-nums; text-shadow: 0 1px 0 #000; line-height: 1; }
+.cr-vp small { font-size: 0.875rem; font-weight: 700; color: #f2e3bd; }
+.cr-you { font-style: normal; font-size: 0.875rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: #fbedc8; text-shadow: 0 1px 0 #000; }
+.cr-seat.light .cr-name, .cr-seat.light .cr-vp, .cr-seat.light .cr-vp small, .cr-seat.light .cr-you { color: #2a1d10; text-shadow: 0 1px 0 rgba(255, 244, 210, 0.6); }
+.cr-seat.win .cr-banner { transform: scaleY(0.1); }
+.crowning.banners .cr-seat.win .cr-banner { transform: none; transition: transform 0.8s var(--k-ease-strike); }
+.crowning.lit .cr-seat.win .cr-cloth { filter: brightness(1.12) drop-shadow(0 0 1.25rem rgba(255, 217, 160, 0.35)); }
+.crowning.banners .cr-seat.lose .cr-banner { transform: translateY(2.25rem) rotate(0.6deg); filter: brightness(0.62) saturate(0.65); }
+.crowning.banners .cr-seat.lose.you .cr-banner { transition-duration: 3.4s; }
+.cr-crown { position: absolute; top: -3.5rem; font-size: 2.25rem; color: #f1d488; opacity: 0; transform: translateY(-1.25rem) scale(1.5) rotate(-10deg);
+  transition: opacity 0.5s ease-out 0.35s, transform 0.65s var(--k-ease-strike) 0.35s; filter: drop-shadow(0 0 0.625rem rgba(255, 216, 107, 0.75)) drop-shadow(0 0.125rem 0 #000); }
+.crowning.banners .cr-crown { opacity: 1; transform: none; }
+.cr-cards { display: flex; flex-direction: column; gap: 0.375rem; width: min(12.5rem, 100%); min-height: 7.5rem; margin-top: 0.75rem; perspective: 40rem; }
+.crowning.banners .cr-seat.lose .cr-cards { transform: translateY(2.25rem); transition: transform 2.6s cubic-bezier(0.45, 0, 0.3, 1); }
+.cr-card {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 0.4375rem; align-items: center; padding: 0.375rem 0.5rem 0.4375rem; border-radius: 7px;
+  color: #2a1d10; text-align: left; border-left: 0.25rem solid var(--pc);
+  background: linear-gradient(180deg, rgba(244, 233, 204, 0.86), rgba(226, 209, 170, 0.9)), var(--k-paper) center / 18rem auto, #e3d3ad;
+  box-shadow: var(--k-cast-lift), inset 0 0 0 1px rgba(107, 86, 56, 0.35); transform-style: preserve-3d; backface-visibility: hidden;
+}
+.cr-card .cr-cic { grid-row: span 2; font-size: 1.375rem; color: #6b4a1c; }
+.cr-card b { font-family: var(--k-display); font-size: 0.875rem; font-weight: 800; line-height: 1.2; }
+.cr-card span { font-family: var(--k-prose); font-style: italic; font-size: 0.875rem; color: #45321c; line-height: 1.25; }
+.cr-card.fade { animation: dl-fade 0.4s ease-out both; }
+.cr-deck { position: fixed; left: 50%; bottom: 1.5rem; width: 2.75rem; height: 3.75rem; margin-left: -1.375rem; border-radius: 7px; opacity: 0; transition: opacity 0.4s;
+  background: linear-gradient(180deg, rgba(244, 233, 204, 0.86), rgba(226, 209, 170, 0.9)), var(--k-paper) center / 10rem auto, #e3d3ad; box-shadow: 0.125rem 0.125rem 0 #c9b48a, 0.25rem 0.25rem 0 #9c845a, var(--k-cast); }
+.crowning.titled .cr-deck { opacity: 1; }
+.crowning.dealt .cr-deck, .crowning.skip .cr-deck { opacity: 0; }
+.cr-short { display: none; }
+.cr-btns { justify-content: center; margin-top: 2.75rem; opacity: 0; transition: opacity 0.5s ease-out; }
+.crowning.dealt .cr-btns, .crowning.skip .cr-btns { opacity: 1; }
+.crowning.dealt [data-saga] { animation: cr-saga 2.6s ease-in-out 0.6s infinite; }
+@keyframes cr-saga { 50% { box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.55), 0 0 1.25rem rgba(255, 210, 120, 0.55); } }
+/* skipped: everything at its final place at once */
+.crowning.skip .cr-banner, .crowning.skip .cr-cards, .crowning.skip .cr-head, .crowning.skip .cr-crown, .crowning.skip .cr-pool { transition: none !important; }
+
+@media (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
+  .dl-seals { gap: 1rem; padding: 1rem; top: 18%; }
+  .dl-seals .dl-split, .dl-seals .dl-wax { --sz: 3.25rem !important; }
+  .dl-title span { font-size: 1.75rem; padding: 0.5rem 1.5rem; }
+  .dl-hold { gap: 0.4375rem; padding: 0.3125rem 0.5rem; }
+  .dl-gar { display: inline-flex; align-items: center; gap: 0.125rem; color: var(--k-brass-200); }
+.dl-gar b { font-size: 1rem; }
+.dl-side em { display: none; }
+  .cr-title { font-size: 1.625rem; }
+  .cr-rail { margin-top: 2.25rem; }
+  .cr-cloth { min-height: 9.5rem; padding: 0.75rem 0.25rem 1.75rem; }
+  .cr-sig svg { width: 2rem; height: 2rem; }
+  .cr-name { font-size: 0.8125rem; }
+  .cr-full { display: none; } .cr-short { display: inline; }
+  .cr-vp { font-size: 1.25rem; }
+  .cr-vp small, .cr-you { font-size: 0.8125rem; }
+  .cr-cards { min-height: 6.5rem; }
+  .cr-card { grid-template-columns: minmax(0, 1fr); padding: 0.3125rem 0.375rem; }
+  .cr-card .cr-cic { display: none; }
+  .cr-card b, .cr-card span { font-size: 0.8125rem; }
+  .cr-crown { top: -3rem; font-size: 1.75rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dl-sealslot, .dl-hold, .dl-title span, .dl-ribbon, .cr-room, .pcrest .sealed.wax { animation: dl-fade 0.25s ease-out both !important; }
+  .dl-split > .dl-wax { transition: opacity 0.3s ease-out; }
+  .dl-split.cracked > .l, .dl-split.cracked > .r { transform: none; opacity: 0.35; }
+  .dl-split.cracked::after { animation: none; opacity: 0.8; }
+  .pcrest .vp.dl-roll-up, .pcrest .vp.dl-roll-down, .pcrest.dl-hit .cb { animation: none; }
+  .cr-banner, .cr-cards, .cr-crown, .cr-head { transition: opacity 0.3s ease-out !important; }
+  .cr-seat.win .cr-banner { transform: none; }
+  .crowning.banners .cr-seat.lose .cr-banner { transform: translateY(2.25rem); }
+  .crowning.dealt [data-saga] { animation: none; }
+}
+
+/* the crest's VP: ivory figures on a small dark cartouche in a brass rim, legible on every enamel */
+.hud .pcrest .cb .vp {
+  display: inline-block; min-width: 1.125rem; padding: 0 0.1875rem; margin-top: -0.3125rem; border-radius: 3px; line-height: 1.2; text-align: center;
+  color: #f8efdc; background-color: #15110c; background-image: linear-gradient(180deg, #2a221a, #0f0c09);
+  box-shadow: 0 0 0 1px rgba(200, 150, 74, 0.75), inset 0 1px 0 rgba(255, 238, 205, 0.12); text-shadow: 0 1px 0 #000; font-variant-numeric: tabular-nums;
+}
+.phone .hud .pcrest .cb .vp { min-width: 1rem; padding: 0 0.125rem; }
