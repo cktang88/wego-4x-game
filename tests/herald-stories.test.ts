@@ -7,8 +7,8 @@ import { planTurn } from '../shared/sim/ai.ts';
 import { makeLive, runTick } from '../shared/sim/live.ts';
 import { viewFor } from '../shared/sim/view.ts';
 import { Rng } from '../shared/sim/rng.ts';
-import { makeEdition, headlineVisible, fillStory } from '../shared/sim/herald.ts';
-import { ensureSoul } from '../shared/sim/soul.ts';
+import { makeEdition, headlineVisible, fillStory, correspondentOf } from '../shared/sim/herald.ts';
+import { ensureSoul, headline, archiveFleet } from '../shared/sim/soul.ts';
 import { STORIES, STORY_CAPS } from '../shared/config/herald-stories.ts';
 import type { Fleet, GameState, Headline, HeraldEdition, RegionId, Submission } from '../shared/sim/types.ts';
 
@@ -247,5 +247,153 @@ describe('herald stories: fog', () => {
     const { s } = scene(3);
     const ed = s.soul!.herald.at(-1)!;
     for (const p of [0, 1, 2]) expect(read(s, p).length).toBe(ed.headlines.filter(h => headlineVisible(h, p)).length);
+  });
+});
+
+// ============================================================================ the Herald remembers (wave 2)
+describe('herald memory: correspondent, callbacks, obituaries, special editions', () => {
+  /** A fresh game at turn `t` with an empty Herald (no claim edition) and the given beats printed. */
+  function edition(s: GameState, t: number, beats: Headline[], cov: Set<RegionId>[]) {
+    s.turn = t;
+    ensureSoul(s)!.beats.push(...beats);
+    return makeEdition(s, cov)!;
+  }
+  const battleAt = (s: GameState, R: { id: number; name: string }, players: number[], lost = 5): Headline => ({
+    kind: 'battle', text: `Battle of ${R.name}: ${lost} ships lost`, region: R.id, players, drama: 9, public: false,
+    facts: { battle: { name: `Battle of ${R.name}`, rounds: 3, winner: players[0], first: [], sides: players.map((o, i) => ({ owner: o, fleets: [], ships: 4, lost: i ? lost - 1 : 1 })) } },
+  });
+  const readerSees = (s: GameState, p: number, kind: string) => viewFor(s, p).state.soul!.herald.at(-1)!.headlines.filter(h => h.kind === kind);
+  const free = (s: GameState) => s.regions.filter(r => r.kind === 'colony' && r.owner === null);
+  const both = (R: number): Set<RegionId>[] => [new Set([R]), new Set([R]), new Set()];
+  const all = (R: number): Set<RegionId>[] => [new Set([R]), new Set([R]), new Set([R])];
+
+  it('every galaxy has a named correspondent (deterministic from the seed) whose byline tops the lead story', () => {
+    const names = new Set<string>();
+    for (let seed = 1; seed <= 12; seed++) names.add(correspondentOf({ seed }).name);
+    expect(names.size).toBeGreaterThanOrEqual(6);
+    expect(correspondentOf({ seed: 5 })).toEqual(correspondentOf({ seed: 5 }));
+    for (const { s, eds } of GAMES) for (const ed of eds) {
+      expect(ed.correspondent).toBe(correspondentOf(s).name);
+      if (ed.headlines[0].body) expect(ed.headlines[0].byline).toBe(`By ${correspondentOf(s).name}, ${correspondentOf(s).title}`);
+    }
+  });
+
+  it('a second battle at the same system calls back to the first, for readers who knew of the first', () => {
+    let called = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+      const s = game(seed);
+      const R = free(s)[0];
+      edition(s, 9, [battleAt(s, R, [0, 1])], both(R.id));
+      const ed = edition(s, 12, [battleAt(s, R, [0, 1])], both(R.id));
+      const b = ed.headlines.find(h => h.kind === 'battle')!;
+      if (/\bsecond\b/.test(b.body!)) called++;
+    }
+    expect(called).toBe(20);
+  });
+
+  it('fog: no callback to a battle part of the audience never saw', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const s = game(seed);
+      const R = free(s)[0];
+      edition(s, 9, [battleAt(s, R, [0, 1])], both(R.id));          // house 2 saw nothing of the first
+      const ed = edition(s, 12, [battleAt(s, R, [0, 1])], all(R.id)); // ...but watched the second
+      const b = ed.headlines.find(h => h.kind === 'battle')!;
+      expect(b.seenBy).toContain(2);
+      expect(b.body).not.toMatch(/\bsecond\b|seen this before|come to blows|met in battle/);
+      // house 2's copy of the Herald's memory holds only what it could know
+      expect(viewFor(s, 2).state.soul!.annals!.filter(a => a.kind === 'battle').map(a => a.turn)).toEqual([12]);
+      expect(viewFor(s, 0).state.soul!.annals!.filter(a => a.kind === 'battle').map(a => a.turn)).toEqual([9, 12]);
+    }
+  });
+
+  it('a capture where a fleet fell before recalls it ("where the Long Watch fell") only if everyone saw it fall', () => {
+    let recalled = 0;
+    for (let seed = 1; seed <= 20; seed++) for (const sawIt of [true, false]) {
+      const s = game(seed);
+      const R = free(s)[0];
+      const [n0, n1] = [s.players[0].name, s.players[1].name];
+      const fell: Headline = { kind: 'destroyed', text: headline(s, 'destroyed', { f: 'Long Watch', r: R.name, a: n1 }), region: R.id, players: [1, 0], drama: 5, public: false };
+      edition(s, 9, [fell], sawIt ? all(R.id) : both(R.id));
+      const ed = edition(s, 14, [{ kind: 'capture', text: `${n0} takes ${R.name} from ${n1}`, region: R.id, players: [0, 1], drama: 5, public: true }], all(R.id));
+      const cap = ed.headlines.find(h => h.kind === 'capture')!;
+      if (sawIt) { if (cap.body!.includes('Long Watch')) recalled++; }
+      else expect(cap.body).not.toContain('Long Watch');
+    }
+    expect(recalled).toBeGreaterThanOrEqual(15);
+  });
+
+  it('a fallen commander gets an obituary: dates and deeds, the same readers as the death, the memorial byline', () => {
+    for (let seed = 1; seed <= 15; seed++) {
+      const s = game(seed);
+      const R = free(s)[0];
+      const f = fleetAt(s, 0, R.id, 'Ember Wake', 'Sunniva Achterberg');
+      f.epithets = ['the Unbroken'];
+      f.banner!.foundedTurn = 2;
+      s.turn = 11;
+      archiveFleet(s, f, 'destroyed', R.id);
+      const death: Headline = { kind: 'death', text: headline(s, 'death', { c: 'Sunniva Achterberg', f: 'Ember Wake', r: R.name }), region: R.id, players: [0], drama: 7, public: false };
+      const ed = edition(s, 11, [death], both(R.id));
+      const ob = ed.headlines.find(h => h.kind === 'obituary')!;
+      expect(ob, `seed ${seed}`).toBeTruthy();
+      expect(ob.text).toBe('Obituary: Sunniva Achterberg');
+      expect(ed.headlines.indexOf(ob)).toBe(ed.headlines.findIndex(h => h.kind === 'death') + 1);
+      expect(ob.public).toBe(false);
+      expect(ob.body).toContain('Sunniva Achterberg');
+      expect(ob.byline).toMatch(/for the memorial page$/);
+      expect(ob.body).not.toMatch(/\{|\}|undefined/);
+      expect(readerSees(s, 0, 'obituary').length).toBe(1);
+      expect(readerSees(s, 1, 'obituary').length).toBe(1);   // its sensors covered the system
+      expect(readerSees(s, 2, 'obituary').length).toBe(0);   // fog: house 2 never saw it
+    }
+  });
+
+  it('special editions mark the acts, once each, from public facts only', () => {
+    // act I: the first edition of every game
+    for (const { eds } of GAMES) {
+      expect(eds[0].special?.act).toBe('claim');
+      const acts = eds.filter(e => e.special).map(e => e.special!.n);
+      expect(acts).toEqual([...acts].sort((a, b) => a - b));            // in order
+      expect(new Set(acts).size).toBe(acts.length);                       // once each
+      for (const e of eds.filter(x => x.special)) {
+        const h = e.headlines.find(x => x.kind === `act_${e.special!.act}`)!;
+        expect(h.public).toBe(true);
+        expect(h.body).toBeTruthy();
+      }
+    }
+    expect(GAMES.some(g => g.eds.some(e => e.special?.act === 'blood'))).toBe(true);
+    // first blood comes from a public event between houses, never from a private battle alone
+    const s = game(21);
+    const R = free(s)[0];
+    expect(edition(s, 6, [battleAt(s, R, [0, 1])], both(R.id)).special).toBeUndefined();
+    const ed = edition(s, 7, [{ kind: 'capture', text: `${s.players[0].name} takes ${R.name} from ${s.players[1].name}`, region: R.id, players: [0, 1], drama: 5, public: true }], both(R.id));
+    expect(ed.special?.act).toBe('blood');
+    for (const p of [0, 1, 2]) expect(readerSees(s, p, 'act_blood').length).toBe(1);
+    expect(edition(s, 8, [{ kind: 'capture', text: `${s.players[1].name} takes ${R.name} from ${s.players[0].name}`, region: R.id, players: [1, 0], drama: 5, public: true }], both(R.id)).special).toBeUndefined();
+  });
+
+  it('the crisis, the Throne and last orders', () => {
+    const s = game(22);
+    s.soul!.acts = ['claim', 'borders', 'blood'];
+    s.players[2].vp = 20; s.players[0].vp = 6; s.players[1].vp = 4;
+    const crisis = edition(s, 14, [], [new Set(), new Set(), new Set()]);
+    expect(crisis.special?.act).toBe('crisis');
+    expect(crisis.headlines.find(h => h.kind === 'act_crisis')!.text).toBe(`${s.players[2].name.toUpperCase()} GROWS FAT`);
+    s.players[2].vp = 31;
+    expect(edition(s, 16, [], [new Set(), new Set(), new Set()]).special?.act).toBe('throne');
+    expect(edition(s, s.rules.victory.turnLimit - 1, [], [new Set(), new Set(), new Set()]).special?.act).toBe('last');
+    expect(edition(s, s.rules.victory.turnLimit, [], [new Set(), new Set(), new Set()]).special).toBeUndefined();
+  });
+
+  it('a broken oath has anniversaries, in public', () => {
+    const s = game(23);
+    const R = free(s)[0];
+    s.players[0].oathbreaker = [{ turn: 5, victim: 1, words: 'Not one ship past the Veil' }];
+    edition(s, 5, [{ kind: 'oath', text: headline(s, 'oath', { a: s.players[0].name, b: s.players[1].name, x: 'Not one ship past the Veil' }), region: R.id, players: [0, 1], drama: 9, public: true }], both(R.id));
+    const ed = edition(s, 15, [], [new Set(), new Set(), new Set()]);
+    const an = ed.headlines.find(h => h.kind === 'anniversary')!;
+    expect(an).toBeTruthy();
+    expect(an.text).toBe(`Ten turns since ${s.players[0].name} broke faith with ${s.players[1].name}`);
+    expect(an.public).toBe(true);
+    expect(edition(s, 16, [], [new Set(), new Set(), new Set()]).headlines.some(h => h.kind === 'anniversary')).toBe(false);
   });
 });

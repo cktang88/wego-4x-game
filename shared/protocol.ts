@@ -25,6 +25,8 @@ export interface GameMeta {
   winReason: string;
   mode?: 'wego' | 'live';
   live?: { speed: number; tick: number; nextTickAt: number; tickMs: number; ticksPerCycle: number };
+  /** The League this game counts for (GET /api/league/:id). Absent for games outside any League. */
+  league?: string;
 }
 
 export interface ChatMsg { at: number; seat: number | null; to: number | null; text: string }
@@ -38,6 +40,13 @@ export interface CreateGameReq {
   deadlineHours?: number;
   mode?: 'wego' | 'live';
   liveSpeed?: string;        // key of LIVE_SPEEDS
+  /**
+   * The League this game counts for (server/store.ts LeagueReq). Omitted: a new League is started for this table.
+   * `{ rematchOf, token }`: again, at the same table (same seats, galaxy and clock; the same League).
+   * `{ id, game, token }`: add the game to an existing League (token: a seat of `game`, a game of that League).
+   * `'none'`: a game outside any League.
+   */
+  league?: { rematchOf?: string; id?: string; game?: string; token?: string; name?: string } | 'none';
 }
 
 /** Server -> client */

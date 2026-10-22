@@ -858,6 +858,200 @@ export const STORIES: Record<string, StoryKind> = {
       '{R} was ready. {B} was not ready for that.',
     ],
   },
+  // ------------------------------------------------------------------ the Herald remembers (wave 2)
+  // Obituaries: a fallen commander's notice. {dates} "turn 3 to turn 12", {age} years of service in turns.
+  obituary: {
+    mood: 'grief', context: ['grim'],
+    lede: [
+      '{C}, commander of {Ft}, died at {R} on {cycle} {turn}.[ Counted {rank} by the end,] {C} served {A}[ for {age}].',
+      'The Herald records the death of {C}[, {rank}], who led {Ft} from its founding[ at {home}] until {R}.',
+      'Died at {R}: {C}, of {A}.[ Commander of {Ft}, {dates}.] No family is listed. The fleet was the family.',
+      '{C} is gone. For {age}, the name meant {Ft}; at {R}, it came to mean a line on a memorial wall.',
+      'It is the Herald’s duty to report the death of {C}[, {rank} of {A}], lost with {Ft} at {R}.',
+      'At {R}, on {cycle} {turn}, {C} gave the last order. {Ft} carried it out[, as it had for {age}].',
+    ],
+    detail: [
+      '[Remembered as {ep}. ][Honours: {honours}. ][Scarred: {scars}. ]The banner of {Ft}[ was raised at {home} on {cycle} {founded}, and it] does not fly any more.',
+      '[{killer} is credited with the blow. ]{C} leaves behind {Ft}’s name, {A}’s gratitude, and a seat at the officers’ table nobody will sit in for a while.',
+      '[Service: {dates}. ][Honours: {honours}. ]{A} has lost commanders before. It has not lost many like this one.',
+      '[The {battle} was the last of it. ][It earned the name {ep}. ]The quartermasters will close the ledger of {Ft} tonight.',
+      '[Founded at {home} on {cycle} {founded}. ][It bore {scars}. ]Of the commander, the crews say only: never late, never lucky, never once afraid of being either.',
+    ],
+    short: [
+      'Obituary: {C}, commander of {Ft}, died at {R}.[ Service: {dates}.]',
+      '{C}[, {rank},] is dead at {R}. {Ft} flies no more.[ Remembered as {ep}.]',
+      'Died at {R}: {C} of {A}, who led {Ft}[ for {age}].',
+      'The Herald notes the death of {C}[, {rank} of {A},] at {R}.[ Honours: {honours}.]',
+      '{C}, of {Ft}, {dates}.[ Lost at {R}.] The memorial gains a name.',
+      'Lost at {R}: {C}. {A} lowers the banner of {Ft}.',
+    ],
+  },
+  // Anniversaries of a broken oath (public). {since} "ten turns", {words} the sworn words.
+  anniversary: {
+    mood: 'oath', context: ['standings', 'rumour'],
+    lede: [
+      'It is {since} to the day since {A} broke its sworn word to {B}[ at {R}]. The Herald has not forgotten, and suspects {B} has not either.',
+      '{since} ago, {A} swore an oath to {B} and then broke it. Anniversaries are usually happier things.',
+      'Mark the date: {since} since {A} turned on {B}[ over {R}]. In the Reach, grudges keep better than wine.',
+      'An anniversary nobody will celebrate: {since} since the betrayal of {B} by {A}.',
+    ],
+    detail: [
+      '[The words, for the record: “{words}.” ]They were printed in these pages at the time. They read no better now.',
+      '[“{words},” {A} swore. ]The Herald keeps old editions for exactly this reason.',
+      '{B} has been asked whether the matter is closed. {B} declined to answer, which is an answer.',
+    ],
+    short: [
+      '{since} since {A} broke faith with {B}.[ “{words}.”] The Herald remembers.',
+      'An anniversary: {since} since the betrayal of {B} by {A}.',
+      'It is {since} since {A}’s broken oath to {B}. Neither house has mentioned it. Both have thought of little else.',
+      'Readers will recall {A}’s oath to {B}, broken {since} ago.[ “{words}.”]',
+    ],
+  },
+  // The first edition of a League game: the feud (docs/DELIGHT.md #83). {nth} "fourth", {score} "Kith leads 2–1".
+  feud: {
+    mood: 'politics', context: ['rumour'],
+    lede: [
+      '{A} and {B} meet again, for the {nth} time.[ {score}.] The Herald has kept every edition, and so, it suspects, have they.',
+      'Here we go again. {A} and {B} sit down at the same table for the {nth} time[, and {score}].',
+      'The {nth} meeting of {A} and {B} begins this {cycle}.[ {score}.] Neither house has forgiven the last one.',
+      'Old enemies, new war: {A} and {B}, the {nth} meeting.[ {score}.]',
+      'The beacons are lit, and the same three houses squint at each other across the Reach. For {A} and {B}, it is the {nth} meeting.',
+    ],
+    detail: [
+      '[Last time, {lastWinner} took the Crown. ][{ugly} still keeps the Ugly Trophy, a dented tin goblet, on the mantel. ]The Herald expects the goblet to change hands.',
+      '[{A} remembers {capA} worlds taken. ][{B} remembers {capB}. ][Between them, {betrayals} broken oaths. ]Nobody at this table has a short memory.',
+      '[Last game, {oathBy} swore “{oathWords}” and broke it. ][{nemA} calls {nemB} a nemesis. ]These things are not forgotten between games; they are merely postponed.',
+      '[{lastWinner} won the last war in {lastTurns} {cycle}s. ][{ugly} finished last and keeps the Ugly Trophy. ]Every house says this time will be different.',
+      '[Old banners are remembered: {fleet}. ][{title} sits at the table again. ]The {league} has opened a fresh page in its ledger.',
+    ],
+    short: [
+      '{A} and {B}: the {nth} meeting.[ {score}.]',
+      'The {nth} meeting of {A} and {B}.[ {ugly} carries the Ugly Trophy into it.]',
+      'Again, at the same table: {A} and {B}, meeting for the {nth} time.',
+      'The {league} meets again. {A} and {B} have unfinished business.[ {score}.]',
+    ],
+  },
+  // Special editions, one per act of the war (docs/LOOPS.md §2). Public facts only.
+  act_claim: {
+    mood: 'muster', context: ['rumour', 'throne'],
+    lede: [
+      'Three beacons are lit and three houses lay claim to the Reach. The Hollow Throne waits between them, as it always has, for someone foolish or great enough to sit in it.',
+      'So it begins. {A}, {B} and their rival have raised their banners, and the Herald has sharpened its pencils.',
+      'Act the first: the claim. Every house is seizing what nobody else has thought to defend yet. It will not stay that easy.',
+      'The war has a first page, and the Herald is printing it. Three houses, one Throne, and a great deal of empty space between them.',
+    ],
+    detail: [
+      'The neutral worlds are going cheap this {cycle}. They will not stay cheap; nothing in the Reach does.',
+      'The first {cycle}s are for scouts, colonists and optimists. The Herald has met all three, and only the scouts were sober.',
+      'The houses say they want peace. They say it while building warships, which the Herald notes without comment.',
+    ],
+    short: [
+      'Act the first: the claim. The houses are seizing what nobody defends yet.',
+      'The beacons are lit. The Herald opens its ledger of the war.',
+      'Three banners, one Throne. The claim begins.',
+      'So it begins: the houses stake their claims across the Reach.',
+    ],
+  },
+  act_borders: {
+    mood: 'politics', context: ['standings', 'rumour'],
+    lede: [
+      'The borders close. For the first time, every house of the Reach can see another house’s banner from its own worlds, and none of them likes the view.',
+      'There is no more empty space to fill. The three houses now touch, border to border, and the easy part of the war is over.',
+      'Special edition: the Reach is full. Every frontier is someone else’s frontier now, and every move is a message.',
+      'The map has run out of blank spaces. From here on, anything one house gains, another loses.',
+    ],
+    detail: [
+      'This is the season of scans, feints and pacts. The Herald advises readers to believe nothing they are told and half of what they see.',
+      'Diplomats are suddenly very busy. So are the yards. The Herald draws no conclusions, but it does draw a map.',
+      '[{leader} leads on {leaderVp} VP. ]A border is a promise, the old saying goes, and promises in the Reach are made to be read carefully.',
+    ],
+    short: [
+      'The borders close: all three houses now share a frontier.',
+      'No more empty space. The houses touch, and the easy part of the war is over.',
+      'Special edition: the Reach is full, and every border is someone’s.',
+      'The frontiers meet. Every move from here is a message.',
+    ],
+  },
+  act_blood: {
+    mood: 'blood', context: ['grim', 'standings'],
+    lede: [
+      'First blood. {A} and {B} have come to it at last, house against house, and the Reach will not go back to the way it was.',
+      'It was always going to happen. {A} has drawn blood from {B}, and the war has stopped pretending to be anything else.',
+      'Special edition: the first blood of the war is spilled between {A} and {B}. The Herald records the date so that nobody can claim they were not warned.',
+      'Until this {cycle} it was a contest. Now, with {A} and {B} at each other’s throats, it is a war.',
+    ],
+    detail: [
+      'The Herald has seen this before: the first blow is the hardest, and the second is much easier.',
+      '[{B} will not forget this. ]Somewhere, a commander is swearing a vow, and somewhere else a clerk is ordering more black ink.',
+      'Every house will now read every pact twice. The third house, watching, will read them three times.',
+    ],
+    short: [
+      'First blood: {A} against {B}. The war begins in earnest.',
+      'Special edition: {A} draws first blood from {B}.',
+      'House against house at last: {A} and {B}.',
+      'The first blood of the war, between {A} and {B}.',
+    ],
+  },
+  act_crisis: {
+    mood: 'politics', context: ['standings', 'throne'],
+    lede: [
+      '{A} grows fat. With {leaderVp} VP against {trail}’s {trailVp}, the house leads the Reach by a distance that is starting to look permanent.',
+      'Special edition: {A} pulls clear. The other houses can count, and they do not like the numbers.',
+      'The crisis of the war is here. {A} leads on {leaderVp} VP[, {gap} clear of {trail}], and every rival is suddenly interested in the same target.',
+      '{A} is winning, and everyone knows it. That is the most dangerous position in the Reach.',
+    ],
+    detail: [
+      'The Herald observes that alliances are easiest to make against the house in front. It merely observes.',
+      '[The goal is {goal} VP. ]A lead is a target, and the Reach is full of good shots.',
+      'Readers are reminded that the war is not over until the Throne says so, and the Throne has said nothing yet.',
+    ],
+    short: [
+      '{A} grows fat: {leaderVp} VP and pulling clear.',
+      'Special edition: {A} leads the Reach, and the others have noticed.',
+      'The crisis: {A} in front[, {gap} clear], and every house is counting.',
+      '{A} leads by enough to worry everyone else.',
+    ],
+  },
+  act_throne: {
+    mood: 'glory', context: ['standings'],
+    lede: [
+      'The Throne is contested. {A} has reached for the Hollow Throne, and the last act of the war has begun.',
+      'Special edition: all eyes on the Throne. {A} is within reach of the Crown, and the Reach holds its breath.',
+      'The war has come down to a chair. {A} stands closest to it[ with {leaderVp} VP], and nobody else will let them sit in peace.',
+      'Act the last: the Throne. Whatever happens now will be in the history books, if anyone survives to write them.',
+    ],
+    detail: [
+      '[The goal is {goal} VP. ]The Herald has prepared two front pages for the end. It will print whichever is true.',
+      'Every fleet in the Reach now has one question: toward the Throne, or against whoever is closest to it?',
+      '[{throne} holds the Hollow Throne, {streak} running. ]The chair has never been comfortable. It is about to get less so.',
+    ],
+    short: [
+      'The Throne is contested. {A} reaches for the Crown.',
+      'Special edition: the last act begins at the Hollow Throne.',
+      'All eyes on the Throne, and on {A}.',
+      'The war comes down to a chair, and {A} is closest to it.',
+    ],
+  },
+  act_last: {
+    mood: 'glory', context: ['standings', 'throne'],
+    lede: [
+      'Last orders. One {cycle} remains in the war for the Reach, and every house has exactly one chance left to change the ending.',
+      'Special edition: the final {cycle}. The candles are guttering, and {leader} leads on {leaderVp} VP.',
+      'This is the last {cycle}. What is done now is done for good, and the Herald will print it all.',
+      'Time is called on the war. One {cycle} of orders remains, and then the Throne will choose.',
+    ],
+    detail: [
+      '[{leader} leads on {leaderVp} VP; {trail} trails on {trailVp}. ]The numbers can still change. They have before.',
+      'Every house has one last move. The Herald advises them to make it count, and to make it memorable.',
+      '[{throne} holds the Hollow Throne. ]The Herald has set the type for the final edition, all but the name.',
+    ],
+    short: [
+      'Last orders: one {cycle} remains.[ {leader} leads on {leaderVp} VP.]',
+      'Special edition: the final {cycle} of the war.',
+      'Time is called. One {cycle} left to change the ending.',
+      'The last {cycle}. Make it count.',
+    ],
+  },
   // ------------------------------------------------------------------ nothing much
   quiet: {
     mood: 'quiet', context: ['standings', 'throne', 'rumour'],
@@ -1154,3 +1348,61 @@ export const POSTURE_PROSE: Record<string, { name: string; bet: string }> = {
 
 /** Caps (characters) so every edition stays small on the wire. */
 export const STORY_CAPS = { lead: 900, short: 360, edition: 3200 };
+
+// ============================================================================ the Herald remembers (wave 2)
+/**
+ * The galaxy's war correspondent, picked by the seed (shared/sim/herald.ts correspondentOf). Invented names only.
+ * Titles go after the name in a byline: "By Ottoline Vask, our correspondent at the front".
+ */
+export const CORRESPONDENT = {
+  first: ['Ottoline', 'Barnaby', 'Ysolde', 'Cassius', 'Merrow', 'Tamsin', 'Ignatius', 'Perpetua', 'Lucan', 'Hesper', 'Odile', 'Fenwick', 'Clemency', 'Aurelio', 'Wren', 'Mabyn'],
+  last: ['Vask', 'Quill', 'Marrowby', 'Thorne', 'Ashgrove', 'Penhallow', 'Strand', 'Galloway', 'Inkersole', 'Draycott', 'Fairweather', 'Mortlake', 'Sallow', 'Kettering'],
+  title: [
+    'our correspondent at the front',
+    'the Herald’s war correspondent',
+    'who files from wherever the guns are',
+    'our correspondent in the Reach',
+    'reporting from the front',
+    'who has covered three wars and believed in none of them',
+  ],
+};
+
+/**
+ * Callbacks: one sentence a story borrows from the Herald's memory (annals), only when everyone in the story's
+ * audience knew the earlier event. {nth} "third", {R} the system, {old} a fleet that fell there ("the Long Watch"),
+ * {ago} "nine turns", {A}/{B} the houses.
+ */
+export const MEMORY: Record<'battle' | 'clash' | 'taken' | 'fell', string[]> = {
+  battle: [
+    'It was the {nth} battle fought at {R}, and the salvage crews no longer need directions.',
+    '{R} has seen this before: this was the {nth} battle there.',
+    'The {nth} battle of {R}. Nobody there pretends to be surprised any more.',
+    'This was the {nth} time the guns have spoken at {R}. The system is becoming a graveyard with a name.',
+  ],
+  clash: [
+    'It is the {nth} time {A} and {B} have come to blows. The Herald has stopped calling it a misunderstanding.',
+    '{A} and {B} have met in battle {nth} times now, and neither has learned to like it.',
+    'For the {nth} time this war, {A} and {B} settled an argument with guns.',
+  ],
+  taken: [
+    '{R} changes hands for the {nth} time this war. Its people have stopped repainting the signs.',
+    'This is the {nth} time {R} has been taken. The locals keep every flag, just in case.',
+    'Taken for the {nth} time, {R} is getting used to new owners.',
+  ],
+  fell: [
+    'It is the same place where {old} fell, {ago} ago.',
+    '{R} is where {old} fell, {ago} ago. The wreckage is still there.',
+    'Readers will remember {R} as the place where {old} fell, {ago} ago.',
+    'This is where {old} fell, {ago} ago. Some places collect grief.',
+  ],
+};
+
+/** The masthead of each special edition (HeraldEdition.special): act number, title and ornament (client art keys). */
+export const ACT_EDITIONS: Record<'claim' | 'borders' | 'blood' | 'crisis' | 'throne' | 'last', { n: number; title: string; ornament: string }> = {
+  claim: { n: 1, title: 'The Claim', ornament: 'beacon' },
+  borders: { n: 2, title: 'The Borders Close', ornament: 'border' },
+  blood: { n: 3, title: 'First Blood', ornament: 'blood' },
+  crisis: { n: 4, title: 'The Crisis', ornament: 'scales' },
+  throne: { n: 5, title: 'The Throne Contested', ornament: 'throne' },
+  last: { n: 6, title: 'Last Orders', ornament: 'candle' },
+};

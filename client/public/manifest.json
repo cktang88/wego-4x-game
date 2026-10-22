@@ -1,0 +1,19 @@
+{
+  "name": "Three Crowns",
+  "short_name": "Three Crowns",
+  "description": "A war for the Hollow Throne between three friends, one sealed turn at a time.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#07080c",
+  "theme_color": "#07080c",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2307080c'/%3E%3Cpath d='M10 46V22l11 11 11-19 11 19 11-11v24z' fill='%23c8964a'/%3E%3Cpath d='M10 50h44v4H10z' fill='%23a87a35'/%3E%3C/svg%3E",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,0 +1,156 @@
+/* League ledger and push prompt: built on the art bible's kit (client/src/art/kit.css, docs/ART-BIBLE.md).
+   Tokens only (--k-*); radii 3px / 7px / 50%; text floor 14px desktop, 13px phone; touch targets >= 44px. */
+
+/* ---------------------------------------------------------------- the tray */
+.tcl-ov, .tcl-ov *, .tcl-result, .tcl-result *, .tcl-picker, .tcp-settings { box-sizing: border-box; }
+.tcl-ov { position: fixed; inset: 0; z-index: 80; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
+  background: radial-gradient(ellipse at 42% 34%, rgba(40, 26, 10, 0.55), rgba(7, 8, 12, 0.86) 70%); opacity: 0; transition: opacity var(--k-t-settle) var(--k-ease-heavy); }
+.tcl-ov.in { opacity: 1; }
+.tcl-ov.out { opacity: 0; }
+.tcl-sheet { position: relative; min-width: 0; width: min(46rem, 100%); max-height: min(88vh, 60rem); overflow: auto; overscroll-behavior: contain;
+  padding: 1.25rem 1.5rem 1.5rem; border-radius: 7px; color: var(--k-ivory); font-family: var(--k-ui); font-size: 1rem; line-height: 1.4;
+  transform: translateY(0.75rem); transition: transform var(--k-t-sheet) var(--k-ease-heavy); }
+.tcl-ov.in .tcl-sheet { transform: none; }
+.tcl-handle { display: none; }
+.tcl-x { position: absolute; top: 0.5rem; right: 0.5rem; width: 2.75rem; height: 2.75rem; min-width: 2.75rem; min-height: 2.75rem; padding: 0; font-size: 1.5rem; line-height: 1; justify-content: center; }
+.tcl-sheet h2 { margin: 0.1rem 0 0.2rem; font-size: 1.6rem; }
+.tcl-sheet h3 { margin: 1.25rem 0 0.5rem; font-size: 0.875rem; }
+.tcl-sheet small { font-size: 0.875rem; }
+.tcl-head { padding-right: 2.75rem; margin-bottom: 0.75rem; }
+.tcl-head p { margin: 0; }
+.tcl-back { min-height: 2.75rem; padding-left: 0; margin-bottom: 0.25rem; }
+.tcl-tabs { margin: 0 -1.5rem 1rem; padding: 0 1rem; overflow-x: auto; scrollbar-width: none; }
+.tcl-tabs .k-tab { min-height: 2.75rem; white-space: nowrap; font-size: 0.875rem; }
+.tcl-pane { min-height: 12rem; }
+.tcl-empty { margin: 1.5rem 0; font-size: 1rem; }
+.tcl-wait { display: grid; justify-items: center; gap: 0.75rem; padding: 2.5rem 0; text-align: center; }
+.tcl-wait .k-btn { min-height: 2.75rem; }
+
+/* a candle burning while the ledger is fetched (a diegetic wait, never a spinner) */
+.tcl-candle { width: 0.7rem; height: 2.2rem; border-radius: 3px 3px 2px 2px; position: relative; background: linear-gradient(90deg, #cdbb92, #efe3c4 45%, #b7a273); box-shadow: var(--k-cast); }
+.tcl-candle::before { content: ''; position: absolute; left: 50%; top: -0.95rem; width: 0.5rem; height: 0.85rem; margin-left: -0.25rem; border-radius: 50% 50% 45% 45% / 65% 65% 35% 35%;
+  background: radial-gradient(circle at 50% 70%, #fff6d0, #f3b648 55%, rgba(200, 90, 20, 0)); animation: tcl-flicker 1.6s ease-in-out infinite alternate; }
+@keyframes tcl-flicker { from { transform: scale(1, 1) rotate(-2deg); opacity: 0.9; } to { transform: scale(0.92, 1.08) rotate(2deg); opacity: 1; } }
+
+/* ---------------------------------------------------------------- houses */
+.tcl-boss { display: inline-grid; place-items: center; flex: none; width: 1.35rem; height: 1.35rem; border-radius: 50%; vertical-align: -0.3em; margin-right: 0.4rem;
+  --en: var(--k-steel-500); --en-hi: var(--k-steel-300);
+  background: radial-gradient(circle at 35% 30%, var(--en-hi), var(--en) 55%, color-mix(in srgb, var(--en) 55%, black));
+  box-shadow: 0 0 0 1.5px var(--k-brass-500), 0 0 0 2.5px rgba(0, 0, 0, 0.6), inset 0 -2px 3px rgba(0, 0, 0, 0.35); }
+.tcl-boss.azure, .tcl-plaque.azure { --en: var(--k-azure); --en-hi: var(--k-azure-hi); }
+.tcl-boss.crimson, .tcl-plaque.crimson { --en: var(--k-crimson); --en-hi: var(--k-crimson-hi); }
+.tcl-boss.gilded, .tcl-plaque.gilded { --en: var(--k-gilded); --en-hi: var(--k-gilded-hi); }
+.tcl-boss.warden, .tcl-plaque.warden { --en: var(--k-warden); --en-hi: var(--k-warden-hi); }
+.tcl-house { font-weight: 700; }
+.tcl-house.azure { color: var(--k-azure-hi); }
+.tcl-house.crimson { color: var(--k-crimson-hi); }
+.tcl-house.gilded { color: var(--k-gilded-hi); }
+.tcl-house.warden { color: var(--k-warden-hi); }
+.tcl-crowns { display: inline-flex; vertical-align: -0.2em; }
+.tcl-goblet { flex: none; vertical-align: -0.35em; filter: drop-shadow(1px 1px 0 rgba(0, 0, 0, 0.6)); }
+.tcl-mark { flex: none; display: inline-block; width: 0.8rem; height: 0.8rem; margin-right: 0.4rem; border-radius: 50%; vertical-align: -0.1em;
+  background: radial-gradient(circle at 35% 30%, var(--k-wax-hi), var(--k-wax) 55%, var(--k-wax-lo)); box-shadow: 0.05rem 0.12rem 0.2rem rgba(0, 0, 0, 0.6); }
+
+/* ---------------------------------------------------------------- the table */
+.tcl-rows { list-style: none; margin: 0; padding: 0; }
+.tcl-row, .tcl-oathrow { display: grid; grid-template-columns: 1.6rem auto 1fr repeat(3, minmax(3.25rem, auto)) 1.75rem; align-items: center; gap: 0.5rem;
+  min-height: 3.25rem; padding: 0.35rem 0; border-bottom: 2px solid transparent;
+  border-image: linear-gradient(90deg, transparent, rgba(220, 180, 108, 0.28), transparent) 1; }
+.tcl-oathrow { grid-template-columns: auto 1fr repeat(2, minmax(3.25rem, auto)); }
+.tcl-rank { color: var(--k-engraved); font-size: 1rem; text-align: center; }
+.tcl-who { display: grid; min-width: 0; }
+.tcl-who b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tcl-who small { color: var(--k-parchment); font-style: italic; }
+.tcl-stat { display: grid; justify-items: end; line-height: 1.15; }
+.tcl-stat small { font-size: 0.8125rem; color: var(--k-faded); }
+.tcl-stat b { font-size: 1.1rem; }
+.tcl-stat.bad b { color: var(--k-bad); }
+.tcl-stat:has(.tcl-crowns) { display: inline-flex; gap: 0.3rem; align-items: center; justify-content: end; }
+.tcl-note { display: flex; gap: 0.5rem; align-items: center; margin: 1rem 0 0; }
+.tcl-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
+.tcl-list li { line-height: 1.4; }
+.tcl-h2h small { display: block; color: var(--k-parchment); }
+.tcl-vs { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem; font-size: 1.05rem; }
+.tcl-vs i { color: var(--k-faded); font-style: normal; }
+.tcl-nem, .tcl-feud { display: flex; align-items: baseline; gap: 0.5rem; min-width: 0; }
+.tcl-nem > span, .tcl-feud > span { min-width: 0; overflow-wrap: anywhere; }
+.tcl-feud b { flex: none; min-width: 6.5rem; font-size: 0.8125rem; }
+.tcl-feud.lvl-blood-feud b { color: var(--k-wax-hi); }
+.tcl-feud.lvl-bitter b { color: var(--k-warn); }
+
+/* ---------------------------------------------------------------- the Hall of Crowns: brass plaques */
+.tcl-hall { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); }
+.tcl-plaque { position: relative; display: grid; justify-items: center; gap: 0.2rem; padding: 0.9rem 0.8rem 0.8rem; text-align: center; border-radius: 3px; color: #2a1a06;
+  background: var(--k-grain) 0 0 / 160px, var(--k-brass-face); background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel-brass), var(--k-cast); }
+.tcl-plaque::after { content: ''; position: absolute; inset: 4px; border-radius: 3px; pointer-events: none; box-shadow: inset 1px 1px 0 rgba(90, 55, 10, 0.55), inset -1px -1px 0 rgba(255, 245, 210, 0.45); }
+.tcl-plaque b, .tcl-plaque span, .tcl-plaque small { text-shadow: 0 1px 0 rgba(255, 245, 210, 0.55); }
+.tcl-plaque-n { color: #4a2c10; font-size: 0.8125rem; }
+.tcl-plaque-house { font-family: var(--k-display); font-size: 1.15rem; letter-spacing: 0.04em; border-bottom: 3px solid var(--en, var(--k-brass-700)); padding-bottom: 0.1rem; }
+.tcl-plaque .k-prose { color: #3a2408; }
+.tcl-plaque-banners { font-style: italic; }
+
+/* ---------------------------------------------------------------- oaths */
+.tcl-quotes { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
+.tcl-quote { position: relative; padding: 0.7rem 0.9rem; border-radius: 3px; }
+.tcl-quote p { margin: 0 0 0.25rem; font-family: var(--k-prose); font-size: 1.05rem; color: var(--k-ink-text); }
+.tcl-quote small { color: var(--k-wax); font-family: var(--k-display); letter-spacing: 0.04em; }
+.tcl-fleet { font-family: var(--k-display); letter-spacing: 0.03em; }
+
+/* ---------------------------------------------------------------- your Leagues */
+.tcl-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
+.tcl-card { display: grid; gap: 0.4rem; width: 100%; min-height: 2.75rem; padding: 0.9rem 1rem; text-align: left; cursor: pointer; color: var(--k-ivory); font: inherit; }
+.tcl-card:focus-visible { outline: 2px solid var(--k-brass-200); outline-offset: 3px; }
+.tcl-card:hover { filter: brightness(1.1); }
+.tcl-card-houses { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; }
+.tcl-card small { color: var(--k-parchment); }
+
+/* ---------------------------------------------------------------- lobby picker */
+.tcl-picker { display: grid; gap: 0.35rem; margin: 0.5rem 0; }
+.tcl-picker:empty { display: none; }
+.tcl-seg { flex-wrap: wrap; }
+.tcl-seg button { min-height: 2.75rem; font-size: 0.875rem; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------------------------------------------------------------- end-of-game card */
+.tcl-result { display: grid; gap: 0.4rem; padding: 1rem 1.2rem 1.1rem; margin: 0.75rem 0; color: var(--k-ivory); font-family: var(--k-ui); font-size: 1rem; }
+.tcl-result h3 { margin: 0 0 0.25rem; font-size: 1.25rem; }
+.tcl-res-line { display: flex; gap: 0.5rem; align-items: center; margin: 0; }
+.tcl-res-btns { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.5rem; }
+.tcl-res-btns .k-btn { min-height: 2.75rem; }
+.tcl-err { color: var(--k-bad); margin: 0.25rem 0 0; }
+
+/* ---------------------------------------------------------------- push prompt and settings (client/src/push) */
+.tcp-sheet { width: min(30rem, 100%); }
+.tcp-sheet .tcl-body { display: grid; gap: 0.75rem; }
+.tcp-slip { padding: 1rem 1.1rem; border-radius: 3px; }
+.tcp-slip p { margin: 0 0 0.5rem; font-family: var(--k-prose); font-size: 1.05rem; color: var(--k-ink-text); line-height: 1.45; }
+.tcp-slip p:last-child { margin-bottom: 0; }
+.tcp-slip .tcp-sample { font-style: italic; color: var(--k-ink-faded); }
+.tcp-btns { display: flex; flex-wrap: wrap; gap: 0.6rem; justify-content: flex-end; }
+.tcp-btns .k-btn { min-height: 2.75rem; }
+.tcp-status { margin: 0; min-height: 1.4em; color: var(--k-parchment); font-family: var(--k-prose); }
+.tcp-status.bad { color: var(--k-bad); }
+.tcp-status.good { color: var(--k-good); }
+.tcp-settings { display: grid; gap: 0.5rem; font-family: var(--k-ui); font-size: 1rem; color: var(--k-ivory); }
+.tcp-settings .k-toggle { font-size: 1rem; }
+.tcp-settings .k-seg button { min-height: 2.75rem; min-width: 3rem; font-size: 0.875rem; }
+.tcp-hours { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding-left: 3.6rem; }
+.tcp-hours[hidden] { display: none; }
+.tcp-note { margin: 0; font-family: var(--k-prose); color: var(--k-parchment); font-size: 0.9375rem; }
+
+/* ---------------------------------------------------------------- phone */
+@media (max-width: 600px) {
+  .tcl-ov { place-items: end stretch; padding: 0; }
+  .tcl-feud { flex-wrap: wrap; }
+  .tcl-sheet { width: 100%; max-height: 92vh; border-radius: 7px 7px 0 0; padding: 0.75rem 1rem calc(1rem + env(safe-area-inset-bottom)); font-size: 0.9375rem; transform: translateY(2rem); }
+  .tcl-handle { display: block; width: 3rem; height: 0.3rem; margin: 0 auto 0.5rem; border-radius: 3px; background: var(--k-brass-face); box-shadow: var(--k-bevel-brass); }
+  .tcl-tabs { margin: 0 -1rem 0.75rem; }
+  .tcl-sheet h2 { font-size: 1.3rem; }
+  .tcl-row { grid-template-columns: 1.3rem auto 1fr repeat(2, minmax(2.75rem, auto)) 1.5rem; }
+  .tcl-row .tcl-wide { display: none; }
+  .tcl-stat small, .tcl-feud b { font-size: 0.8125rem; }
+  .tcp-hours { padding-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tcl-ov, .tcl-sheet { transition: none; }
+  .tcl-candle::before { animation: none; }
+}

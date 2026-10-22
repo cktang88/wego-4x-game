@@ -1,3 +1,4 @@
+import type { LeagueMemory } from '../league.ts';
 import type { Res, Rules } from '../config/rules.ts';
 import type { StarKind, BodyKind, BodyQuality } from '../config/systems.ts';
 export type { StarKind, BodyKind, BodyQuality, SystemRole } from '../config/systems.ts';
@@ -250,6 +251,8 @@ export interface Headline {
   body?: string;
   /** Where and when it was filed, e.g. "VEL, TURN 9". Absent in old saves. */
   dateline?: string;
+  /** Who wrote the story ("By Ottoline Vask, our correspondent at the front"). Absent in old saves. */
+  byline?: string;
   /** Internal (queued beats only, never printed): what the story needs from the step that queued it. */
   facts?: HeadlineFacts;
 }
@@ -260,7 +263,19 @@ export interface HeadlineFacts {
   posture?: string;
   fate?: string;
 }
-export interface HeraldEdition { turn: number; headlines: Headline[]; dispatches: { player: PlayerId; text: string; as: 'house' | 'source'; byline: string }[] }
+export interface HeraldEdition {
+  turn: number; headlines: Headline[]; dispatches: { player: PlayerId; text: string; as: 'house' | 'source'; byline: string }[];
+  /** The galaxy's war correspondent (deterministic from the seed). Absent in old saves. */
+  correspondent?: string;
+  /** A special edition marking an act of the war (docs/LOOPS.md §2). Public. Absent on ordinary editions. */
+  special?: { act: HeraldAct; n: number; title: string; ornament: string };
+  /** The first edition of a League game opens with the feud (docs/DELIGHT.md #83). */
+  feud?: boolean;
+}
+/** The five acts of a game (docs/LOOPS.md §2), plus the last turn. */
+export type HeraldAct = 'claim' | 'borders' | 'blood' | 'crisis' | 'throne' | 'last';
+/** What the Herald remembers of a printed (or witnessed) event, for callbacks: fog-tagged like a headline. */
+export interface Annal { turn: number; kind: string; region?: RegionId; players: PlayerId[]; public: boolean; seenBy?: PlayerId[]; name?: string }
 export interface FleetRecord {
   id: FleetId; owner: PlayerId; name: string; commander: string; rank: number; sigil: string; boons: string[]; banes: string[];
   home: RegionId; foundedTurn: number; fate: 'destroyed' | 'caught' | 'broken' | 'retired' | 'merged' | 'alive';
@@ -275,6 +290,10 @@ export interface SoulState {
   dispatches: { p: PlayerId; text: string; as: 'house' | 'source'; turn: number }[];  // waiting for the next edition
   fallen: FleetRecord[];               // bannered fleets that are gone
   moments: Headline[];                 // the biggest moments of the game so far (for the Saga)
+  /** The Herald's memory: past events (fog-tagged, filtered per reader in views). Absent in old saves. */
+  annals?: Annal[];
+  /** Acts of the war the Herald has already marked with a special edition (public). */
+  acts?: HeraldAct[];
 }
 
 /** A battle in progress. Persists across pulses and turns until one side is gone. */
@@ -525,6 +544,8 @@ export interface GameState {
   log: { turn: number; submissions: Record<number, Submission>; tick?: TickOpts }[];
   /** Soul layer: blood-debts, reigns, the Herald, fallen fleets. Absent in old saves (created on demand). */
   soul?: SoulState;
+  /** League games: what the Herald may recall of past games between these houses (public; names and counts only). */
+  league?: LeagueMemory;
 }
 
 /** LIVE mode: resolve a single tick instead of a whole turn. */

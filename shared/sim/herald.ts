@@ -5,11 +5,11 @@
 // Each printed headline also gets a story (body + dateline, templates in config/herald-stories.ts), written
 // only from facts that every player in the headline's audience was allowed to know.
 import { BOONS, BANES, HERALD_TEMPLATES, SCARS, SIGILS, DISPATCH_TEMPLATES, CALLINGS } from '../config/content.ts';
-import { STORIES, QUOTES, ASIDES, SOURCES, QUOTE_FRAMES, CLOSERS, CALLBACKS, READS, FATE_PROSE, RANK_WORDS, POSTURE_PROSE, STORY_CAPS } from '../config/herald-stories.ts';
+import { STORIES, QUOTES, ASIDES, SOURCES, QUOTE_FRAMES, CLOSERS, CALLBACKS, READS, FATE_PROSE, RANK_WORDS, POSTURE_PROSE, STORY_CAPS, CORRESPONDENT, MEMORY, ACT_EDITIONS } from '../config/herald-stories.ts';
 import { SR, cleanText, ensureSoul, recordOf, soulOn, RANK_NAMES, worldEpithet, vowText } from './soul.ts';
 import { SY, bodyName } from './systems.ts';
 import { hashString } from './rng.ts';
-import type { BattleReport, Fleet, FleetRecord, GameEvent, GameState, Headline, HeadlineFacts, HeraldEdition, PlayerId, RegionId, Vow } from './types.ts';
+import type { Annal, BattleReport, Fleet, FleetRecord, GameEvent, GameState, Headline, HeadlineFacts, HeraldAct, HeraldEdition, PlayerId, RegionId, SoulState, Vow } from './types.ts';
 
 /**
  * Note what the Herald will need from this step (call at the end of every WEGO turn / LIVE tick, before
@@ -61,21 +61,170 @@ export function makeEdition(s: GameState, cov: Set<RegionId>[]): HeraldEdition |
   const ranked = beats.map((b, i) => ({ b, i })).sort((x, y) => y.b.drama - x.b.drama || x.i - y.i).map(x => x.b)
     .filter(b => { const k = `${b.kind}:${b.region ?? ''}:${b.text}`; if (seen.has(k)) return false; seen.add(k); return true; });
   const headlines = ranked.filter(b => b.drama > 0).slice(0, S.heraldMax);
+  // the Herald remembers: an anniversary fills a thin page before the quiet filler does
+  if (headlines.length < S.heraldMax) { const an = anniversaryOf(s, st); if (an) headlines.push(an); }
   const quiet = HERALD_TEMPLATES.quiet;
   for (let i = 0; headlines.length < S.heraldMin && i < quiet.length; i++) {
     headlines.push({ kind: 'quiet', text: quiet[(hashString(`${s.seed}:${s.turn}`) + i) % quiet.length], players: [], drama: 0, public: true });
   }
-  writeStories(s, headlines, beats, st.herald[st.herald.length - 1] ?? null);
+  // an obituary under the death of a commander (the first one printed), for the same readers
+  const ob = obituaryOf(headlines);
+  if (ob) headlines.splice(headlines.indexOf(ob.after) + 1, 0, ob.h);
+  // special editions: an act of the war (by drama, so a great battle may still lead), and the League's feud (always leads)
+  const act = actOf(s, st, ranked);
+  if (act) { const at = headlines.findIndex(h => h.drama < act.h.drama); headlines.splice(at < 0 ? headlines.length : at, 0, act.h); }
+  const feud = feudOf(s, st);
+  if (feud) headlines.unshift(feud);
+  const corr = correspondentOf(s);
+  writeStories(s, headlines, beats, st.herald[st.herald.length - 1] ?? null, corr, st);
   for (const b of beats) delete b.facts;
   const dispatches = st.dispatches.map(d => ({ player: d.p, text: d.text, as: d.as, byline: d.as === 'source' ? `a source close to ${s.players[d.p]?.name ?? '?'}` : s.players[d.p]?.name ?? '?' }));
   st.dispatches = [];
-  const ed: HeraldEdition = { turn: s.turn, headlines, dispatches };
+  const ed: HeraldEdition = { turn: s.turn, headlines, dispatches, correspondent: corr.name };
+  if (act) { const e = ACT_EDITIONS[act.act]; ed.special = { act: act.act, n: e.n, title: e.title, ornament: e.ornament }; }
+  if (feud) ed.feud = true;
   st.herald.push(ed);
   if (st.herald.length > S.heraldKeep) st.herald.splice(0, st.herald.length - S.heraldKeep);
+  remember(s, st, ranked);
   // the biggest moments of the game (for the Saga; the headline only, not the story)
   for (const b of ranked) if (b.drama >= 5) { const { body: _b, dateline: _d, ...m } = b; st.moments.push({ ...m, text: `T${s.turn}: ${b.text}` }); }
   st.moments = st.moments.map((m, i) => ({ m, i })).sort((a, b) => b.m.drama - a.m.drama || a.i - b.i).slice(0, 12).map(x => x.m);
   return ed;
+}
+
+// ============================================================================ the Herald remembers
+/** The galaxy's war correspondent: deterministic from the public seed. */
+export function correspondentOf(s: Pick<GameState, 'seed'>): { name: string; title: string } {
+  const h = hashString(`${s.seed}:correspondent`);
+  const C = CORRESPONDENT;
+  return { name: `${C.first[h % C.first.length]} ${C.last[(h >>> 5) % C.last.length]}`, title: C.title[(h >>> 11) % C.title.length] };
+}
+
+const ORD = ['zeroth', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth'];
+const ordinal = (n: number) => ORD[n] ?? `${n}th`;
+/** Turns since a broken oath that the Herald marks as an anniversary. */
+const ANNIVERSARIES = [5, 10, 15, 20, 25, 30];
+const ANNAL_KINDS = new Set(['battle', 'capture', 'capital', 'liberated', 'razed', 'destroyed', 'caught', 'death', 'broken', 'oath', 'coronation', 'vengeance', 'debt']);
+const MAX_ANNALS = 400;
+
+/** Keep what happened this edition (fog-tagged like its beat) for later callbacks. */
+function remember(s: GameState, st: SoulState, ranked: Headline[]) {
+  const an = (st.annals ??= []);
+  for (const b of ranked) {
+    if (!ANNAL_KINDS.has(b.kind)) continue;
+    const hv = headlineVars(b.kind, b.text);
+    const name = b.kind === 'death' ? hv.c : hv.f;
+    an.push({ turn: s.turn, kind: b.kind, ...(b.region !== undefined ? { region: b.region } : {}), players: [...b.players], public: b.public,
+      ...(!b.public ? { seenBy: [...(b.seenBy ?? b.players)] } : {}), ...(name ? { name: cleanText(name, 80) } : {}) });
+  }
+  if (an.length > MAX_ANNALS) an.splice(0, an.length - MAX_ANNALS);
+}
+/** Could everyone in `aud` know about this past event? */
+const annalKnown = (aud: PlayerId[], a: Annal) => a.public || within(aud, [...a.players, ...(a.seenBy ?? [])]);
+
+/** "Ten turns since X broke faith with Y": a public anniversary of a broken oath (the oath and its words are public). */
+function anniversaryOf(s: GameState, st: SoulState): Headline | null {
+  const cyc = s.mode === 'live' ? 'cycle' : 'turn';
+  const hits = (st.annals ?? []).filter(a => a.kind === 'oath' && a.public && ANNIVERSARIES.includes(s.turn - a.turn)
+    && a.players.length >= 2 && a.players.every(p => s.players[p] && !s.players[p].eliminated));
+  const a = hits[hits.length - 1];
+  if (!a) return null;
+  const [x, y] = a.players;
+  return { kind: 'anniversary', text: `${capFirst(plural(s.turn - a.turn, cyc))} since ${s.players[x].name} broke faith with ${s.players[y].name}`,
+    ...(a.region !== undefined ? { region: a.region } : {}), players: [x, y], drama: 1, public: true };
+}
+
+/** The obituary for the first fallen commander on the page: same readers as the death notice. */
+function obituaryOf(headlines: Headline[]): { after: Headline; h: Headline } | null {
+  const d = headlines.find(h => h.kind === 'death');
+  const c = d ? headlineVars('death', d.text).c : undefined;
+  if (!d || !c) return null;
+  return { after: d, h: { kind: 'obituary', text: `Obituary: ${c}`, ...(d.region !== undefined ? { region: d.region } : {}), players: [...d.players], drama: d.drama,
+    public: d.public, ...(d.seenBy ? { seenBy: [...d.seenBy] } : {}) } };
+}
+
+/** Do two houses' worlds touch (public: ownership is on everyone's map)? */
+function touching(s: GameState, a: PlayerId, b: PlayerId): boolean {
+  for (const r of s.regions) {
+    if (r.owner !== a) continue;
+    for (const n of r.links ?? r.neighbors) if (s.regions[n]?.owner === b) return true;
+  }
+  return false;
+}
+
+/**
+ * Has the war reached a new act (docs/LOOPS.md §2)? Acts are detected from public facts only, each marked once; when
+ * several arrive together the latest is printed and the earlier ones are passed.
+ */
+function actOf(s: GameState, st: SoulState, beats: Headline[]): { act: HeraldAct; h: Headline } | null {
+  const done = new Set(st.acts ?? []);
+  const live = s.players.filter(p => !p.eliminated);
+  const V = s.rules.victory;
+  const byVp = [...live].sort((x, y) => y.vp - x.vp || x.id - y.id);
+  const found: { act: HeraldAct; h: Headline }[] = [];
+  const mk = (act: HeraldAct, text: string, players: PlayerId[], region?: RegionId) =>
+    found.push({ act, h: { kind: `act_${act}`, text, players, drama: 6, public: true, ...(region !== undefined ? { region } : {}) } });
+  if (!done.has('claim') && st.herald.length === 0 && s.turn <= 2) mk('claim', 'THE BEACONS ARE LIT', []);
+  if (!done.has('borders') && live.length >= 2 && live.every((p, i) => live.every((q, j) => j <= i || touching(s, p.id, q.id) || touching(s, q.id, p.id)))) mk('borders', 'THE BORDERS CLOSE', []);
+  if (!done.has('blood')) {
+    const b = beats.find(x => x.public && ['capture', 'capital', 'debt', 'vengeance', 'oath'].includes(x.kind) && x.players.length >= 2
+      && x.players[0] >= 0 && x.players[1] >= 0 && x.players[0] !== x.players[1]);
+    if (b) mk('blood', `FIRST BLOOD: ${s.players[b.players[0]].name.toUpperCase()} AND ${s.players[b.players[1]].name.toUpperCase()}`, [b.players[0], b.players[1]]);
+  }
+  if (!done.has('crisis') && V.mode === 'vp' && byVp.length >= 2 && byVp[0].vp - byVp[1].vp >= 0.25 * V.vpTarget) mk('crisis', `${byVp[0].name.toUpperCase()} GROWS FAT`, [byVp[0].id]);
+  if (!done.has('throne')) {
+    const crowned = beats.find(x => x.kind === 'coronation' && x.public && x.players.length);
+    const near = V.mode === 'vp' && byVp[0] && byVp[0].vp >= 0.75 * V.vpTarget ? byVp[0] : undefined;
+    const who = crowned ? crowned.players[0] : near?.id;
+    if (who !== undefined) mk('throne', 'THE THRONE CONTESTED', [who], s.regions.find(r => r.kind === 'throne')?.id);
+  }
+  if (!done.has('last') && s.winner === null && s.turn === V.turnLimit - 1) mk('last', 'LAST ORDERS', []);
+  if (!found.length) return null;
+  const top = found.reduce((a, b) => (ACT_EDITIONS[b.act].n > ACT_EDITIONS[a.act].n ? b : a));
+  const n = ACT_EDITIONS[top.act].n;
+  st.acts = [...new Set([...(st.acts ?? []), ...(Object.keys(ACT_EDITIONS) as HeraldAct[]).filter(a => ACT_EDITIONS[a].n <= n && a !== 'last' || a === top.act)])];
+  return top;
+}
+
+/** A League game's first edition opens with the feud between the two houses with the most history. */
+function feudOf(s: GameState, st: SoulState): Headline | null {
+  const L = s.league;
+  if (!L || L.meeting < 2 || s.turn > 2 || st.herald.some(e => e.feud)) return null;
+  const f = L.feuds.find(x => x.games >= 1 && s.players[x.a] && s.players[x.b]);
+  if (!f) return null;
+  const A = s.players[f.a].name, B = s.players[f.b].name;
+  return { kind: 'feud', text: `${A.toUpperCase()} AND ${B.toUpperCase()}: THE ${ordinal(f.games + 1).toUpperCase()} MEETING`, players: [f.a, f.b], drama: 99, public: true };
+}
+
+/** One sentence from the Herald's memory for this story, if its whole audience knew the earlier event. */
+function memoryLine(c: Ctx, h: Headline, aud: PlayerId[], v: Slots, seed: number): string | null {
+  const { s } = c;
+  const past = c.annals.filter(a => a.turn < s.turn && annalKnown(aud, a));
+  const R = h.region;
+  if (R === undefined || !v.R || !past.length) return null;
+  const tries: [keyof typeof MEMORY, Slots][] = [];
+  if (['battle', 'capture', 'capital', 'liberated', 'razed', 'destroyed', 'caught', 'death', 'rout', 'obituary'].includes(h.kind)) {
+    const fell = past.filter(a => a.region === R && a.name && (a.kind === 'destroyed' || a.kind === 'caught' || a.kind === 'broken') && a.name !== v.F).at(-1);
+    if (fell) tries.push(['fell', { R: v.R, old: the(fell.name!), ago: plural(s.turn - fell.turn, c.cycle) }]);
+  }
+  if (h.kind === 'battle') {
+    const n = past.filter(a => a.kind === 'battle' && a.region === R).length;
+    if (n >= 1) tries.push(['battle', { R: v.R, nth: ordinal(n + 1) }]);
+    const [a, b] = h.players;
+    if (!v.murk && a !== undefined && b !== undefined && a >= 0 && b >= 0) {
+      const m = past.filter(x => x.kind === 'battle' && x.players.includes(a) && x.players.includes(b)).length;
+      if (m >= 1) tries.push(['clash', { A: s.players[a]?.name, B: s.players[b]?.name, nth: ordinal(m + 1) }]);
+    }
+  }
+  if (h.kind === 'capture' || h.kind === 'capital' || h.kind === 'liberated') {
+    const n = past.filter(a => (a.kind === 'capture' || a.kind === 'capital' || a.kind === 'liberated') && a.region === R).length;
+    if (n >= 1) tries.push(['taken', { R: v.R, nth: ordinal(n + 1) }]);
+  }
+  for (const [k, vars] of tries) {
+    const out = pick(MEMORY[k], vars, mix(seed, `mem:${k}`), c.used, `mem:${k}`);
+    if (out) return out;
+  }
+  return null;
 }
 
 // ============================================================================ stories
@@ -160,18 +309,24 @@ function bannerOf(s: GameState, h: Headline, owner: PlayerId | undefined, fallen
   return f && named && named.length > f.name.length && named.includes(f.name) ? null : f;
 }
 
-interface Ctx { s: GameState; beats: Headline[]; prev: HeraldEdition | null; used: Set<string>; everyone: PlayerId[]; cycle: string }
+interface Ctx { s: GameState; beats: Headline[]; prev: HeraldEdition | null; used: Set<string>; everyone: PlayerId[]; cycle: string; annals: Annal[]; older: HeraldEdition[] }
 const audienceOf = (c: Ctx, h: Headline) => (h.public ? c.everyone : [...new Set([...h.players, ...(h.seenBy ?? [])])]);
 /** Does everyone in `aud` know what `who` knows? */
 const within = (aud: PlayerId[], who: PlayerId[]) => aud.every(p => who.includes(p));
 
-function writeStories(s: GameState, headlines: Headline[], beats: Headline[], prev: HeraldEdition | null) {
-  const c: Ctx = { s, beats, prev, used: new Set(), everyone: s.players.map(p => p.id), cycle: s.mode === 'live' ? 'cycle' : 'turn' };
+/** Stories that carry the correspondent's byline (besides the lead). */
+const BYLINED = new Set(['obituary', 'feud', 'anniversary']);
+function writeStories(s: GameState, headlines: Headline[], beats: Headline[], prev: HeraldEdition | null, corr = correspondentOf(s), st: SoulState | null = null) {
+  const c: Ctx = { s, beats, prev, used: new Set(), everyone: s.players.map(p => p.id), cycle: s.mode === 'live' ? 'cycle' : 'turn',
+    annals: st?.annals ?? [], older: (st?.herald ?? []).slice(-6, -1) };
   headlines.forEach((h, i) => {
     try {
-      const st = storyFor(c, h, i === 0, i);
-      if (st.body) h.body = st.body;
-      if (st.dateline) h.dateline = st.dateline;
+      const out = storyFor(c, h, i === 0, i);
+      if (out.body) h.body = out.body;
+      if (out.dateline) h.dateline = out.dateline;
+      if (out.body && (i === 0 || BYLINED.has(h.kind) || h.kind.startsWith('act_'))) {
+        h.byline = h.kind === 'obituary' ? `By ${corr.name}, for the memorial page` : i === 0 ? `By ${corr.name}, ${corr.title}` : `By ${corr.name}`;
+      }
     } catch { /* a story is decoration: never let it break the turn */ }
   });
   // the whole front page stays small: later stories shrink to their first paragraph, then go
@@ -401,6 +556,64 @@ function slotsFor(c: Ctx, h: Headline, aud: PlayerId[]): { v: Slots; kind: strin
       break;
     }
     case 'eliminated': bad(a); break;
+    case 'obituary': {
+      const cmd = h.text.replace(/^Obituary:\s*/, '');
+      const rec = (s.soul?.fallen ?? []).find(x => x.commander === cmd && x.owner === a && x.fateTurn === s.turn);
+      fleetSlots(rec ? fromRecord(rec) : null);
+      v.C = cmd;
+      if (rec) v.dates = `${c.cycle} ${rec.foundedTurn} to ${c.cycle} ${s.turn}`;
+      const d = (s.soul?.debts ?? []).find(x => x.turn === s.turn && x.victim === cmd && x.creditor === a);
+      if (d && d.killer !== v.B) v.killer = d.killer;
+      const bt = c.beats.find(x => x.kind === 'battle' && x.region === h.region && within(aud, audienceOf(c, x)));
+      const bn = bt?.facts?.battle?.name?.replace(/\s*\([^)]*\)$/, '');
+      if (bn && !(r?.feature === 'nebula' && s.rules.sensors.nebulaHidesFleets && !within(aud, bt!.players))) v.battle = bn;
+      bad(a);
+      break;
+    }
+    case 'anniversary': {
+      const ago = (o: { turn: number }) => s.turn - o.turn;
+      const o = [...(s.players[a ?? -1]?.oathbreaker ?? [])].reverse().find(x => x.victim === b && ANNIVERSARIES.includes(ago(x)));
+      if (o) { v.since = plural(ago(o), c.cycle); v.words = cleanText(o.words, 160).replace(/[.!?]+$/, ''); }
+      else v.since = lowFirst(h.text.replace(/ since .*$/, ''));
+      bad(a);
+      break;
+    }
+    case 'feud': {
+      const L = s.league;
+      const f = L?.feuds.find(x => x.a === a && x.b === b);
+      if (L && f && a !== undefined && b !== undefined) {
+        v.nth = ordinal(f.games + 1);
+        v.league = L.name.replace(/^the\s+/i, '');
+        const [wa, wb] = f.wins;
+        if (wa !== wb) v.score = `${wa > wb ? v.A : v.B} leads ${Math.max(wa, wb)}–${Math.min(wa, wb)}`;
+        else if (wa > 0) v.score = `the score stands level at ${wa}–${wb}`;
+        if (f.captures[0]) v.capA = num(f.captures[0]);
+        if (f.captures[1]) v.capB = num(f.captures[1]);
+        if (f.betrayals[0] + f.betrayals[1] > 0) v.betrayals = num(f.betrayals[0] + f.betrayals[1]);
+        const nameOf = (seat: number | null | undefined, fallback: string) => (seat !== null && seat !== undefined && s.players[seat] ? s.players[seat].name : fallback || undefined);
+        if (L.last) {
+          v.lastWinner = nameOf(L.last.winner, L.last.winnerName);
+          if (L.last.turns) v.lastTurns = String(L.last.turns);
+        }
+        const ugly = L.houses.find(x => x.ugly);
+        if (ugly) v.ugly = s.players[ugly.seat]?.name;
+        const oath = L.oaths.find(x => x.by === a || x.by === b);
+        if (oath) { v.oathBy = s.players[oath.by]?.name; v.oathWords = cleanText(oath.words, 160).replace(/[.!?]+$/, ''); }
+        const nm = L.nemesis.find(x => (x.seat === a && x.of === b) || (x.seat === b && x.of === a));
+        if (nm) { v.nemA = s.players[nm.seat]?.name; v.nemB = s.players[nm.of]?.name; }
+        const fl = L.fleets[0];
+        if (fl) v.fleet = `${s.players[fl.seat]?.name ?? 'an old house'}’s ${fl.name}${fl.epithet ? `, ${the(fl.epithet)}` : ''}`;
+        const ti = L.houses.find(x => x.title);
+        if (ti) v.title = `${s.players[ti.seat]?.name ?? ti.name}, ${ti.title},`;
+      }
+      break;
+    }
+    case 'act_claim': case 'act_borders': case 'act_blood': case 'act_crisis': case 'act_throne': case 'act_last': {
+      if (s.rules.victory.mode === 'vp') v.goal = String(s.rules.victory.vpTarget);
+      if (kind === 'act_blood') { good(a); bad(b); }
+      if (kind === 'act_crisis' || kind === 'act_throne') good(a);
+      break;
+    }
   }
   // whose side a partisan quote comes from
   const voice = kind === 'battle' ? (!v.murk && typeof h.facts?.battle?.winner === 'number' && h.facts.battle.winner >= 0 ? h.facts.battle.winner : undefined)
@@ -509,9 +722,11 @@ function storyFor(c: Ctx, h: Headline, isLead: boolean, idx: number): { body?: s
     }
     return null;
   };
+  const mem = memoryLine(c, h, aud, v, seed);
   if (!isLead) {
     let body = pick(K.short, v, mix(seed, 'short'), c.used, `${kind}:short`);
     if (!body) return { dateline };
+    if (mem && words(body) + words(mem) <= 50) body = `${body} ${mem}`;
     // room for colour: a quote, or a dry aside (by hash), and the other if there is still room
     const order = mix(seed, 'colour') % 5 < 3 ? ['q', 'a'] : ['a', 'q'];
     for (const what of order) {
@@ -521,8 +736,9 @@ function storyFor(c: Ctx, h: Headline, isLead: boolean, idx: number): { body?: s
     }
     return { body: clip(body, STORY_CAPS.short), dateline };
   }
-  const lede = pick(K.lede, v, mix(seed, 'lede'), c.used, `${kind}:lede`);
-  if (!lede) return { dateline };
+  const lede0 = pick(K.lede, v, mix(seed, 'lede'), c.used, `${kind}:lede`);
+  if (!lede0) return { dateline };
+  const lede = mem ? `${lede0} ${mem}` : lede0;
   const detail = K.detail ? pickRich(K.detail, v, mix(seed, 'detail'), c.used, `${kind}:detail`) : null;
   const q = quote(false);
   // a house's dispatch from the last edition, quoted back at it when this story says how it fared
@@ -552,7 +768,7 @@ function pledgeOf(text: string): string | null {
 const clip = (t: string, n: number) => (t.length <= n ? t : `${t.slice(0, n - 1).replace(/\s+\S*$/, '')}…`);
 
 /** Can player `p` read this headline? */
-export const headlineVisible = (h: Headline, p: PlayerId) => h.public || h.players.includes(p) || !!h.seenBy?.includes(p);
+export const headlineVisible = <T extends Pick<Headline, 'public' | 'players' | 'seenBy'>>(h: T, p: PlayerId) => h.public || h.players.includes(p) || !!h.seenBy?.includes(p);
 
 /** Validate and queue a dispatch (one per house per edition). Returns an error or null. */
 export function queueDispatch(s: GameState, p: PlayerId, text: unknown, as: unknown): string | null {

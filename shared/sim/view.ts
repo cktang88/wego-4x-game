@@ -119,6 +119,8 @@ export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
     v.soul.herald = v.soul.herald.map(ed => ({ ...ed, headlines: ed.headlines.filter(h => headlineVisible(h, p)) }));
     v.soul.moments = v.soul.moments.filter(h => headlineVisible(h, p));
     v.soul.fallen = v.soul.fallen.filter(r => r.owner === p || r.public || !!r.seenBy?.includes(p));
+    // the Herald's memory: only what this house could know (same rule as a headline)
+    if (v.soul.annals) v.soul.annals = v.soul.annals.filter(a => headlineVisible(a, p));
   }
   if (v.live) {
     // your own queue and bank only; rivals' banks and plans are secret

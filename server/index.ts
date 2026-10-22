@@ -10,6 +10,8 @@ import { Store, UserError, ID_RE, cleanText, MAX_CHAT, type StoredGame } from '.
 import type { ClientMsg, ServerMsg } from '../shared/protocol.ts';
 import { filterHistoryFor } from './history.ts';
 import { isObj } from '../shared/index.ts';
+import { LeagueStore } from './league.ts';
+import { PushService, overPayload, reminderPayload, turnPayload, type PushSender } from './push.ts';
 
 const ROOT = resolve(import.meta.dirname, '..');
 
@@ -24,11 +26,20 @@ export interface ServerOptions {
   createPerWindow?: number;    // game creations allowed per IP per window
   createWindowMs?: number;
   trustProxy?: boolean;        // use X-Forwarded-For for rate limiting (only behind a trusted proxy)
+  /** League files (default: data/leagues, or <dataDir>/_leagues when dataDir is given). */
+  leagueDir?: string;
+  /** Web Push keys and subscriptions (default: data/push, or <dataDir>/_push). false: no push at all. */
+  pushDir?: string | false;
+  /** Tests: a fake push sender, and accept subscription endpoints on any https host. */
+  pushSender?: PushSender;
+  pushAnyHost?: boolean;
 }
 
 export interface RunningServer {
   port: number;
   store: Store;
+  leagues: LeagueStore;
+  push: PushService | null;
   http: Server;
   close(): Promise<void>;
 }
@@ -70,7 +81,14 @@ class HttpError extends Error { constructor(public code: number, msg: string) { 
 
 export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
   const DIST = resolve(opts.distDir ?? join(ROOT, 'dist'));
-  const store = new Store(opts.dataDir ?? join(ROOT, 'data', 'games'));
+  const leagues = new LeagueStore(opts.leagueDir ?? (opts.dataDir ? join(opts.dataDir, '_leagues') : join(ROOT, 'data', 'leagues')));
+  const store = new Store(opts.dataDir ?? join(ROOT, 'data', 'games'), leagues);
+  let push: PushService | null = null;
+  if (opts.pushDir !== false) {
+    try { push = new PushService(opts.pushDir ?? (opts.dataDir ? join(opts.dataDir, '_push') : join(ROOT, 'data', 'push')), { sender: opts.pushSender, anyHost: opts.pushAnyHost }); }
+    catch (e) { console.error('[push] disabled:', (e as Error)?.message ?? e); }
+  }
+  const pushLimiter = new RateLimiter(30, 60_000);
   const maxGames = opts.maxGames ?? 2000;
   const createLimiter = new RateLimiter(opts.createPerWindow ?? 20, opts.createWindowMs ?? 10 * 60_000);
   const joinLimiter = new RateLimiter(60, 60_000);
@@ -114,6 +132,34 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     console.error(`[store] resolve failed for ${g.id} (turn ${g.state.turn}); previous state kept`, e);
     for (const c of conns) if (c.game === g.id) send(c, { type: 'error', error: 'The server failed to resolve this turn; the previous state was kept. Orders are still sealed — try again or unseal and resubmit.', code: 'resolve_failed' });
   };
+
+  // ---------------------------------------------------------------- push ("your turn", in the Herald's voice)
+  const humanSeats = (g: StoredGame) => g.seats.map((x, i) => i).filter(i => g.seats[i].kind === 'human' && g.seats[i].token && !g.state.players[i].eliminated);
+  const fire = (p: Promise<unknown>) => { p.catch(e => console.error('[push]', e)); };
+  if (push) {
+    const P = push;
+    store.onTurn = g => {
+      // every seat that has not sealed the next turn (none has: the turn just resolved); its own fogged view only
+      for (const i of humanSeats(g)) {
+        if (!P.forSeat(g.id, i).length) continue;
+        const payload = g.state.winner !== null ? overPayload(g.state, g) : turnPayload(store.view(g, i), g);
+        fire(P.notifySeat(g.id, i, payload));
+      }
+    };
+    store.onSealed = (g, seat) => {
+      const hs = humanSeats(g);
+      const open = hs.filter(i => !g.pending[i]);
+      if (hs.length < 2 || open.length !== 1 || g.pushReminded === g.state.turn) return;
+      if (!P.forSeat(g.id, open[0]).length) return;
+      g.pushReminded = g.state.turn;
+      store.save(g);
+      fire(P.notifySeat(g.id, open[0], reminderPayload(g.state, hs.filter(i => g.pending[i]), g)));
+    };
+    store.onLive = g => {
+      if (g.state.winner === null) return;
+      for (const i of humanSeats(g)) if (P.forSeat(g.id, i).length) fire(P.notifySeat(g.id, i, overPayload(g.state, g)));
+    };
+  }
 
   // ---------------------------------------------------------------- http
   async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -175,6 +221,8 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 405, { error: 'method not allowed' });
       return serveStatic(url, res);
     }
+    if (parts[1] === 'league' || parts[1] === 'leagues') return leagueApi(req, res, parts);
+    if (parts[1] === 'push') return pushApi(req, res, parts);
     if (parts[1] !== 'games') return json(res, 404, { error: 'not found' });
     // GET /api/games
     if (parts.length === 2 && req.method === 'GET') return json(res, 200, store.list(onlineSeats));
@@ -213,6 +261,68 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       const resolved = store.submit(g, seat, b.submission, b.turn);
       if (resolved) pushView(g); else pushMeta(g);
       return json(res, 200, { ok: true, resolved, turn: g.state.turn });
+    }
+    return json(res, 404, { error: 'not found' });
+  }
+
+  /** Seat tokens a browser holds, as [{game, token}]: each checked against the game's seats (hashes); never stored. */
+  function seatsFromTokens(raw: unknown): { g: StoredGame; seat: number }[] {
+    if (!Array.isArray(raw)) return [];
+    const out: { g: StoredGame; seat: number }[] = [];
+    for (const x of raw.slice(0, 200)) {
+      if (!isObj(x) || typeof x.game !== 'string' || !ID_RE.test(x.game)) continue;
+      const g = store.games.get(x.game);
+      const seat = g ? store.seatFor(g, x.token) : null;
+      if (g && seat !== null) out.push({ g, seat });
+    }
+    return out;
+  }
+
+  // GET /api/league/:id                 the League's tables (public to whoever has the id: names and game facts only)
+  // POST /api/leagues/mine {tokens}     the Leagues this browser belongs to, from the seat tokens it holds
+  async function leagueApi(req: IncomingMessage, res: ServerResponse, parts: string[]) {
+    if (parts.length === 3 && parts[2] === 'mine' && req.method === 'POST') {
+      if (!joinLimiter.take(clientIp(req))) return json(res, 429, { error: 'slow down' });
+      const b = await body(req);
+      // per League, the games this browser proved a seat in (`via`: it already knows them; used to add a game to the League)
+      const via = new Map<string, string[]>();
+      for (const { g } of seatsFromTokens(b.tokens)) if (g.league) via.set(g.league.id, [...(via.get(g.league.id) ?? []), g.id]);
+      const cards = [...via.keys()].map(id => leagues.get(id)).filter((l): l is NonNullable<typeof l> => !!l).map(l => ({ ...leagues.card(l), via: via.get(l.id)! }));
+      return json(res, 200, { leagues: cards });
+    }
+    if (parts.length === 3 && req.method === 'GET') {
+      const l = leagues.get(parts[2]);
+      if (!l) return json(res, 404, { error: 'no such league' });
+      return json(res, 200, leagues.view(l));
+    }
+    return json(res, 404, { error: 'not found' });
+  }
+
+  // GET /api/push/key                                  the VAPID public key
+  // POST /api/push/subscribe {subscription, games: [{game, token}], quiet?, live?}
+  // POST /api/push/settings {endpoint, quiet?, live?}   POST /api/push/unsubscribe {endpoint}
+  // POST /api/push/test {endpoint}                     one notification now (the opt-in prompt's proof)
+  async function pushApi(req: IncomingMessage, res: ServerResponse, parts: string[]) {
+    if (!push) return json(res, 503, { error: 'push notifications are not available on this server' });
+    const what = parts[2];
+    if (parts.length === 3 && what === 'key' && req.method === 'GET') return json(res, 200, { publicKey: push.publicKey });
+    if (parts.length !== 3 || req.method !== 'POST') return json(res, 404, { error: 'not found' });
+    if (!pushLimiter.take(clientIp(req))) return json(res, 429, { error: 'slow down' });
+    const b = await body(req);
+    if (what === 'subscribe') {
+      const seats = seatsFromTokens(b.games).map(x => ({ game: x.g.id, seat: x.seat }));
+      const sub = push.subscribe(b.subscription, seats, { quiet: b.quiet, live: b.live });
+      if (!sub) return json(res, 400, { error: 'that is not a push subscription this server can use' });
+      return json(res, 200, { ok: true, games: sub.seats.map(x => x.game), quiet: sub.quiet, live: sub.live });
+    }
+    if (what === 'settings') return push.settings(b.endpoint, { quiet: b.quiet, live: b.live }) ? json(res, 200, { ok: true }) : json(res, 404, { error: 'not subscribed' });
+    if (what === 'unsubscribe') { push.unsubscribe(b.endpoint); return json(res, 200, { ok: true }); }
+    if (what === 'test') {
+      const s = typeof b.endpoint === 'string' ? push.subs.get(PushService.idOf(b.endpoint)) : undefined;
+      if (!s) return json(res, 404, { error: 'not subscribed' });
+      const game = s.seats[0]?.game ?? '';
+      const ok = await push.notifySeat(game, s.seats[0]?.seat ?? -1, { title: 'The Herald', body: 'Word will reach you here when the turn is in.', tag: 'test', url: '/', game, kind: 'test' }, Date.now() - 0, x => x.id === s.id);
+      return json(res, 200, { ok: true, sent: ok });
     }
     return json(res, 404, { error: 'not found' });
   }
@@ -341,7 +451,13 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
     try {
       for (const id of store.tick()) { const g = store.games.get(id); if (g) pushView(g); }
     } catch (e) { console.error('[tick]', e); }
+    if (push) {
+      const now = Date.now();
+      for (const g of store.games.values()) if (g.state.live && g.state.winner === null) fire(push.liveAlerts(g.id, g.name, g.state, now));
+    }
   }, opts.tickMs ?? 2_000);   // cheap: only due deadlines / live ticks do work
+  // quiet hours over: send what they held back
+  const pushFlush = setInterval(() => { if (push) fire(push.flush()); }, 60_000);
   // terminate half-open sockets so `conns` doesn't leak and "online" stays honest
   const heartbeat = setInterval(() => {
     for (const c of conns) {
@@ -358,9 +474,9 @@ export function startServer(opts: ServerOptions = {}): Promise<RunningServer> {
       const addr = http.address();
       const port = typeof addr === 'object' && addr ? addr.port : opts.port ?? 0;
       resolveP({
-        port, store, http,
+        port, store, http, leagues, push,
         close: () => new Promise<void>(done => {
-          clearInterval(ticker); clearInterval(heartbeat);
+          clearInterval(ticker); clearInterval(heartbeat); clearInterval(pushFlush);
           for (const c of conns) c.ws.terminate();
           conns.clear();
           wss.close();

@@ -10,6 +10,7 @@ import { ensureSoul, soulOn, soulGarrison } from './soul.ts';
 import { SIGILS } from '../config/content.ts';
 import { ensureSig } from './signature.ts';
 import { starGarrison, worldFx } from './systems.ts';
+import { cleanLeagueMemory, type LeagueMemory } from '../league.ts';
 
 export interface PlayerSetup { name?: string; kind: 'human' | 'ai'; aiLevel?: Player['aiLevel'] }
 export interface GameSetup {
@@ -25,6 +26,11 @@ export interface GameSetup {
   rules?: unknown;
   id?: string;
   homeRotation?: number;
+  /**
+   * League games only (server): what the Herald may recall of past games between these houses, seats of THIS game.
+   * Public: names and counts only (shared/league.ts leagueMemory). Absent = a game outside any League.
+   */
+  league?: LeagueMemory;
 }
 
 export function createGame(setup: GameSetup): GameState {
@@ -83,6 +89,8 @@ export function createGame(setup: GameSetup): GameState {
     });
   }
   ensureSoul(s);
+  const lm = cleanLeagueMemory(setup.league, s.players.length);
+  if (lm) s.league = lm;
   ensureSig(s);   // Signature: Fate tokens
   s.rngState = rng.state;
   s.chronicle.push({ turn: 1, text: 'Three heirs of a dead empire light their beacons. The Hollow Throne waits between them.', players: [0, 1, 2], major: true });

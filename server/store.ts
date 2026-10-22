@@ -7,6 +7,8 @@ import { createGame, resolveTurn, planTurn, viewFor, emptySubmission, defaultRul
 import type { GameState, Submission, TurnResult, PlayerView } from '../shared/index.ts';
 import type { ChatMsg, CreateGameReq, GameMeta, SeatInfo } from '../shared/protocol.ts';
 import { spectatorView } from './history.ts';
+import { cleanLeagueMemory, leagueMemory, leagueName, memberKey, summarizeGame, type League } from '../shared/league.ts';
+import type { LeagueStore } from './league.ts';
 
 export interface Seat {
   name: string;
@@ -29,7 +31,18 @@ export interface StoredGame {
   history: TurnResult[];     // full (unfiltered) results of resolved turns (capped at MAX_HISTORY)
   resolveFailures?: number;  // consecutive failed resolutions (sim bug); used for backoff
   liveRetryAt?: number;      // LIVE: after a failed tick, don't retry before this (epoch ms)
+  /**
+   * League games: the League and who sat where (member keys, shared/league.ts memberKey). `fixed` seats carry their
+   * member over from the game a rematch was made from; the others follow the name the seat is joined with.
+   * Absent on old games and games outside any League: they never touch a League.
+   */
+  league?: { id: string; members: string[]; fixed: boolean[] };
+  /** Push: the turn whose "the table waits" reminder went out (one per turn). */
+  pushReminded?: number;
 }
+
+/** POST /api/games `league` field: join a League (rematch or by id, proven with a seat token) or start a new one. */
+export interface LeagueReq { rematchOf?: string; id?: string; game?: string; token?: string; name?: string }
 
 export const ID_RE = /^[0-9a-f]{6,32}$/;
 export const AI_LEVELS = ['novice', 'standard', 'expert'] as const;
@@ -168,6 +181,7 @@ function scrubSpectator(v: PlayerView): PlayerView {
     s.soul.herald = s.soul.herald.map(ed => ({ ...ed, headlines: ed.headlines.filter(h => h.public) }));
     s.soul.moments = s.soul.moments.filter(h => h.public);
     s.soul.fallen = s.soul.fallen.filter(r => r.public);
+    if (s.soul.annals) s.soul.annals = s.soul.annals.filter(a => a.public);
   }
   return v;
 }
@@ -182,7 +196,16 @@ export class Store {
   /** Called with (game, error) when a resolution throws; previous state is kept. */
   onResolveError: (g: StoredGame, e: unknown) => void = (g, e) => console.error(`[store] resolve failed for ${g.id}`, e);
 
-  constructor(private dir: string) {
+  /** Called after a WEGO turn resolves (push: "your turn"). */
+  onTurn: (g: StoredGame) => void = () => {};
+  /** Called after a seat seals without resolving the turn (push: the last-to-seal reminder). */
+  onSealed: (g: StoredGame, seat: number) => void = () => {};
+  /** Called after LIVE ticks ran (push: arrivals). */
+  onLive: (g: StoredGame) => void = () => {};
+  /** Called when a League game ends and the League was updated. */
+  onLeague: (g: StoredGame, l: League) => void = () => {};
+
+  constructor(private dir: string, public leagues: LeagueStore | null = null) {
     mkdirSync(dir, { recursive: true });
     for (const f of readdirSync(dir)) {
       if (!f.endsWith('.json')) continue;
@@ -216,6 +239,64 @@ export class Store {
       }
     }
     console.log(`[store] loaded ${this.games.size} games from ${dir}`);
+    // a League game that ended while the server was down (or before a crash mid-update): record it now (idempotent)
+    for (const g of this.games.values()) if (g.league && g.state.winner !== null) this.recordLeague(g);
+  }
+
+  // ------------------------------------------------------------------ Leagues
+  /** Member keys for a game's seats: carried ones stay; else a member of that name; else whoever sat there last game. */
+  private resolveMembers(l: League, seats: { kind: 'human' | 'ai'; name: string }[], carried: (string | null)[]): string[] {
+    const known = new Set(l.games.flatMap(x => x.seats.map(sd => sd.member)));
+    const last = l.games[l.games.length - 1];
+    const out: string[] = [];
+    seats.forEach((sd, i) => {
+      const own = memberKey(sd.kind, sd.name);
+      const prev = last?.seats[i];
+      out.push(carried[i] ?? (known.has(own) ? own : prev && prev.kind === sd.kind && !seats.some((o, j) => j !== i && memberKey(o.kind, o.name) === prev.member) ? prev.member : own));
+    });
+    // two seats can't be one member
+    return out.map((m, i) => (out.indexOf(m) === i ? m : memberKey(seats[i].kind, seats[i].name) + (out.indexOf(memberKey(seats[i].kind, seats[i].name)) === -1 ? '' : `#${i}`)));
+  }
+
+  /** Validate the `league` field of a create request: which League, which members are carried over, the seats to copy. */
+  private leagueFor(req: CreateGameReq & { league?: unknown }): { league: League; carried: (string | null)[]; src?: StoredGame } | null {
+    const L = this.leagues;
+    if (!L || req.league === 'none' || (req.league as unknown) === false) return null;
+    const lr = (isObj(req.league) ? req.league : {}) as LeagueReq;
+    if (lr.rematchOf !== undefined) {
+      const src = typeof lr.rematchOf === 'string' && ID_RE.test(lr.rematchOf) ? this.games.get(lr.rematchOf) : undefined;
+      if (!src) throw new UserError('no such game to rematch', 404);
+      if (this.seatFor(src, lr.token) === null) throw new UserError('only a player of that game can ask for a rematch', 403);
+      const existing = src.league ? L.get(src.league.id) : undefined;
+      const league = existing ?? L.create(src.state.players.map(p => p.name), cleanText(lr.name, 80) || undefined);
+      const carried = src.league && existing ? src.league.members.map(m => m) : src.seats.map((sd, i) => memberKey(sd.kind, src.state.players[i].name));
+      return { league, carried, src };
+    }
+    if (lr.id !== undefined) {
+      const league = L.get(lr.id);
+      if (!league) throw new UserError('no such league', 404);
+      // membership: a seat token of any game of this League
+      const g = typeof lr.game === 'string' && ID_RE.test(lr.game) ? this.games.get(lr.game) : undefined;
+      if (!g || g.league?.id !== league.id || this.seatFor(g, lr.token) === null) throw new UserError('only a member of that league can add a game to it', 403);
+      return { league, carried: [null, null, null] };
+    }
+    return { league: L.create([], cleanText(lr.name, 80) || undefined), carried: [null, null, null], };
+  }
+
+  /** The Herald's memory of this League for a game's current seats (public: names and counts). */
+  private memoryFor(g: StoredGame, l: League) {
+    return cleanLeagueMemory(leagueMemory(l, g.seats.map((sd, i) => ({ member: g.league!.members[i], name: g.state.players[i].name }))));
+  }
+
+  /** A League game ended: put its summary in the League (idempotent; never throws). */
+  recordLeague(g: StoredGame) {
+    try {
+      if (!g.league || g.state.winner === null || !this.leagues) return;
+      const l = this.leagues.get(g.league.id);
+      if (!l) return;
+      const sum = summarizeGame(g.state, { game: g.id, name: g.name, createdAt: g.createdAt, members: g.league.members, kinds: g.seats.map(sd => sd.kind), history: g.history });
+      if (this.leagues.record(l, sum)) this.onLeague(g, l);
+    } catch (e) { console.error(`[store] league update failed for ${g.id}`, e); }
   }
 
   /** Atomic write: temp file + fsync + rename, so a crash mid-write never leaves a truncated game. */
@@ -229,11 +310,23 @@ export class Store {
 
   create(req: CreateGameReq): StoredGame {
     if (!isObj(req)) throw new UserError('body must be an object');
+    const lg = this.leagueFor(req as CreateGameReq & { league?: unknown });
+    // a rematch keeps the table: the same seats (kinds, names, AI levels), the same galaxy and the same clock
+    if (lg?.src) {
+      const src = lg.src;
+      req = { ...req };
+      if (req.seats === undefined) req.seats = src.seats.map((sd, i) => ({ kind: sd.kind, name: src.state.players[i].name, aiLevel: sd.aiLevel }));
+      if (req.seed === undefined) req.seed = src.state.seed;
+      if (req.name === undefined) req.name = `${src.name.replace(/\s*\(again(?: ×\d+)?\)$/, '')} (again)`.slice(0, 60);
+      if (req.mode === undefined) req.mode = src.state.live ? 'live' : 'wego';
+      if (req.deadlineHours === undefined && !src.state.live) req.deadlineHours = src.deadlineHours;
+      if (req.rules === undefined) { try { req.rules = sanitizeRules(JSON.parse(JSON.stringify(src.state.rules))); } catch { /* too large: defaults */ } }
+    }
     let id: string;
     do { id = randomBytes(5).toString('hex'); } while (this.games.has(id) || existsSync(join(this.dir, `${id}.json`)));
     if (req.seats !== undefined && !Array.isArray(req.seats)) throw new UserError('seats must be an array');
     const seatsReq = (req.seats ?? []).slice(0, 3).map(s => {
-      const o = isObj(s) ? s : {};
+      const o = (isObj(s) ? s : {}) as Record<string, any>;
       return {
         kind: o.kind === 'human' ? 'human' as const : 'ai' as const,
         name: cleanText(o.name, 40) || undefined,
@@ -244,8 +337,18 @@ export class Store {
     const seed = typeof req.seed === 'number' && Number.isFinite(req.seed) ? req.seed : undefined;
     const rules = sanitizeRules(req.rules);
     let state: GameState;
+    let leagueRec: StoredGame['league'];
     try {
       state = createGame({ id, seed, rngSeed: randomBytes(4).readUInt32LE(0), rules, players: seatsReq.map(s => ({ kind: s.kind, name: s.name, aiLevel: s.aiLevel })) });
+      if (lg) {
+        const seats = seatsReq.map((s, i) => ({ kind: s.kind, name: state.players[i].name }));
+        leagueRec = { id: lg.league.id, members: this.resolveMembers(lg.league, seats, lg.carried), fixed: lg.carried.map(x => x !== null) };
+        // a League named after nobody yet takes its first table's names (and again when the first game ends)
+        if (lg.league.auto && !lg.league.games.length) lg.league.name = leagueName(seats.map(x => x.name));
+        // the Herald's memory of past games between these houses (createGame cleans it again; it is public state)
+        const mem = cleanLeagueMemory(leagueMemory(lg.league, seats.map((s, i) => ({ member: leagueRec!.members[i], name: s.name }))));
+        if (mem) state.league = mem;
+      }
     } catch (e) { throw new UserError(`could not create game with these rules: ${(e as Error)?.message ?? e}`); }
     let dh = Number(req.deadlineHours ?? state.rules.async.defaultDeadlineHours);
     if (!Number.isFinite(dh) || dh <= 0) dh = 0;
@@ -254,6 +357,7 @@ export class Store {
       id, name: cleanText(req.name, 60) || `Game ${id}`, createdAt: Date.now(),
       seats: seatsReq.map((s, i) => ({ name: state.players[i].name, kind: s.kind, aiLevel: s.aiLevel, token: null })),
       state, pending: {}, deadlineHours: dh, deadline: null, chat: [], history: [],
+      ...(leagueRec ? { league: leagueRec } : {}),
     };
     if (req.mode === 'live') {
       const sp = typeof req.liveSpeed === 'string' && Object.hasOwn(LIVE_SPEEDS, req.liveSpeed) ? LIVE_SPEEDS[req.liveSpeed].mult : 1;
@@ -263,6 +367,7 @@ export class Store {
     this.armDeadline(g);
     this.save(g);
     this.games.set(id, g);
+    if (lg && this.leagues) this.leagues.attach(lg.league, id);
     return g;
   }
 
@@ -317,6 +422,8 @@ export class Store {
       for (const res of r.results) g.history.push(res);
       if (g.history.length > MAX_HISTORY * 8) g.history.splice(0, g.history.length - MAX_HISTORY * 8);
       this.save(g);
+      if (g.state.winner !== null) this.recordLeague(g);
+      try { this.onLive(g); } catch (e) { console.error('[store] onLive', e); }
       return true;
     } catch (e) {
       this.onResolveError(g, e);
@@ -335,8 +442,19 @@ export class Store {
     s.token = hashToken(token);
     const nm = cleanText(name, 40);
     if (nm) { s.name = nm; g.state.players[seat].name = nm; }
+    const prevLeague = g.league ? { members: [...g.league.members], mem: g.state.league } : null;
+    if (g.league && nm && !g.league.fixed[seat] && g.state.turn === 1 && this.leagues) {
+      // the seat's member follows its name; the feud page (printed after turn 1) recalls the right houses
+      const l = this.leagues.get(g.league.id);
+      if (l) {
+        g.league.members = this.resolveMembers(l, g.seats.map((x, i) => ({ kind: x.kind, name: g.state.players[i].name })), g.league.members.map((m, i) => (g.league!.fixed[i] ? m : null)));
+        const mem = this.memoryFor(g, l);
+        if (mem) g.state.league = mem;
+      }
+    }
     try { this.save(g); } catch (e) {
       s.token = null; s.name = prev.name; g.state.players[seat].name = prev.pname;
+      if (prevLeague && g.league) { g.league.members = prevLeague.members; g.state.league = prevLeague.mem; }
       throw e;
     }
     return token;
@@ -361,7 +479,7 @@ export class Store {
     const L = g.state.live;
     return { id: g.id, name: g.name, createdAt: g.createdAt, turn: g.state.turn, seats, deadline: g.deadline,
       deadlineHours: g.deadlineHours, winner: g.state.winner, winReason: g.state.winReason,
-      mode: L ? 'live' : 'wego',
+      mode: L ? 'live' : 'wego', ...(g.league ? { league: g.league.id } : {}),
       live: L ? { speed: L.speed, tick: L.tick, nextTickAt: nextTickAt(g.state), tickMs: tickMs(g.state), ticksPerCycle: g.state.rules.live.ticksPerCycle } : undefined };
   }
 
@@ -386,6 +504,7 @@ export class Store {
     g.state.players[seat].missedTurns = 0;
     const resolved = this.tryResolve(g, false);
     this.save(g);
+    if (!resolved) { try { this.onSealed(g, seat); } catch (e) { console.error('[store] onSealed', e); } }
     return resolved;
   }
 
@@ -436,6 +555,8 @@ export class Store {
     if (g.history.length > MAX_HISTORY) g.history.splice(0, g.history.length - MAX_HISTORY);
     g.pending = {};
     this.armDeadline(g);
+    if (g.state.winner !== null) this.recordLeague(g);
+    try { this.onTurn(g); } catch (e) { console.error('[store] onTurn', e); }
     return true;
   }
 
