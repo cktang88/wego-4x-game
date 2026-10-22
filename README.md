@@ -21,6 +21,9 @@ Every world is a **star system**: a star and up to three bodies that decide what
 - [docs/SOUL.md](docs/SOUL.md): fleets as characters, worlds with a story, friends as antagonists
 - [docs/SYSTEMS.md](docs/SYSTEMS.md): star systems (stars, bodies, roles, citizens, contested systems)
 - [docs/SIGNATURE.md](docs/SIGNATURE.md): signature mechanics (Postures, Fate)
+- [docs/LOOPS.md](docs/LOOPS.md): the minute, session and many-session loops, the dopamine map and the build waves
+- [docs/DELIGHT.md](docs/DELIGHT.md): 88 delight details by screen, with priority and effort
+- [docs/QUALITY.md](docs/QUALITY.md): the checklist every screen passes before it ships
 - [docs/TODO.md](docs/TODO.md): ideas we like but haven't built yet (Legacy Galaxy, League, Exile, Turncoats…)
 
 ## Quick start
