@@ -244,7 +244,22 @@ export interface RegionStory {
 export interface LedgerEntry { turn: number; kind: string; text: string; body?: number; players?: PlayerId[] }
 
 export interface BloodDebt { id: number; turn: number; debtor: PlayerId; creditor: PlayerId; killer: string; victim: string; fleet: string; region: RegionId; cleared?: number | null }
-export interface Headline { text: string; kind: string; region?: RegionId; players: PlayerId[]; drama: number; public: boolean; seenBy?: PlayerId[] }
+export interface Headline {
+  text: string; kind: string; region?: RegionId; players: PlayerId[]; drama: number; public: boolean; seenBy?: PlayerId[];
+  /** The Herald's story under the headline (paragraphs split by a blank line). Only facts its audience may know. Absent in old saves. */
+  body?: string;
+  /** Where and when it was filed, e.g. "VEL, TURN 9". Absent in old saves. */
+  dateline?: string;
+  /** Internal (queued beats only, never printed): what the story needs from the step that queued it. */
+  facts?: HeadlineFacts;
+}
+/** Herald internals: battle and posture details captured when a beat is queued (herald.ts heraldNote). */
+export interface HeadlineFacts {
+  battle?: { name: string; rounds: number; winner: PlayerId | -1 | null; first: (PlayerId | -1)[];
+    sides: { owner: PlayerId | -1; fleets: { name: string; cmd: string }[]; ships: number; lost: number }[] };
+  posture?: string;
+  fate?: string;
+}
 export interface HeraldEdition { turn: number; headlines: Headline[]; dispatches: { player: PlayerId; text: string; as: 'house' | 'source'; byline: string }[] }
 export interface FleetRecord {
   id: FleetId; owner: PlayerId; name: string; commander: string; rank: number; sigil: string; boons: string[]; banes: string[];

@@ -35,7 +35,7 @@ import { maxGarrison, newFleet, newShip } from './setup.ts';
 import type { TickOpts, BattleReport, Engagement, Doctrine, Fleet, FoundSpec, FreeAction, GameEvent, GameState, Order, PlayerId, Region, RegionId, Signal, Submission, TurnResult, VowKind, Posture, WorldPosture, FateUse } from './types.ts';
 import { coverage, seesFleetsIn } from './visibility.ts';
 import { soulOn, SR, ensureSoul, bannersFree, resolveFound, raiseBanner, applyRout, onFleetLost, catchLimping, onCapture, raze, razeBlock, vowBlock, swearVow, pickHonour, pickCalling, soulEndTurn, soulReigns, soulRegen, soulYield, soulUpkeep, hasBoon, hasBane, breakVow, sagaBeat, beat, headline, addDeed, archiveFleet, cleanText, isPicket } from './soul.ts';
-import { makeEdition, queueDispatch } from './herald.ts';
+import { heraldNote, makeEdition, queueDispatch } from './herald.ts';
 import { traitFx, traitHpMult } from './shiptraits.ts';
 import { sigOn, ensureSig, fx, postureOf, effStance, postureSpeed, isDugIn, hasHyperjump, ambushAt, noteArrivals, checkPostures, postureBlock, setPosture, wpostureBlock, setWorldPosture, fateBlock, spendFate, scorchedOnCapture, scorchAftermath, gatesOpenFor, gatesHost, sigEndTurn, regionIdle, regionSurge, SG, POSTURE_IDS, WORLD_POSTURE_IDS, FATE_IDS } from './signature.ts';
 import { BOONS, DEEDS } from '../config/content.ts';
@@ -1074,6 +1074,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     for (const b of s.soul.beats) if (!b.public && !b.seenBy) b.seenBy = sb(b.players, b.region);
     for (const r of s.soul.fallen) if (r.fateTurn === s.turn && !r.seenBy) r.seenBy = sb([r.owner], r.fateRegion);
   }
+  if (soul) heraldNote(s, battles, events);   // the Herald's notes: battle reports and posture reads for its stories
   if (endCycle) {
     // the Herald goes to press (fog: each headline remembers who could see it)
     if (stepCov) {
