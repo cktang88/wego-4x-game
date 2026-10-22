@@ -4,13 +4,18 @@
 import type { GameScreen } from '../game.ts';
 import { connected, supplied } from '../../../shared/sim/empire.ts';
 import { esc } from '../ui/dom.ts';
-import { shortName } from './util.ts';
+import { shortName, tip } from './util.ts';
 import { soulNotes } from './soul.ts';
 import { systemNotes } from './systems.ts';
 
 export interface Note { key: string; icon: string; text: string; tone: 'bad' | 'good' | 'gold' | 'info'; p: number; go: () => void }
 
-export function notes(g: GameScreen): Note[] {
+/** Planning nags (a choice to make, research to buy, a full bank, terms offered): they live on the plan strip's
+ *  "to do" tab, not in the notice stack over the map. */
+const NAG = /^(?:cal|hon|trib)\d|^bank$/;
+export function planNags(g: GameScreen): Note[] { return allNotes(g).filter(n => NAG.test(n.key)); }
+export function notes(g: GameScreen): Note[] { return allNotes(g).filter(n => !NAG.test(n.key)); }
+function allNotes(g: GameScreen): Note[] {
   const st = g.st, you = g.you, out: Note[] = [];
   const at = (rid: number) => () => { if (st.regions[rid]) { g.select({ kind: 'region', id: rid }); g.focus(st.regions[rid].site); } };
   const rn = (rid: number) => shortName(st.regions[rid]?.name ?? '?', 2);
@@ -49,7 +54,7 @@ export function notes(g: GameScreen): Note[] {
     if (dig) out.push({ key: 'dig', icon: '✧', text: `Relic at ${rn(dig.region)}`, tone: 'gold', p: 3, go: () => { g.select({ kind: 'fleet', id: dig.id }); g.focus(st.regions[dig.region].site); } });
     for (const n of soulNotes(g)) out.push({ ...n, tone: 'gold', p: 1 });
     for (const n of systemNotes(g)) out.push({ ...n, p: n.tone === 'bad' ? 0 : 1 });
-    if (g.canResearchNow()) out.push({ key: 'res', icon: '✺', text: 'Research ready', tone: 'gold', p: 6, go: () => g.openModal('empire', 'research') });
+    // (research ready: the primary button and the Empire tool's dot say so; no notice over the map)
     if (g.live && g.bank >= st.rules.live.bankCap) out.push({ key: 'bank', icon: '⏱', text: 'Order bank full', tone: 'gold', p: 2, go: () => g.nextIdle() });
     const ed = st.edicts.find(e => e.scoresTurn === st.turn);
     if (ed) out.push({ key: `e${ed.id ?? ed.name}`, icon: '♛', text: `Edict: ${shortName(ed.name, 2)}`, tone: 'gold', p: 7, go: () => g.openModal('score') });
@@ -60,21 +65,45 @@ export function notes(g: GameScreen): Note[] {
 
 let expanded = false;
 let current: Note[] = [];
+/** News (battles, captures, failed orders, edicts) is shown for a while, then folds into the "+N" pill; the
+ *  notices that ask for something (threats, choices, research, terms) stay until dealt with. At most 3 chips. */
+const NEWS = /^(?:[bcl]\d|fail$|e)/;
+const NEWS_MS = 12000;
+const MAX_SHOWN = 2;
+const firstSeen = new Map<string, number>();
+let refresh = 0;
 export function renderNotes(g: GameScreen, el: HTMLElement) {
   current = notes(g);
   const list = current;
+  const now = performance.now();
+  const turn = g.st.turn;
+  let soonest = Infinity;
+  const fresh = (n: Note) => {
+    if (!NEWS.test(n.key)) return true;
+    const k = `${turn}:${n.key}`;
+    if (!firstSeen.has(k)) firstSeen.set(k, now);
+    const left = NEWS_MS - (now - firstSeen.get(k)!);
+    if (left > 0) soonest = Math.min(soonest, left);
+    return left > 0;
+  };
   let html = '';
   if (g.phone) {
     if (list.length) {
       const tone = list.some(n => n.tone === 'bad') ? 'bad' : list[0].tone;
-      html = `<button class="nbadge ${tone}" data-n="more" aria-label="${list.length} notifications">${esc(list[0].icon)}<b>${list.length}</b></button>`;
+      html = `<button class="nbadge ${tone}" data-n="more" aria-label="${list.length} notice${list.length > 1 ? 's' : ''}"${tip('Notices')}>${esc(list[0].icon)}<b>${list.length}</b></button>`;
       if (expanded) html += `<div class="nlist">${list.map((n, i) => chip(n, i)).join('')}</div>`;
     }
   } else {
-    const shown = expanded ? list : list.slice(0, 3);
-    html = shown.map((n, i) => chip(n, i)).join('') + (!expanded && list.length > 3 ? `<button class="nchip more" data-n="more">+${list.length - 3}</button>` : expanded && list.length > 3 ? `<button class="nchip more" data-n="more">−</button>` : '');
+    const live = list.map((n, i) => ({ n, i })).filter(x => fresh(x.n));
+    const shown = expanded ? list.map((n, i) => ({ n, i })) : live.slice(0, MAX_SHOWN);
+    const rest = list.length - shown.length;
+    html = shown.map(x => chip(x.n, x.i)).join('') +
+      (!expanded && rest > 0 ? `<button class="nchip more" data-n="more" aria-label="${rest} more notice${rest > 1 ? 's' : ''}"${tip('More notices')}>+${rest}</button>`
+        : expanded && list.length > MAX_SHOWN ? `<button class="nchip more" data-n="more" aria-label="Fewer notices">−</button>` : '');
   }
   g.setHtml(el, html);
+  // fold the news away when it goes stale (one timer at a time)
+  if (soonest < Infinity && !refresh) refresh = window.setTimeout(() => { refresh = 0; if (!g.destroyed) renderNotes(g, el); }, soonest + 60);
 }
 const chip = (n: Note, i: number) => `<button class="nchip ${n.tone}" data-n="${i}" data-pop="note:${esc(n.key)}"${n.key.startsWith('b') ? ` data-battle="${esc(n.key.slice(1))}"` : ''}><i>${esc(n.icon)}</i><span>${esc(n.text)}</span></button>`;
 

@@ -5,6 +5,8 @@
   --glass-hi: rgba(36, 38, 46, 0.92);
   --edge: rgba(214, 186, 130, 0.18);
   --you: #d9b26a;
+  /* secondary text a step lighter than theme.css: #a89f8c / #9a907e fell to 4.1 / 3.4:1 on the lit plate corner */
+  --dim: #c2b8a4; --faint: #b5ab97; --bad: #ff8478;
   --t1: var(--fs-xs); --t2: var(--fs-md); --t3: 1.25rem;
   --safe-t: env(safe-area-inset-top, 0px); --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px); --safe-r: env(safe-area-inset-right, 0px);
@@ -21,6 +23,9 @@
 .glassy, .turnbox, .respill, .crests, .strip:not(:empty), .tool, .nchip, .nbadge, .hud > .card, .pop, .dragcard, .loupe, .ri, .replaybar {
   background: var(--glass); border: 1px solid var(--edge); box-shadow: 0 0.375rem 1.5rem rgba(0, 0, 0, 0.45);
 }
+
+/* the card is read over a busy map: the solid plate (theme.css), not the 82% glass the list above gives it */
+.hud > .card { background: var(--plate, var(--glass-hi)); border-color: var(--rim, var(--edge)); }
 
 /* ------------------------------------------------------------ top-left: turn + phase */
 .hud-tl { top: calc(0.625rem + var(--safe-t)); left: calc(0.75rem + var(--safe-l)); }
@@ -51,14 +56,14 @@
 .hud-tr { top: calc(0.625rem + var(--safe-t)); right: calc(0.75rem + var(--safe-r)); }
 .crests { display: flex; gap: 0.25rem; padding: 0.25rem 0.375rem; border-radius: 0.875rem; cursor: pointer; }
 .crests:hover { background: var(--glass-hi); }
-.pcrest { position: relative; display: flex; flex-direction: column; align-items: center; width: 3.875rem; padding: 0.125rem 0 0.25rem; border-radius: 0.625rem; }
+.pcrest { position: relative; display: flex; flex-direction: column; align-items: center; min-width: 3.875rem; padding: 0.125rem 0.3125rem 0.25rem; border-radius: 0.625rem; }
 .pcrest.you { background: color-mix(in srgb, var(--pc) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pc) 70%, transparent); }
 .pcrest.out { opacity: 0.4; }
 .pcrest .cb { position: relative; display: flex; align-items: center; justify-content: center; width: 2.125rem; height: 1.875rem; clip-path: polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%); background: var(--pc); }
 .pcrest .vp { font-size: var(--t2); font-weight: 700; color: #0b0718; margin-top: -0.25rem; }
 .pcrest .lead { position: absolute; top: -0.25rem; left: 0.375rem; font-style: normal; font-size: var(--t1); color: var(--gold); text-shadow: 0 0 0.375rem #000; }
 .pcrest .sealed { position: absolute; top: -0.125rem; right: 0.375rem; font-style: normal; font-size: var(--t1); color: #0b0718; background: var(--good); border-radius: 0.5rem; width: 0.875rem; height: 0.875rem; line-height: 0.875rem; text-align: center; font-weight: 700; }
-.pcrest .nm { font-size: var(--t1); color: var(--text); max-width: 3.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.pcrest .nm { font-size: var(--t1); color: var(--text); max-width: 7.5rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 .pcrest .nm .on { display: inline-block; width: 0.375rem; height: 0.375rem; border-radius: 50%; background: var(--good); margin-right: 0.1875rem; vertical-align: 1px; }
 .pcrest .vpbar { display: block; width: 2.75rem; height: 0.1875rem; border-radius: 0.125rem; background: rgba(255, 255, 255, 0.12); overflow: hidden; margin-top: 0.125rem; }
 .pcrest .vpbar > i { display: block; height: 100%; background: var(--gold); }
@@ -66,7 +71,8 @@
 /* ------------------------------------------------------------ bottom-left: notifications */
 .hud-bl { left: calc(0.75rem + var(--safe-l)); bottom: calc(0.875rem + var(--safe-b)); display: flex; flex-direction: column-reverse; align-items: flex-start; gap: 0.375rem; transition: opacity 0.15s; }
 .card-left .hud-bl { opacity: 0; pointer-events: none; }
-.nchip { display: flex; align-items: center; gap: 0.4375rem; height: 2.125rem; padding: 0 0.75rem 0 0.625rem; border-radius: 1.0625rem; cursor: pointer; font-size: var(--t2); max-width: 15rem; white-space: nowrap; }
+.nchip { display: flex; align-items: center; gap: 0.375rem; height: 2.125rem; padding: 0 0.625rem 0 0.5rem; border-radius: 1.0625rem; cursor: pointer; font-size: var(--t1); font-weight: 600; max-width: 16rem; white-space: nowrap; animation: nchip-in 0.25s var(--ease-out, ease-out); }
+@keyframes nchip-in { from { opacity: 0; transform: translateX(-0.5rem); } }
 .nchip i { font-style: normal; width: 1rem; text-align: center; }
 .nchip span { overflow: hidden; text-overflow: ellipsis; }
 .nchip.bad i { color: var(--bad); } .nchip.good i { color: var(--good); } .nchip.gold i { color: var(--gold); } .nchip.info i { color: #8fd3ff; }
@@ -76,7 +82,10 @@
 
 /* ------------------------------------------------------------ bottom-right: modal buttons */
 .hud-br { right: calc(0.75rem + var(--safe-r)); bottom: calc(0.875rem + var(--safe-b)); display: flex; gap: 0.375rem; }
-.tool { position: relative; width: 2.75rem; height: 2.75rem; border-radius: 50%; padding: 0; font-size: 1.1875rem; line-height: 1; cursor: pointer; color: var(--text); }
+.tool { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.1875rem; min-width: 3.25rem; height: 3.5rem; border-radius: 0.75rem; padding: 0.25rem 0.4375rem 0.1875rem; line-height: 1; cursor: pointer; color: var(--text); }
+.tool .ti { font-style: normal; font-size: 1.1875rem; line-height: 1; }
+.tool .tl { font-size: var(--t1); line-height: 1; color: var(--dim); white-space: nowrap; font-weight: 600; }
+.tool:hover .tl { color: var(--text); }
 .tool:hover { background: var(--glass-hi); border-color: var(--accent); }
 .tool .dot, .nbadge .dot { position: absolute; top: 0.25rem; right: 0.25rem; width: 0.5625rem; height: 0.5625rem; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0.375rem var(--gold); }
 
@@ -94,7 +103,7 @@
 .chip.empty.target { border-color: var(--gold); border-style: solid; }
 .chip.filled { background: color-mix(in srgb, var(--you) 22%, rgba(18, 19, 24, 0.9)); border: 1px solid color-mix(in srgb, var(--you) 55%, transparent); }
 .chip.filled .oic { font-style: normal; font-size: var(--t3); width: 1.375rem; text-align: center; flex: none; }
-.chip.filled .t { font-size: var(--t1); line-height: 1.15; font-weight: 600; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
+.chip.filled .t { font-size: var(--t1); line-height: 1.15; font-weight: 600; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .chip.filled sup { position: absolute; top: 0.125rem; left: 1.375rem; font-size: var(--t1); color: #ff9db0; font-weight: 700; }
 .chip.k-seize { background: rgba(120, 20, 45, 0.6); border-color: rgba(255, 93, 122, 0.6); }
 .chip.k-seize .oic { color: #ff8197; }
@@ -158,13 +167,13 @@
 .teach-seal .prim [data-submit] { animation: sealpulse 1.2s ease-in-out infinite; }
 
 /* ------------------------------------------------------------ selection card */
-.hud > .card { left: auto; right: auto; bottom: calc(5.375rem + var(--safe-b)); width: 22rem; max-height: calc(100% - 10.625rem); overflow-y: auto; padding: 0.625rem 0.75rem 0.75rem; z-index: 6; scrollbar-width: thin; }
+.hud > .card { left: auto; right: auto; bottom: calc(6.25rem + var(--safe-b)); width: 22rem; max-height: calc(100% - 11.5rem - var(--safe-t) - var(--safe-b)); overflow-y: auto; overscroll-behavior: contain; padding: 0.625rem 0.75rem 0.75rem; z-index: 6; scrollbar-width: thin; }
 .card.at-left { left: calc(0.75rem + var(--safe-l)); }
 .card.at-right { right: calc(0.75rem + var(--safe-r)); }
 @keyframes cardin { from { opacity: 0; transform: translateY(0.5rem); } }
 .card .ch { display: flex; align-items: center; gap: 0.5rem; }
 .card .crestdot { width: 0.75rem; height: 0.875rem; flex: none; background: var(--pc); clip-path: polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%); }
-.card .nm { font-family: var(--display); font-size: var(--t2); letter-spacing: 0.06em; font-weight: 600; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--pc); }
+.card .nm { font-family: var(--display); font-size: var(--t2); letter-spacing: 0.06em; font-weight: 600; flex: 1; min-width: 0; line-height: 1.3; overflow-wrap: anywhere; color: var(--pc); }
 .card .tag { font-size: var(--t1); color: var(--dim); white-space: nowrap; border: none; padding: 0; }
 .card .cx { width: 1.875rem; height: 1.875rem; padding: 0; border-radius: 50%; font-size: var(--t3); line-height: 1; background: transparent; border: none; color: var(--dim); }
 .card .cx:hover { color: var(--text); background: rgba(255, 255, 255, 0.08); }
@@ -270,8 +279,9 @@
 .callout.below::after { bottom: auto; top: -0.375rem; border: 0.375rem solid transparent; border-top: none; border-bottom-color: #ffe599; }
 .callout button { width: 1.625rem; height: 1.625rem; padding: 0; border-radius: 50%; background: rgba(0, 0, 0, 0.12); border: none; color: #1a1205; font-weight: 700; }
 .callout button:hover { background: rgba(0, 0, 0, 0.25); }
+.callout.left::after { left: auto; right: -0.375rem; top: 50%; bottom: auto; margin: -0.375rem 0 0; border: 0.375rem solid transparent; border-right: none; border-left-color: #d9a84a; }
 @keyframes callbob { 50% { margin-top: -0.1875rem; } }
-.pop { z-index: 12; border-radius: 0.875rem; padding: 0.375rem; background: var(--glass-hi); min-width: 9.375rem; }
+.pop { z-index: 12; border-radius: 0.875rem; padding: 0.375rem; background: var(--glass-hi); min-width: 9.375rem; max-height: calc(100dvh - 1rem - var(--safe-t) - var(--safe-b)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .pop .bd { min-width: 10rem; font-size: var(--t2); }
 .pop .bd .h { font-size: var(--t3); font-weight: 700; padding: 0.125rem 0.375rem 0.25rem; }
 .pop .bd .r { display: flex; justify-content: space-between; gap: 0.875rem; padding: 0.125rem 0.375rem; font-size: var(--t1); color: var(--dim); }
@@ -301,12 +311,48 @@
 
 .shell .banner { left: 50%; top: 22%; transform: translateX(-50%); }
 
-/* ------------------------------------------------------------ narrower desktops */
-@media (max-width: 1180px) and (min-width: 701px) {
-  .chip { width: 5.375rem; }
-  .pbtn { min-width: 8.75rem; padding: 0 0.875rem; }
-  .hud-bl { bottom: calc(5rem + var(--safe-b)); }
-}
+/* ------------------------------------------------------------ the strip's label: "Orders 2/5" on a tab above it */
+.stabs { position: absolute; left: 0.875rem; bottom: 100%; margin-bottom: -1px; display: flex; align-items: flex-end; gap: 0.25rem; max-width: calc(100% - 1.75rem); }
+.stodo { display: inline-flex; align-items: center; gap: 0.3125rem; min-width: 0; height: 1.625rem; padding: 0 0.625rem; border-radius: 0.5rem 0.5rem 0 0; border: 1px solid rgba(255, 216, 107, 0.6); border-bottom: none;
+  background: linear-gradient(180deg, rgba(255, 216, 107, 0.22), rgba(40, 28, 8, 0.9)); color: #fff0c8; font-size: var(--t1); font-weight: 700; box-shadow: none; white-space: nowrap; }
+.stodo i { font-style: normal; color: var(--gold); }
+.stodo span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.stodo b { color: var(--gold); }
+.touch .stodo { height: 2.75rem; }
+.slabel { padding: 0.125rem 0.625rem 0.0625rem; border-radius: 0.5rem 0.5rem 0 0;
+  background: var(--plate, var(--glass)); border: 1px solid var(--rim, var(--edge)); border-bottom: none; font-family: var(--display); font-size: var(--t1); font-weight: 700;
+  letter-spacing: 0.08em; color: var(--dim); white-space: nowrap; line-height: 1.25; cursor: help; }
+.slabel b { font-family: var(--font); letter-spacing: 0; color: var(--text); margin-left: 0.125rem; }
+
+/* ------------------------------------------------------------ layouts by width (GameScreen.layoutClasses, in rem)
+   wide (>= 104rem): the strip centred, notices beside it at the bottom-left, tools at the bottom-right.
+   lay-mid: the strip centred in the room left of the tool row (it used to slide under it at 1280x720);
+   notices stack above the bar. lay-narrow (portrait tablets, narrow windows): the tools stand in a column at the
+   right edge above the bar, the bar spans the width and its chips shrink, the card docks beside the tools. */
+.lay-mid .hud-bc { left: calc(0.75rem + var(--safe-l)); right: calc(25.5rem + var(--safe-r)); transform: none; justify-content: center; }
+.lay-mid .hud-bl, .lay-narrow .hud-bl { bottom: calc(6.25rem + var(--safe-b)); }
+.lay-narrow .hud-bc { left: calc(0.75rem + var(--safe-l)); right: calc(0.75rem + var(--safe-r)); transform: none; justify-content: center; }
+/* the bar shrinks its chips before it would run off the screen (touch tablets: 44px undo / preview make it wider) */
+.lay-mid .hud-bc > .strip, .lay-narrow .hud-bc > .strip { flex: 0 1 auto; min-width: 0; }
+.lay-mid .strip .slots, .lay-narrow .strip .slots { flex: 1 1 auto; min-width: 0; }
+.lay-mid .chip { flex: 0 1 auto; width: 6.5rem; min-width: 4.5rem; }
+.lay-narrow .chip { flex: 1 1 auto; width: 5.375rem; min-width: 3.25rem; }
+.lay-mid .chip.freec, .lay-narrow .chip.freec { flex: none; }
+.lay-mid .hud-bc > .prim, .lay-narrow .hud-bc > .prim { flex: none; }
+/* narrow chips stack icon over a two-line target ("Cryin / g…" side by side was unreadable) */
+.lay-narrow .chip, .lay-mid.touch .chip { height: 3.25rem; }
+.lay-narrow .chip.filled, .lay-mid.touch .chip.filled { flex-direction: column; justify-content: center; gap: 0; padding: 0 0.25rem; }
+.lay-narrow .chip.filled .oic, .lay-mid.touch .chip.filled .oic { font-size: var(--t2); width: auto; line-height: 1; }
+.lay-narrow .chip.filled .t, .lay-mid.touch .chip.filled .t { flex: none; text-align: center; line-height: 1.15; max-width: 100%; }
+.lay-narrow .strip > .sbtn, .lay-mid.touch .strip > .sbtn { height: 3.25rem; }
+/* the top bar on narrow screens: crests drop their names (the tip and the Score screen have them) */
+.lay-narrow .pcrest { min-width: 2.75rem; padding: 0.125rem 0.125rem 0.25rem; }
+.lay-narrow .pcrest .nm { display: none; }
+.lay-narrow .pcrest .cb { margin-top: 0.25rem; }
+.lay-narrow .pbtn { min-width: 8.5rem; padding: 0 0.875rem; }
+.lay-narrow .hud-br { flex-direction: column-reverse; align-items: stretch; bottom: calc(6.25rem + var(--safe-b)); }
+.lay-narrow .card.at-right { right: calc(5.5rem + var(--safe-r)); }
+.lay-narrow.card-left .hud-bl { opacity: 0; }
 
 /* ============================================================ phone (<= 43.75rem) */
 .phone.shell { --t1: var(--fs-xs); --t2: var(--fs-sm); --t3: 1.125rem; }
@@ -322,7 +368,7 @@
 .phone .respill i { font-size: var(--t1); line-height: 1; }
 .phone .hud-tr { top: calc(0.375rem + var(--safe-t)); right: calc(0.375rem + var(--safe-r)); }
 .phone .crests { padding: 0.125rem; gap: 1px; border-radius: 0.625rem; height: 2.75rem; align-items: center; }
-.phone .pcrest { width: 1.875rem; padding: 0; }
+.phone .pcrest { width: 1.875rem; min-width: 0; padding: 0; }
 .phone .pcrest .cb { width: 1.625rem; height: 1.5rem; }
 .phone .pcrest .nm { display: none; }
 .phone .pcrest .vpbar { width: 1.375rem; }
@@ -333,7 +379,8 @@
 .phone .strip .slots { flex: 1; min-width: 0; gap: 0.1875rem; }
 .phone .chip { flex: 1; min-width: 0; width: auto; height: 3.125rem; flex-direction: column; justify-content: center; gap: 1px; padding: 0 0.125rem; }
 .phone .chip.filled .oic { font-size: var(--t3); width: auto; }
-.phone .chip.filled .t { -webkit-line-clamp: 1; font-size: var(--fs-xs); max-width: 100%; text-align: center; }
+.phone .chip.filled .t { flex: none; -webkit-line-clamp: 2; font-size: var(--fs-xs); line-height: 1.05; max-width: 100%; text-align: center; }
+.phone .chip.filled .oic { line-height: 1; }
 .phone .chip .x { display: none; }
 .phone .chip.freec { flex: none; width: 2.125rem; min-width: 0; }
 .phone .sbtns { gap: 0.125rem; }
@@ -353,11 +400,11 @@
 .phone .hud-bl { bottom: calc(4.625rem + var(--safe-b)); left: calc(0.375rem + var(--safe-l)); }
 .phone.no-strip.no-prim .hud-bl { bottom: calc(0.625rem + var(--safe-b)); }
 .nbadge { position: relative; display: flex; align-items: center; gap: 0.25rem; height: 2.75rem; min-width: 2.75rem; padding: 0 0.75rem; border-radius: 1.375rem; font-size: var(--t2); cursor: pointer; }
-.nbadge b { font-size: var(--t1); background: var(--bad); color: #fff; border-radius: 0.5625rem; min-width: 1.125rem; height: 1.125rem; line-height: 1.125rem; text-align: center; padding: 0 0.25rem; }
+.nbadge b { font-size: var(--t1); background: var(--bad); color: #1a0606; border-radius: 0.5625rem; min-width: 1.125rem; height: 1.125rem; line-height: 1.125rem; text-align: center; padding: 0 0.25rem; }
 .nbadge.gold b { background: var(--gold); color: #1a1205; } .nbadge.good b { background: var(--good); color: #062b18; } .nbadge.info b { background: #8fd3ff; color: #061a2b; }
 .nlist { display: flex; flex-direction: column-reverse; gap: 0.375rem; margin-bottom: 0.375rem; }
 .nlist .nchip { height: 2.75rem; }
-.phone .card { left: 0 !important; right: 0 !important; bottom: 0; width: auto; max-height: 56%; border-radius: 1.125rem 1.125rem 0 0; border-bottom: none; padding: 0.875rem calc(0.75rem + var(--safe-r)) calc(0.75rem + var(--safe-b)) calc(0.75rem + var(--safe-l)); z-index: 7; animation: sheetup 0.22s ease-out; box-shadow: 0 -0.625rem 2.5rem rgba(0, 0, 0, 0.6); background: rgba(20, 21, 26, 0.97); }
+.phone .card { left: calc(0.25rem + var(--safe-l)) !important; right: calc(0.25rem + var(--safe-r)) !important; bottom: calc(4.25rem + var(--safe-b)); width: auto; max-height: min(56%, calc(100% - 9.5rem - var(--safe-t) - var(--safe-b))); border-radius: 1.125rem; padding: 0.875rem 0.75rem 0.75rem; z-index: 7; animation: sheetup 0.22s ease-out; box-shadow: 0 -0.625rem 2.5rem rgba(0, 0, 0, 0.6); background: rgba(20, 21, 26, 0.97); }
 .phone .card::before { content: ''; position: absolute; top: 0.3125rem; left: 50%; width: 2.375rem; height: 0.25rem; margin-left: -1.1875rem; border-radius: 0.125rem; background: rgba(255, 255, 255, 0.25); }
 /* the header is the sheet's grab handle: without this a downward swipe became a native pan (pointercancel) and never dismissed */
 .phone .card .ch, .phone .card .cs { touch-action: none; }
@@ -422,7 +469,7 @@
 .card .syssplit { display: flex; flex-wrap: wrap; gap: 0.125rem 0.625rem; margin: 0.125rem 0; font-size: var(--t1); }
 .card .bsplit { display: inline-flex; align-items: center; gap: 0.25rem; }
 .card .bsplit > i { font-style: normal; color: var(--dim); }
-.card .syssplit .rcv { font-style: normal; font-size: 0.85em; font-weight: 700; padding: 0 0.25rem; border-radius: 0.4375rem; background: rgba(0, 0, 0, 0.45); border: 1px solid var(--pc, #888); color: #fff; min-width: 1em; text-align: center; }
+.card .syssplit .rcv { font-style: normal; font-size: var(--t1); font-weight: 700; padding: 0 0.25rem; border-radius: 0.4375rem; background: rgba(0, 0, 0, 0.45); border: 1px solid var(--pc, #888); color: #fff; min-width: 1em; text-align: center; }
 .card .syssplit .rcv.lost { --pc: rgba(255, 120, 100, 0.6); color: #ffb4a4; }
 .card .tribute { margin: 0.375rem 0 0.125rem; padding: 0.375rem 0.5rem; border-radius: 0.5rem; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(214, 173, 98, 0.35); border-left: 0.1875rem solid var(--pc, var(--gold)); display: grid; grid-template-columns: 1fr auto; gap: 0.125rem 0.5rem; align-items: center; }
 .card .tribute .trib-h { display: flex; align-items: center; gap: 0.375rem; font-size: var(--t1); }
@@ -437,3 +484,83 @@
 .tile.locked.why { opacity: 0.6; }
 .tile .tdisc { font-style: normal; color: var(--good); margin-left: 0.1875rem; font-weight: 700; }
 .trh .trway { text-transform: none; letter-spacing: 0; color: var(--good); font-family: inherit; margin-left: 0.375rem; }
+
+/* ============================================================ touch (tablets and phones: GameScreen.layoutClasses)
+   44px targets for everything tappable, no hover-only affordances (the order chips' × is a flick on touch). */
+.touch .respill { height: 2.75rem; }
+.touch .nchip { height: 2.75rem; min-width: 2.75rem; justify-content: center; }
+.touch .card .cx { width: 2.75rem; height: 2.75rem; }
+.touch .card .sib button { width: 2.75rem; height: 2.75rem; }
+.touch .card .cst .mini, .touch .card .mini, .touch .mini { height: 2.75rem; min-width: 2.75rem; }
+.touch .sc { width: 2.875rem; height: 2.75rem; }
+.touch .chip .x { display: none; }
+.touch .sbtns { flex-direction: row; gap: 0.25rem; }
+.touch .sbtn { width: 2.75rem; height: 2.75rem; }
+.touch .odds { height: 2.75rem; }
+.touch .replaybar button { width: 2.75rem; height: 2.75rem; }
+.touch .menu > button, .touch .menu .mrow button { min-height: 2.75rem; }
+.touch .menu .mrep button { height: 2.75rem; width: 2.75rem; }
+.touch .menu .mrep input, .touch .menu .mlink input { height: 2.75rem; }
+.touch .card .more input { height: 2.75rem; }
+.touch .menu label { min-height: 2.75rem; }
+.touch .callout button { width: 2.75rem; height: 2.75rem; }
+.touch .freelist .fr button, .touch .replace-hint button { width: 2.75rem; height: 2.75rem; }
+.touch .ib { min-width: 3rem; height: 3.25rem; }
+.touch .fan .cls { min-width: 2.75rem; min-height: 2.75rem; }
+.touch .pmini { min-width: 2.75rem; }
+.touch .tool { min-width: 2.75rem; min-height: 2.75rem; }
+.touch .crests { min-height: 2.75rem; }
+/* touch tablets get a slightly wider card: the bigger buttons need the room */
+.touch:not(.phone) .hud > .card { width: 24rem; }
+
+/* ============================================================ phone on its side: the card is a side sheet */
+.phone .tool .tl { display: none; }
+.phone .tool { width: 2.75rem; height: 2.75rem; min-width: 0; border-radius: 50%; padding: 0; }
+.phone.landscape .card { top: calc(3.5rem + var(--safe-t)); bottom: calc(4.25rem + var(--safe-b)); left: auto !important; right: calc(0.25rem + var(--safe-r)) !important; width: min(24rem, 56vw); max-height: none;
+  border-radius: 1rem; border-bottom: 1px solid var(--rim, var(--edge)); padding: 0.625rem 0.75rem 0.75rem; animation: sheetleft 0.22s ease-out; }
+.phone.landscape .card::before { display: none; }
+@keyframes sheetleft { from { transform: translateX(30%); opacity: 0.3; } }
+.phone.landscape .hud-br { bottom: calc(4.75rem + var(--safe-b)); flex-direction: row; }
+.phone.landscape .hud-bl { bottom: calc(7rem + var(--safe-b)); }
+
+/* ============================================================ phone: the sheet docks above the bar, so the plan
+   stays in sight (the order you just gave lands in the strip under your finger); the bar fits 44px slots */
+.phone .strip { padding: 0.1875rem; gap: 0.1875rem; }
+.phone .strip .slots { gap: 0.125rem; }
+.phone .chip { min-width: 2.75rem; }
+.phone .strip [data-preview] { display: none; }
+.phone .sbtns { flex-direction: column; }
+.phone.touch .sbtn { width: 2.75rem; height: 3.125rem; }
+.phone .pbtn .pl { display: none; }
+.phone .pbtn { padding: 0 0.625rem; min-width: 2.75rem; gap: 0.25rem; }
+.phone .respill { min-width: 2.75rem; }
+.phone .freelist { right: auto; left: 0; min-width: 0; width: max-content; max-width: calc(100vw - 1rem); }
+.phone .stabs { left: 0.5rem; }
+/* portrait phone: the strip takes the whole width (five 44px slots, free changes, undo) and the primary button
+   sits above its right end, under the tool column (side by side, the slots fell to 33px) */
+.phone:not(.landscape) .hud-bc { flex-direction: column-reverse; align-items: stretch; gap: 0.375rem; }
+.phone:not(.landscape) .hud-bc > .prim { align-self: flex-end; }
+.phone:not(.landscape) .pbtn, .phone:not(.landscape) .pmini { height: 3rem; }
+.phone:not(.landscape) .pbtn .pl { display: inline; }
+.phone:not(.landscape) .pbtn { padding: 0 1rem; }
+.phone:not(.landscape) .hud-br, .phone:not(.landscape) .hud-bl { bottom: calc(8.125rem + var(--safe-b)); }
+.phone.no-prim:not(.landscape) .hud-br, .phone.no-prim:not(.landscape) .hud-bl { bottom: calc(4.75rem + var(--safe-b)); }
+.phone.no-strip:not(.landscape) .hud-br, .phone.no-strip:not(.landscape) .hud-bl { bottom: calc(4.125rem + var(--safe-b)); }
+.phone.no-strip.no-prim:not(.landscape) .hud-br, .phone.no-strip.no-prim:not(.landscape) .hud-bl { bottom: calc(0.625rem + var(--safe-b)); }
+.phone:not(.landscape) .strip [data-preview] { display: inline-block; }
+.phone .sbtns { flex-direction: row; }
+.phone:not(.landscape) .card { bottom: calc(8.125rem + var(--safe-b)); max-height: min(60%, calc(100% - 12rem - var(--safe-t) - var(--safe-b))); }
+.phone.no-prim:not(.landscape) .card { bottom: calc(4.25rem + var(--safe-b)); }
+.phone .chip.freec { width: 2.75rem; }
+
+/* the map key popover ("?" tool) */
+.legend { display: flex; flex-direction: column; gap: 0.125rem; width: min(24rem, calc(100vw - 2rem)); padding: 0.125rem 0.25rem; }
+.legend .lg-h { font-family: var(--display); font-weight: 700; letter-spacing: 0.1em; color: var(--brass, var(--accent)); font-size: var(--t1); padding: 0.125rem 0.25rem 0.25rem; }
+.legend .lg { display: flex; align-items: center; gap: 0.625rem; padding: 0.1875rem 0.25rem; font-size: var(--t1); line-height: 1.3; color: var(--text); }
+.legend .lg svg.kg { flex: none; width: 2rem; height: 1.375rem; }
+.legend .lg-f { margin-top: 0.25rem; padding: 0.375rem 0.25rem 0.125rem; border-top: 1px solid var(--edge); font-size: var(--t1); color: var(--dim); }
+.phone .stodo span { display: none; }
+.phone .stodo { min-width: 2.75rem; justify-content: center; }
+/* touch tablets: the "to do" tab above the strip is 44px tall; the card and the notices stand above it */
+.touch:not(.phone) .hud > .card { bottom: calc(7.75rem + var(--safe-b)); max-height: calc(100% - 13rem - var(--safe-t) - var(--safe-b)); }
+.touch.lay-mid .hud-bl, .touch.lay-narrow .hud-bl { bottom: calc(7.75rem + var(--safe-b)); }

@@ -42,8 +42,10 @@ export function fmtClock(ms: number): string {
 
 /** First n words of a name ("The Gilded Reach" → "Gilded Reach" for n=2 drops leading "The"). */
 export function shortName(name: string, n = 2): string {
-  const w = name.replace(/^the\s+/i, '').split(/\s+/);
-  return w.slice(0, n).join(' ');
+  const w = name.replace(/^the\s+/i, '').split(/\s+/).slice(0, n);
+  // never end on a dangling "of" / "the" ("Ninefold of the Unbroken..." → "Ninefold", not "Ninefold of")
+  while (w.length > 1 && /^(of|the|and|a|an|at|in|on|to|de|von)$/i.test(w[w.length - 1])) w.pop();
+  return w.join(' ');
 }
 
 /** Rule-engine reasons (sentences) → at most ~3 words for the preview card. */

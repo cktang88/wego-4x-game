@@ -42,6 +42,7 @@ export class Gestures {
     c.addEventListener('pointercancel', this.up);
     c.addEventListener('pointerleave', () => { if (!this.press && !this.drag) { this.g.hoverRegion = null; this.hover = null; this.hoverXY = null; this.g.hoverSlot = null; this.hidePreview(); } });
     c.addEventListener('wheel', this.wheel, { passive: false });
+    c.addEventListener('dblclick', this.dbl);
     c.addEventListener('contextmenu', this.context);
     window.addEventListener('pointermove', this.winMove);
     window.addEventListener('pointerup', this.winUp);
@@ -227,10 +228,14 @@ export class Gestures {
   private wheel = (e: WheelEvent) => {
     e.preventDefault();
     const g = this.g, { x, y } = this.xy(e);
-    const before = g.map.toWorld(x, y);
-    g.map.cam.z = clampZ(g.map.cam.z * Math.exp(-e.deltaY * 0.0015));
-    const after = g.map.toWorld(x, y);
-    g.map.cam.x += before.x - after.x; g.map.cam.y += before.y - after.y;
+    // eased, anchored at the cursor (render/map.ts zoomAt); a fast spin retargets one glide
+    g.map.zoomAt(x, y, Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015)));
+  };
+  /** Double-click: zoom in on that point (Shift: out). */
+  private dbl = (e: MouseEvent) => {
+    e.preventDefault();
+    const { x, y } = this.xy(e as PointerEvent);
+    this.g.map.zoomAt(x, y, e.shiftKey ? 1 / 1.6 : 1.6);
   };
   private context = (e: MouseEvent) => {
     e.preventDefault();
@@ -492,7 +497,12 @@ export class Gestures {
     const rad = (this.g.phone ? 74 : 64) * uiScale();
     // the items stay on screen and clear of the notch / home bar
     const si = safeInsets(this.g.root);
-    const cx = Math.max(rad + 30 + si.l, Math.min(this.g.map.w - rad - 30 - si.r, R.x)), cy = Math.max(rad + 30 + si.t, Math.min(this.g.map.h - rad - 30 - si.b, R.y));
+    // ...and clear of the top bar and the bottom bar (on a phone on its side the items landed on the resource pills)
+    const h = this.g.hud.h;
+    const topBar = Math.max(si.t, ...[h.turn, h.res, h.crests].map(e => e.getBoundingClientRect().bottom));
+    const botBar = Math.min(this.g.map.h - si.b, h.bottom.getBoundingClientRect().top || this.g.map.h);
+    const lo = topBar + rad + 26, hi = botBar - rad - 26;
+    const cx = Math.max(rad + 30 + si.l, Math.min(this.g.map.w - rad - 30 - si.r, R.x)), cy = lo <= hi ? Math.max(lo, Math.min(hi, R.y)) : (lo + hi) / 2;
     const hv = R.items.find(i => i.a === R.hover);
     el.classList.remove('hidden');
     el.style.transform = `translate(${cx}px, ${cy}px)`;

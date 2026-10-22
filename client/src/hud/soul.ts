@@ -162,7 +162,7 @@ export function honourChoice(g: GameScreen, f: Fleet): string {
 export function sagaChips(g: GameScreen, f: Fleet): string {
   if (!on(g) || !f.saga?.length) return '';
   const beats = f.saga.slice(-3).reverse();
-  return `<div class="beats">${beats.map(b => `<button class="beat k-${esc(b.kind)}" data-a="record"${tip(b.text.split(/[.:;]/)[0].split(/\s+/).slice(0, 10).join(' '))}><i>${beatIcon(b.kind)}</i><small>T${b.turn}</small></button>`).join('')}<button class="beat more" data-a="record"${tip('Full record')}>☰</button></div>`;
+  return `<div class="beats">${beats.map(b => `<button class="beat k-${esc(b.kind)}" data-a="record"${tip(b.text.split(/[.:;]/)[0].split(/\s+/).slice(0, 10).join(' '))}><i>${beatIcon(b.kind)}</i><small>T${b.turn}</small></button>`).join('')}<button class="beat more" data-a="record" aria-label="Full record"${tip('Full record')}>☰</button></div>`;
 }
 
 /** Retire / Vow buttons for the action row (own bannered fleet). */

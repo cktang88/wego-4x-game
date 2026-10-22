@@ -10,6 +10,7 @@ import { nextTickAt } from '../../../shared/sim/live.ts';
 import { esc } from '../ui/dom.ts';
 import { ORDER_ICON, shortName, tip, romanN, fmtClock } from './util.ts';
 import { ic, icFor } from '../art/icons.ts';
+import { planNags } from './notify.ts';
 
 /** Two words for an order chip: what it targets. */
 export function orderTarget(g: GameScreen, o: Order): string {
@@ -51,21 +52,23 @@ export function renderStrip(g: GameScreen, el: HTMLElement) {
     const next = st.live!.nextOrderAt[g.you] ?? 0;
     const pips = Array.from({ length: cap }, (_, i) => `<i class="pip ${i < g.bank ? 'on' : ''}"></i>`).join('');
     const q = g.queue.map((o, i) => `<div class="chip filled live" data-live="${i}" data-pop="liveq:${i}:${o.type}:${'fleet' in o ? o.fleet : ''}"><i class="oic">${ORDER_ICON[o.type]}</i><span class="t">${esc(orderTarget(g, o))}</span><button class="x" data-x="${i}" aria-label="Take back">${X}</button></div>`).join('');
-    html = `<div class="bank ${g.bank >= cap ? 'full' : ''} ${g.bank > 0 ? 'has' : ''}"${tip(g.bank >= cap ? 'Bank full: spend one' : 'Orders banked')}><span class="pips">${pips}</span><small>${g.bank >= cap ? 'full' : `+1 <b data-countdown="${next}"></b>`}</small></div>
+    html = `<div class="stabs"><div class="slabel"${tip('LIVE: orders bank up over time; spend them whenever you like')}>Orders <b>${g.bank}/${cap}</b></div>${todoTab(g)}</div><div class="bank ${g.bank >= cap ? 'full' : ''} ${g.bank > 0 ? 'has' : ''}"${tip(g.bank >= cap ? `Bank full (${cap}): spend one or the next is wasted` : `${g.bank} of ${cap} orders banked; the next one comes in the time shown`)}><span class="pips">${pips}</span><small>${g.bank >= cap ? 'full' : `+1 <b data-countdown="${next}"></b>`}</small></div>
       ${q ? `<div class="slots">${q}</div>` : ''}${g.queue.length ? `<button class="sbtn" data-act="undo"${tip('Take back last · Ctrl+Z')} aria-label="Undo">${ic('undo')}</button>` : ''}`;
   } else {
     const n = g.plan.orders.length;
     const rep = g.replacing;
     const chips = g.plan.orders.map((o, i) => {
-      if (!o) return `<div class="chip empty ${g.targetSlot === i ? 'target' : ''}" data-slot="${i}" aria-label="Empty slot"><small>${romanN(i + 1)}</small></div>`;
+      if (!o) return `<div class="chip empty ${g.targetSlot === i ? 'target' : ''}" data-slot="${i}" role="button" aria-label="Order ${i + 1}: empty"${tip(`Order ${romanN(i + 1)}: empty. Drag a fleet on the map, or use a card's buttons`)}><small>${romanN(i + 1)}</small></div>`;
       const err = g.validateAt(o, i);
       const hot = g.hoverSlot === i;
       return `<div class="chip filled k-${o.type} ${err ? 'bad' : ''} ${rep ? 'replace' : ''} ${hot ? 'hot' : ''}" data-slot="${i}" data-pop="slots:${i}:${o.type}:${'fleet' in o ? o.fleet : ''}"${err ? tip(`⊘ ${err}`) : ''}><i class="oic">${ORDER_ICON[o.type]}</i><span class="t">${esc(orderTarget(g, o))}</span>${o.type === 'seize' && o.also?.length ? `<sup>+${o.also.length}</sup>` : ''}<button class="x" data-x="${i}" aria-label="Remove">${X}</button></div>`;
     }).join('');
     const free = g.plan.free;
-    const freeChip = free.length ? `<button class="chip freec" data-act="free"${tip('Free changes')}>${[...new Set(free.map(f => f.type))].slice(0, 3).map(freeIcon).join('')}<small>${free.length}</small></button>` : '';
+    const freeChip = free.length ? `<button class="chip freec" data-act="free"${tip('Free changes: cost no order')} aria-label="${free.length} free change${free.length > 1 ? 's' : ''}">${[...new Set(free.map(f => f.type))].slice(0, 3).map(freeIcon).join('')}<small>${free.length}</small></button>` : '';
     const used = g.plan.orders.filter(Boolean).length;
-    html = `${rep ? `<div class="replace-hint">Replace which?<button data-act="cancelrep" aria-label="Cancel">${X}</button></div>` : ''}<div class="slots" style="--n:${n}">${chips}</div>${freeChip}
+    // the strip names itself: "Orders 2/5" on a tab above the slots (five bare boxes said nothing)
+    const label = rep ? '' : `<div class="stabs"><div class="slabel"${tip(`You give ${n} orders a turn; they all happen together when everyone has sealed`)}>Orders <b>${used}/${n}</b></div>${todoTab(g)}</div>`;
+    html = `${rep ? `<div class="replace-hint">Replace which?<button data-act="cancelrep" aria-label="Cancel">${X}</button></div>` : ''}${label}<div class="slots" style="--n:${n}">${chips}</div>${freeChip}
       <div class="sbtns"><button class="sbtn" data-act="undo" ${g.undoStack.length ? '' : 'disabled'}${tip('Undo · Ctrl+Z')} aria-label="Undo">${ic('undo')}</button><button class="sbtn" data-preview ${used ? '' : 'disabled'}${tip('Preview vs idle rivals')} aria-label="Preview">${ic('eye')}</button></div>`;
   }
   g.root.classList.toggle('no-strip', !html);
@@ -78,30 +81,41 @@ export function renderStrip(g: GameScreen, el: HTMLElement) {
 }
 let freeOpen = false;
 
+/** The "to do" tab beside "Orders": choices and nags of this turn (honours, callings, research, terms). Each tap
+ *  takes you to the next one. */
+let todoAt = 0;
+function todoTab(g: GameScreen): string {
+  const ns = planNags(g);
+  if (!ns.length) return '';
+  const n = ns[todoAt % ns.length];
+  return `<button class="stodo" data-todo aria-label="To do: ${esc(ns.map(x => x.text).join(', '))}"${tip(ns.map(x => x.text).join(' · '))}><i>${esc(n.icon)}</i><span>${esc(n.text)}</span>${ns.length > 1 ? `<b>+${ns.length - 1}</b>` : ''}</button>`;
+}
+
 export function renderPrimary(g: GameScreen, el: HTMLElement) {
   const st = g.st;
   let html = '';
   const btn = (cls: string, attrs: string, inner: string) => `<button class="pbtn ${cls}" ${attrs}>${inner}</button>`;
   if (g.blockingReplay) html = '';
-  else if (st.winner !== null) html = btn('gold', 'data-p="results"', `${ic('crown')} Results`);
+  else if (st.winner !== null) html = btn('gold', 'data-p="results" aria-label="Results"', `${ic('crown')}<span class="pl"> Results</span>`);
   else if (g.watching) {
-    html = btn('', 'data-x="next"', `Next ${ic('play')}`) + `<button class="pmini ${g.autoPlay ? 'on' : ''}" data-x="auto"${tip('Auto play')} aria-label="Auto">${ic('fast')}</button>`;
+    html = btn('', 'data-x="next" aria-label="Next turn"', `<span class="pl">Next </span>${ic('play')}`) + `<button class="pmini ${g.autoPlay ? 'on' : ''}" data-x="auto"${tip('Auto play: keep advancing turns')} aria-label="Auto play">${ic('fast')}</button>`;
   } else if (g.you === null || st.players[g.you]?.eliminated) html = '';
   else if (g.live) {
     const idle = g.idleFleets();
-    if (idle.length) html = btn('idle', 'data-p="idle"', `${ic('dormant')} Idle ×${idle.length}`);
-    else if (g.canResearchNow()) html = btn('research', 'data-p="research"', `${ic('research')} Research`);
-    else html = btn('clock', 'data-p="tick" disabled', `${ic('time')} <b data-countdown="${nextTickAt(st)}">${fmtClock(nextTickAt(st) - Date.now())}</b>`);
+    if (idle.length) html = btn('idle', `data-p="idle" aria-label="${idle.length} idle fleet${idle.length > 1 ? 's' : ''}: show the next"${tip('Fleets with no orders: tap to visit the next')}`, `${ic('dormant')}<span class="pl"> Idle</span> ×${idle.length}`);
+    else if (g.canResearchNow()) html = btn('research', `data-p="research" aria-label="Research ready"${tip('A technology is affordable: open Research')}`, `${ic('research')}<span class="pl"> Research</span>`);
+    else html = btn('clock', `data-p="tick" aria-disabled="true" aria-label="Next tick"${tip('Next LIVE tick: queued orders resolve then')}`, `${ic('time')} <b data-countdown="${nextTickAt(st)}">${fmtClock(nextTickAt(st) - Date.now())}</b>`);
   } else if (g.submitted) {
     const seats = g.src.meta.seats;
     const pips = st.players.map(p => `<i class="sp ${seats[p.id]?.submitted ? 'on' : ''}" style="--pc:${esc(p.color)}"></i>`).join('');
-    html = btn('waiting', 'data-p="waiting" disabled', `Waiting <span class="sps">${pips}</span>`) + `<button class="pmini" data-unsubmit${tip('Unseal')} aria-label="Unseal">${ic('undo')}</button>`;
+    const nSealed = st.players.filter(p => seats[p.id]?.submitted).length;
+    html = btn('waiting', `data-p="waiting" aria-disabled="true" aria-label="Waiting: ${nSealed} of ${st.players.length} players have sealed"`, `Waiting <span class="sps"${tip(`${nSealed} of ${st.players.length} have sealed their orders`)}>${pips}</span>`) + `<button class="pmini" data-unsubmit${tip('Unseal: change your orders')} aria-label="Unseal">${ic('undo')}</button>`;
   } else {
     const n = g.plan.orders.length, used = g.plan.orders.filter(Boolean).length;
     const idle = g.idleFleets();
     const full = used === n;
-    if (idle.length && !full) html = btn('idle', 'data-p="idle"', `${ic('dormant')} Idle ×${idle.length}`) + `<button class="pmini seal" data-submit${tip('Seal now · Enter')} aria-label="Seal">${ic('check')}</button>`;
-    else if (g.canResearchNow()) html = btn('research', 'data-p="research"', `${ic('research')} Research`) + `<button class="pmini seal" data-submit${tip('Seal now · Enter')} aria-label="Seal">${ic('check')}</button>`;
+    if (idle.length && !full) html = btn('idle', `data-p="idle" aria-label="${idle.length} idle fleet${idle.length > 1 ? 's' : ''}: show the next"${tip('Fleets with no orders: tap to visit the next')}`, `${ic('dormant')}<span class="pl"> Idle</span> ×${idle.length}`) + `<button class="pmini seal" data-submit${tip('Seal now · Enter')} aria-label="Seal">${ic('check')}</button>`;
+    else if (g.canResearchNow()) html = btn('research', `data-p="research" aria-label="Research ready"${tip('A technology is affordable: open Research')}`, `${ic('research')}<span class="pl"> Research</span>`) + `<button class="pmini seal" data-submit${tip('Seal now · Enter')} aria-label="Seal">${ic('check')}</button>`;
     else html = btn(`seal ${full || !idle.length ? 'ready' : ''}`, 'data-submit', `SEAL ${ic('check')}<small>${used}/${n}</small>`);
   }
   g.root.classList.toggle('no-prim', !html);
@@ -137,6 +151,7 @@ export function bindStrip(g: GameScreen, strip: HTMLElement, prim: HTMLElement) 
       return;
     }
     if (t.closest('[data-preview]')) { g.preview(); return; }
+    if (t.closest('[data-todo]')) { const ns = planNags(g); const n = ns[todoAt % Math.max(1, ns.length)]; todoAt++; n?.go(); return; }
     const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
     if (act === 'undo') { g.undo(); return; }
     if (act === 'cancelrep') { g.replacing = null; g.renderAll(); return; }

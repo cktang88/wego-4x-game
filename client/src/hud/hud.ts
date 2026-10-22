@@ -33,6 +33,8 @@ const loadModals = (): Promise<ModalsModule | null> => Promise.resolve(modals);
 
 const lensIcon = (l: Lens) => ic(icFor('lens', l));
 const LENS_NAME: Record<Lens, string> = { political: 'Political', supply: 'Supply', economy: 'Economy', military: 'Military' };
+const RES_NAME = { industry: 'Industry', credits: 'Credits', influence: 'Influence' } as const;
+const RES_WHAT = { industry: 'Builds ships and projects.', credits: 'Pays upkeep, ships and projects.', influence: 'Buys loyalty, laws and pacts.' } as const;
 
 export class Hud {
   h: Record<string, HTMLElement> = {};
@@ -68,7 +70,7 @@ export class Hud {
       if (!b) return;
       const a = b.dataset.act!;
       if (a === 'menu') { audio.ui('click'); this.togglePop('menu', b); }
-      else if (a === 'lens') this.togglePop('lens', b);
+      else if (a === 'lens' || a === 'legend') this.togglePop(a, b);
       else this.modal(a as ModalName);
     });
     this.h.pop.addEventListener('click', e => this.popClick(e));
@@ -109,7 +111,21 @@ export class Hud {
     renderPrimary(g, this.h.primary);
     renderCard(g, this.h.card);
     if (this.pop) this.showPop(this.pop.kind, this.pop.anchor);
+    this.fitTop();
     g.tickClocks();
+  }
+  /** Keep the resource pills between the turn box and the crests: centred when there is room, else nudged aside
+   *  (a touch tablet's taller pills and the Fate label ran into the crests at 1180x820). */
+  fitTop() {
+    const tc = this.h.res;
+    tc.style.marginLeft = '';
+    if (this.g.phone || !tc.childElementCount) return;
+    const a = tc.getBoundingClientRect(), c = this.h.crests.getBoundingClientRect(), t = this.h.turn.getBoundingClientRect();
+    if (!a.width) return;
+    let dx = 0;
+    if (c.width && a.right > c.left - 8) dx = c.left - 8 - a.right;
+    if (t.width && a.left + dx < t.right + 8) dx = t.right + 8 - a.left;
+    if (dx) tc.style.marginLeft = `${Math.round(dx)}px`;
   }
   /** Once or twice a second: countdowns and the LIVE tick ring. */
   tick() {
@@ -152,7 +168,7 @@ export class Hud {
     const cell = (k: 'industry' | 'credits' | 'influence', icon: string) => {
       const left = p.res[k] - sp[k];
       const d = k === 'credits' ? inc[k] - up : inc[k];
-      return `<button class="respill ${left < 0 ? 'short' : ''}" data-k="${k}" aria-label="${k}"><i>${icon}</i><b data-num="res-${k}">${left}</b><small class="${d < 0 ? 'neg' : ''}">${plus(d)}</small></button>`;
+      return `<button class="respill ${left < 0 ? 'short' : ''}" data-k="${k}" aria-label="${RES_NAME[k]} ${left}, ${plus(d)} a ${g.live ? 'cycle' : 'turn'}"><i>${icon}</i><b data-num="res-${k}">${left}</b><small class="${d < 0 ? 'neg' : ''}">${plus(d)}</small></button>`;
     };
     g.setHtml(this.h.res, cell('industry', '⚙') + cell('credits', '¢') + cell('influence', '✦') + fatePill(g));
   }
@@ -167,22 +183,26 @@ export class Hud {
       const frac = Math.max(0, Math.min(1, vp / Math.max(1, target)));
       const sealed = !g.live && s?.submitted && st.winner === null;
       const oath = (p.oathbreaker ?? []).length;
-      return `<div class="pcrest ${p.id === g.you ? 'you' : ''} ${p.eliminated ? 'out' : ''} ${oath ? 'oath' : ''}" style="--pc:${esc(p.color)}" data-crest="${p.id}"${tip(`${p.name} · ${p.vp}/${target} ♛${oath ? ' · Oathbreaker' : ''}`)}>
-        <span class="cb"><b class="vp" data-num="vp-${p.id}">${vp}</b>${oath ? '<i class="crack" aria-label="Oathbreaker"></i>' : ''}</span>${leader === p.id ? '<i class="lead">♛</i>' : ''}${sealed ? '<i class="sealed">✓</i>' : ''}
+      return `<div class="pcrest ${p.id === g.you ? 'you' : ''} ${p.eliminated ? 'out' : ''} ${oath ? 'oath' : ''}" style="--pc:${esc(p.color)}" data-crest="${p.id}"${tip(`${p.name}: ${p.vp} of ${target} victory points (♛)${leader === p.id ? ' · in the lead' : ''}${sealed ? ' · orders sealed' : ''}${oath ? ' · Oathbreaker' : ''}`)}>
+        <span class="cb"><b class="vp" data-num="vp-${p.id}">${vp}</b>${oath ? '<i class="crack" aria-label="Oathbreaker"></i>' : ''}</span>${leader === p.id ? '<i class="lead" aria-label="In the lead">♛</i>' : ''}${sealed ? '<i class="sealed" aria-label="Orders sealed">✓</i>' : ''}
         <span class="nm">${s?.online && g.src.kind === 'remote' ? '<i class="on"></i>' : ''}${esc(shortName(p.name, 1))}</span><i class="vpbar"><i style="width:${(frac * 100).toFixed(1)}%"></i></i></div>`;
     }).join('');
-    g.setHtml(this.h.crests, `<button class="crests" aria-label="Score">${html}</button>`);
+    g.setHtml(this.h.crests, `<button class="crests" aria-label="Score: victory points of each player">${html}</button>`);
   }
   renderTools() {
     const g = this.g;
     const emp = g.st.rules.empire?.enabled !== false;
     const dot = (on: boolean) => (on ? '<i class="dot"></i>' : '');
     const newBattles = !!g.st.last?.battles.length && g.st.last.turn >= g.lastSeenTurn && !g.replay;
-    const html = `${emp ? `<button class="tool" data-act="empire"${tip('Empire · E')} aria-label="Empire">✺${dot(g.canResearchNow())}</button>` : ''}
-      <button class="tool" data-act="score"${tip('Score · Q')} aria-label="Score">♛${dot(g.unreadChat > 0)}</button>
-      <button class="tool" data-act="chronicle"${tip('Chronicle · C')} aria-label="Chronicle">${ic('chronicle')}${dot(newBattles && false)}</button>
-      <button class="tool" data-act="lens"${tip(`Lens: ${LENS_NAME[g.lens]} · 1-4`)} aria-label="Lens">${lensIcon(g.lens)}</button>
-      <button class="tool" data-act="menu" aria-label="Menu">≡${dot(g.phone && (g.unreadChat > 0 || g.canResearchNow()))}</button>`;
+    // icon + a one-word caption (phones fold Empire / Score / Chronicle into the menu and drop the captions)
+    const tool = (act: string, icon: string, label: string, tipText: string, on = false) =>
+      `<button class="tool" data-act="${act}"${tip(tipText)} aria-label="${label}"><i class="ti">${icon}</i><span class="tl">${label}</span>${dot(on)}</button>`;
+    const html = `${emp ? tool('empire', '✺', 'Empire', 'Empire · E: research, laws, ship designs', g.canResearchNow()) : ''}
+      ${tool('score', '♛', 'Score', 'Score · Q: victory points, pacts, chat', g.unreadChat > 0)}
+      ${tool('chronicle', ic('chronicle'), 'Chronicle', 'Chronicle · C: what happened each turn', newBattles && false)}
+      ${tool('lens', lensIcon(g.lens), LENS_NAME[g.lens], 'Map lens · 1-4: what the map colours show')}
+      ${tool('legend', '?', 'Key', 'Map key: what the marks on the map mean')}
+      ${tool('menu', '≡', 'Menu', 'Menu: replays, sound, help, save, leave', g.phone && (g.unreadChat > 0 || g.canResearchNow()))}`;
     g.setHtml(this.h.tools, html);
   }
 
@@ -200,7 +220,7 @@ export class Hud {
     if (!html) { this.closePopovers(); return; }
     // re-find a re-rendered anchor
     if (anchor && !anchor.isConnected) {
-      anchor = kind.startsWith('res:') ? this.h.res.querySelector(`[data-k="${kind.slice(4)}"]`) : kind === 'menu' || kind === 'lens' ? this.h.tools.querySelector(`[data-act="${kind}"]`) : null;
+      anchor = kind.startsWith('res:') ? this.h.res.querySelector(`[data-k="${kind.slice(4)}"]`) : kind === 'menu' || kind === 'lens' || kind === 'legend' ? this.h.tools.querySelector(`[data-act="${kind}"]`) ?? this.h.tools.querySelector('[data-act=menu]') : null;
     }
     this.pop = { kind, anchor };
     const p = this.h.pop;
@@ -228,8 +248,9 @@ export class Hud {
       const per = g.live ? 'cycle' : 'turn';
       const row = (a: string, b: string, cls = '') => `<div class="r ${cls}"><span>${a}</span><b>${b}</b></div>`;
       const cut = det.why.find(w => /cut off/i.test(w));
-      return `<div class="bd"><div class="h">${icon} ${now}</div>${row('Income', `${plus(det.total[k])}/${per}`, 'good')}${up ? row('Upkeep', `−${up}`, 'bad') : ''}${sp ? row('Planned', `−${sp}`, now - sp < 0 ? 'bad' : '') : ''}${sp ? row('Left', String(now - sp), now - sp < 0 ? 'bad' : '') : ''}${cut ? row('⚠ Cut off', '½', 'bad') : ''}</div>`;
+      return `<div class="bd"><div class="h">${icon} ${RES_NAME[k]} <b>${now}</b></div><div class="r sub"><span>${RES_WHAT[k]}</span></div>${row('Income', `${plus(det.total[k])}/${per}`, 'good')}${up ? row('Upkeep', `−${up}`, 'bad') : ''}${sp ? row('Planned', `−${sp}`, now - sp < 0 ? 'bad' : '') : ''}${sp ? row('Left', String(now - sp), now - sp < 0 ? 'bad' : '') : ''}${cut ? row('⚠ Cut off', '½', 'bad') : ''}</div>`;
     }
+    if (kind === 'legend') return legendHtml();
     if (kind === 'lens') {
       return `<div class="lenses">${LENSES.map((l, i) => `<button class="${g.lens === l ? 'on' : ''}" data-lens="${l}"${tip(`${LENS_NAME[l]} · ${i + 1}`)}><i>${lensIcon(l)}</i><span>${LENS_NAME[l]}</span></button>`).join('')}</div>`;
     }
@@ -241,11 +262,13 @@ export class Hud {
       const phoneItems = g.phone ? `<div class="mrow">${emp ? item('empire', '✺', 'Empire', g.canResearchNow() ? ' class="hot"' : '') : ''}${item('score', '♛', 'Score', g.unreadChat ? ' class="hot"' : '')}${item('chronicle', ic('chronicle'), 'Chronicle')}</div>` : '';
       const last = g.live ? (st.live?.tick ?? 0) : st.turn - 1;
       return `<div class="menu">${phoneItems}
+        ${g.phone && !g.live && g.canPlan && !g.submitted ? item('preview', ic('eye'), 'Preview my turn', g.plan.orders.some(Boolean) ? '' : ' disabled') : ''}
         ${item('replaylast', '⟲', g.live ? 'Replay tick' : 'Replay turn')}
         ${last >= 1 ? `<label class="mrep"><span>${g.live ? 'Tick' : 'Turn'}</span><input type="number" min="1" max="${last}" value="${Math.max(1, last)}" data-rt><button data-m="replayturn">▶</button></label>` : ''}
         ${item('signals', '◎', `Signals ${g.showSignals ? 'on' : 'off'}`)}
         ${(() => { const m = audio.getSettings().muted; return item('sound', soundIcon(m), `Sound ${m ? 'off' : 'on'}`, `${m ? ' class="off"' : ''} aria-pressed="${!m}"${tip('Mute or unmute · Shift+M')}`); })()}
         ${item('soundset', soundIcon(false), 'Sound settings')}
+        ${g.phone ? item('legend', '?', 'Map key') : ''}
         ${item('help', ic('help'), 'Help')}
         ${g.you !== null ? item('teach', ic('replay'), 'Teach again') : ''}
         ${local ? item('save', '⤓', 'Save file') : ''}
@@ -278,6 +301,7 @@ export class Hud {
     switch (x) {
       case 'empire': case 'score': case 'chronicle': case 'help': this.modal(x); break;
       case 'replaylast': g.toolbar('replay'); break;
+      case 'preview': g.preview(); break;
       case 'replayturn': {
         const n = Math.floor(Number(this.h.pop.querySelector<HTMLInputElement>('[data-rt]')?.value ?? (t.closest('.mrep')?.querySelector('input') as HTMLInputElement | null)?.value));
         const v = Number.isFinite(n) && n >= 1 ? n : 0;
@@ -286,6 +310,7 @@ export class Hud {
         break;
       }
       case 'soundset': openSoundSettings(); break;
+      case 'legend': this.showPop('legend', this.h.tools.querySelector('[data-act=menu]')); break;
       case 'teach': g.restartTeach(); break;
       case 'save': g.exportSave(); break;
       case 'exit': g.onExit(); break;
@@ -344,3 +369,29 @@ export class Hud {
 /** One line for the LIVE bank: "+1 in 3m". */
 export function bankNext(g: GameScreen): number { return g.you !== null ? g.st.live?.nextOrderAt[g.you] ?? 0 : 0; }
 export { orderMs };
+
+// ------------------------------------------------------------------ the map key ("?" tool)
+/** Small drawings of the map's marks, in the map's own manner (render/map.ts): territory wash, crown rings, fleet
+ *  counters, lanes, battles, plans, rims, hatching. 32x22 each. */
+const K = {
+  gold: '#e9c46a', you: 'var(--you, #6fc3ff)', foe: '#e0566f', line: 'rgba(214, 186, 130, 0.55)', amber: '#ffb347',
+};
+const svg = (body: string) => `<svg class="kg" viewBox="0 0 32 22" width="32" height="22" aria-hidden="true">${body}</svg>`;
+const star = (x = 16, y = 11, r = 2.6) => `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff4cf"/><circle cx="${x}" cy="${y}" r="${r + 2.2}" fill="rgba(255,220,140,0.25)"/>`;
+const LEGEND: [string, string][] = [
+  [svg(`<path d="M3 4 Q12 1 22 4 L29 12 Q20 21 8 19 Z" fill="rgba(111,195,255,0.28)" stroke="${K.you}" stroke-width="1.6"/>`), 'Coloured territory: who holds it.'],
+  [svg(`${star()}<circle cx="16" cy="11" r="7" fill="none" stroke="${K.gold}" stroke-width="1.8"/>`), 'Gold ring: a Crown, worth victory points every turn.'],
+  [svg(`${star()}<circle cx="16" cy="11" r="6.5" fill="none" stroke="${K.gold}" stroke-width="1.5"/><circle cx="16" cy="11" r="9.5" fill="none" stroke="${K.gold}" stroke-width="1.2"/>`), 'Double gold ring: the Throne.'],
+  [svg(`${star(20)}<circle cx="9" cy="10" r="5" fill="${K.you}" stroke="#fff" stroke-width="1"/><text x="9" y="21.5" font-size="6.5" text-anchor="middle" fill="#fff" font-family="sans-serif">2</text>`), 'Round counter or chevron beside a star: a fleet in that system. Yours always sit on the left; a small number under it: fleets in the stack.'],
+  [svg(`<line x1="2" y1="16" x2="30" y2="6" stroke="${K.line}" stroke-width="1.4"/><path d="M13 13.5 l6 -5 l1.5 4 Z" fill="${K.foe}" stroke="#fff" stroke-width="0.8"/>`), 'Piece on a lane: a fleet travelling between systems.'],
+  [svg(`<path d="M9 4 L23 18 M23 4 L9 18" stroke="#ffd2c4" stroke-width="2.2" stroke-linecap="round"/><path d="M7 16 l4 4 M25 16 l-4 4" stroke="#ffd2c4" stroke-width="2.2" stroke-linecap="round"/>`), 'Crossed swords: a battle.'],
+  [svg(`<path d="M3 17 L24 6" stroke="${K.you}" stroke-width="1.8" stroke-dasharray="3 2.4"/><path d="M29 3.5 L22 4.5 L25.5 10 Z" fill="${K.you}"/>`), 'Dashed line with arrowhead: a planned move.'],
+  [svg(`${star()}<circle cx="16" cy="11" r="7" fill="none" stroke="${K.foe}" stroke-width="1.4"/><path d="M16 1v5 M16 16v5 M6 11h5 M21 11h5" stroke="${K.foe}" stroke-width="1.4"/>`), 'Reticle round a star: a planned attack.'],
+  [svg(`<circle cx="16" cy="11" r="5.5" fill="${K.you}"/><circle cx="16" cy="11" r="8.5" fill="none" stroke="#fff" stroke-opacity="0.75" stroke-width="1.6"/>`), 'Breathing rim: your fleet has no orders.'],
+  [svg(`<circle cx="16" cy="11" r="5.5" fill="${K.you}"/><circle cx="16" cy="11" r="8.5" fill="none" stroke="${K.amber}" stroke-width="1.6" stroke-dasharray="2.6 2"/>`), 'Amber dashed rim: out of supply.'],
+  [svg(`<defs><pattern id="kh" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="4" stroke="${K.you}" stroke-width="1.4"/></pattern></defs><path d="M3 4 Q12 1 22 4 L29 12 Q20 21 8 19 Z" fill="url(#kh)" stroke="${K.you}" stroke-width="1.2"/>`), 'Hatching: cut off from your capital.'],
+  [svg(`${star()}<circle cx="16" cy="11" r="7.5" fill="none" stroke="#ff9b7a" stroke-width="1.5" stroke-dasharray="2.4 2.2"/>`), 'Dashed ring round a star: a contested system.'],
+];
+function legendHtml(): string {
+  return `<div class="legend" role="list"><div class="lg-h">Map key</div>${LEGEND.map(([i, t]) => `<div class="lg" role="listitem">${i}<span>${esc(t)}</span></div>`).join('')}<div class="lg-f">Hover or tap anything for details.</div></div>`;
+}

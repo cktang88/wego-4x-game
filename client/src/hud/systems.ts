@@ -10,7 +10,7 @@ import { contestOn, systemStatus, tributeBlock, acceptBlock, tributeOfferer, typ
 import { regionYield, type YieldPart } from '../../../shared/sim/resolve.ts';
 import { connected } from '../../../shared/sim/empire.ts';
 import { esc } from '../ui/dom.ts';
-import { tip, shortWhy } from './util.ts';
+import { tip, shortWhy, shortName } from './util.ts';
 import { setFree, dropFree } from './soul.ts';
 import { ic, icFor } from '../art/icons.ts';
 
@@ -199,10 +199,10 @@ export function systemNotes(g: GameScreen): { key: string; icon: string; text: s
   const at = (r: Region) => () => { g.select({ kind: 'region', id: r.id }); g.focus(r.site); };
   for (const r of st.regions) {
     if (r.owner !== you || !r.bodies) continue;
-    if (tributeOfferer(st, r.id, 'plan') !== null && !g.myFree().some(x => x.type === 'tribute' && x.region === r.id)) out.push({ key: `trib${r.id}`, icon: '⚖', text: `Terms for ${r.name.split(' ')[0]}`, tone: 'gold', go: at(r) });
+    if (tributeOfferer(st, r.id, 'plan') !== null && !g.myFree().some(x => x.type === 'tribute' && x.region === r.id)) out.push({ key: `trib${r.id}`, icon: '⚖', text: `Terms for ${shortName(r.name, 2)}`, tone: 'gold', go: at(r) });
     const S = systemStatus(st, r);
-    if (S.blockaded && S.refugeesIn === 1) out.push({ key: `ref${r.id}`, icon: '⚠', text: `Refugees soon: ${r.name.split(' ')[0]}`, tone: 'bad', go: at(r) });
-    else if (S.blockaded) out.push({ key: `blk${r.id}`, icon: '⛓', text: `${r.name.split(' ')[0]} blockaded`, tone: 'bad', go: at(r) });
+    if (S.blockaded && S.refugeesIn === 1) out.push({ key: `ref${r.id}`, icon: '⚠', text: `Refugees soon: ${shortName(r.name, 2)}`, tone: 'bad', go: at(r) });
+    else if (S.blockaded) out.push({ key: `blk${r.id}`, icon: '⛓', text: `${shortName(r.name, 2)} blockaded`, tone: 'bad', go: at(r) });
   }
   return out.slice(0, 2);
 }

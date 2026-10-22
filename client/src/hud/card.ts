@@ -14,9 +14,9 @@ import { TRAITS as CMD_TRAITS } from '../../../shared/config/content.ts';
 import { TECH, MODULE, TRAITS as WORLD_TRAITS, VEINS } from '../../../shared/config/empire.ts';
 import { blueprintFor, classBlock, connected, hasTech, maxDevAt, supplied } from '../../../shared/sim/empire.ts';
 import { etaTicks, tickMs } from '../../../shared/sim/live.ts';
-import { esc } from '../ui/dom.ts';
+import { esc, toast } from '../ui/dom.ts';
 import { intentFor, commitIntent, type Intent } from './verbs.ts';
-import { shipSvg, shortWhy, tip, fmtDur } from './util.ts';
+import { shipSvg, shortWhy, tip, fmtDur, shortName } from './util.ts';
 import { fleetBadge, fleetSubline, fleetSoulRows, honourChoice, sagaChips, fleetSoulActs, vowPicker, shipTraitBits, worldEpi, worldSoulRows, soulAction, openFounding, bannersLeft } from './soul.ts';
 import { bannerSvg } from '../art/sigils.ts';
 import { postureRow, fateRow, postureStatus, worldSigRows, sigAction } from './signature.ts';
@@ -84,7 +84,7 @@ function ownFleet(g: GameScreen, f: Fleet): string {
   const siblings = st.fleets.filter(x => x.owner === f.owner && x.region === f.region && x.ships.length);
   const sib = siblings.length > 1 ? `<span class="sib"><button data-a="sib" data-d="-1" aria-label="Previous fleet">‹</button><small>${siblings.indexOf(f) + 1}/${siblings.length}</small><button data-a="sib" data-d="1" aria-label="Next fleet">›</button></span>` : '';
   const stats = stat('⚔', String(power), 'Power') + stat('❤', `${hpPct}%`, 'Hull', hpPct < 50 ? 'bad' : '') + stat(ic('speed'), String(speed), 'Speed') +
-    `<span class="cmd"${tip(`${c.name}${tword ? ` · ${tword}` : ''}`)}>${esc(c.name.split(' ').slice(-1)[0])}${tword ? ` · <em>${esc(tword)}</em>` : ''}</span>`;
+    `<span class="cmd"${tip(`${c.name}${tword ? ` · ${tword}` : ''}`)}>${esc(lastName(c.name))}${tword ? ` · <em>${esc(tword)}</em>` : ''}</span>`;
   // one status line, icon-first
   const status: string[] = [];
   const war = (st.engagements ?? []).find(e => e.region === f.region);
@@ -110,7 +110,7 @@ function ownFleet(g: GameScreen, f: Fleet): string {
     const old = bp && s.mod && bp !== s.mod;
     const sys = !s.sys.engines || !s.sys.weapons || !s.sys.shields;
     const tr = shipTraitBits(s.traits);
-    return `<button class="sc ${lifted.has(s.id) ? 'up' : ''}" data-ship="${s.id}"${tip(`${s.name} · ${def?.name ?? s.cls}${s.title ? ` ${s.title}` : ''}${tr.tip}`)}>${tr.icons}${shipSvg(s.cls, g.color(f.owner), 30)}<i class="hb"><i style="width:${(pct * 100).toFixed(0)}%;background:${pct < 0.4 ? 'var(--bad)' : 'var(--good)'}"></i></i>${s.mod ? `<i class="md ${old ? 'old' : ''}" style="background:${MOD_COLOR[s.mod] ?? '#ccc'}"></i>` : ''}${sys ? '<i class="sx">!</i>' : ''}</button>`;
+    return `<button class="sc ${lifted.has(s.id) ? 'up' : ''}" data-ship="${s.id}" aria-label="${esc(`${s.name}, ${def?.name ?? s.cls}, hull ${Math.round(pct * 100)}%`)}" aria-pressed="${lifted.has(s.id)}"${tip(`${s.name} · ${def?.name ?? s.cls}${s.title ? ` ${s.title}` : ''}${tr.tip}`)}>${tr.icons}${shipSvg(s.cls, g.color(f.owner), 30)}<i class="hb"><i style="width:${(pct * 100).toFixed(0)}%;background:${pct < 0.4 ? 'var(--bad)' : 'var(--good)'}"></i></i>${s.mod ? `<i class="md ${old ? 'old' : ''}" style="background:${MOD_COLOR[s.mod] ?? '#ccc'}"></i>` : ''}${sys ? '<i class="sx">!</i>' : ''}</button>`;
   }).join('');
   const nLift = [...lifted].filter(id => f.ships.some(s => s.id === id)).length;
   // actions
@@ -133,7 +133,7 @@ function ownFleet(g: GameScreen, f: Fleet): string {
       ${c.traits.length ? `<div class="r">${c.traits.map(t => `<span class="trait"${tip(CMD_TRAITS[t]?.desc ?? '')}>${esc(CMD_TRAITS[t]?.name ?? t)}</span>`).join('')}</div>` : ''}
       ${g.canPlan ? `<div class="r"><input data-rename value="${esc(g.pendingName(f))}" maxlength="40" aria-label="Fleet name"></div>` : ''}
       ${f.history.length ? `<div class="hist">${f.history.slice(-4).reverse().map(x => `<div>${esc(x)}</div>`).join('')}</div>` : ''}</div>` : '';
-  return `${head(g, f.name, g.color(f.owner), stats, `${sib}<button class="cx more-btn ${moreOpen ? 'on' : ''}" data-a="more" aria-label="More"${tip('Commander & record')}>⋯</button>`, fleetBadge(g, f), fleetSubline(g, f))}
+  return `${head(g, f.name, g.color(f.owner), stats, `${sib}<button class="cx more-btn ${moreOpen ? 'on' : ''}" data-a="more" aria-label="Commander and record" aria-expanded="${moreOpen}"${tip('Commander, rename, record')}>⋯</button>`, fleetBadge(g, f), fleetSubline(g, f))}
     ${status.length ? `<div class="cst">${status.join('')}</div>` : ''}
     ${honourChoice(g, f)}${fleetSoulRows(g, f)}${postureRow(g, f)}${fateRow(g, f)}
     <div class="fan" data-fleet="${f.id}">${fan}</div>
@@ -152,7 +152,9 @@ function foeFleet(g: GameScreen, f: Fleet): string {
   const ps = postureStatus(g, f);
   return `${head(g, f.name, g.color(f.owner), stats, '', fleetBadge(g, f), fleetSubline(g, f))}${ps.length ? `<div class="cst">${ps.join('')}</div>` : ''}${fleetSoulRows(g, f)}<div class="fan foe">${ships}</div>${sagaChips(g, f)}`;
 }
-const shortOwner = (g: GameScreen, o: number | null) => g.pname(o).split(' ')[0];
+const shortOwner = (g: GameScreen, o: number | null) => shortName(g.pname(o), 1);
+/** A commander's surname: the last capitalised word ("Admiral Theodora Vasquez of the" → "Vasquez"). */
+const lastName = (n: string) => n.split(/\s+/).filter(w => /^[A-Z]/.test(w)).slice(-1)[0] ?? n;
 
 function regionStats(g: GameScreen, r: Region): string {
   const st = g.st, R = st.rules;
@@ -231,7 +233,7 @@ function ownPlanet(g: GameScreen, r: Region): string {
       const techLock = p.tech && !hasTech(ps, you, p.tech) ? `needs ${TECH[p.tech]?.name ?? p.tech}` : null;
       const err = techLock ?? (lvl >= max ? (k === 'develop' && sysOn(st) ? g.orderWhy(o) ?? 'maxed' : 'maxed') : null) ?? g.orderWhy(o);
       if (lvl >= max && k !== 'develop' && max > 0 && !err?.startsWith('needs')) {
-        return `<button class="tile done" data-a="develop" data-proj="${k}" aria-disabled="true"${tip(`${p.name}: ${p.desc}`)}><i class="pi">${PROJ_ICON[k] ?? '▲'}</i><span class="tname">${esc(p.name.split(' ')[0])}</span>${pips(lvl, max)}</button>`;
+        return `<button class="tile done" data-a="develop" data-proj="${k}" aria-disabled="true"${tip(`${p.name} (built ${lvl}/${max}): ${p.desc}`)}><i class="pi">${PROJ_ICON[k] ?? '▲'}</i><span class="tname">${esc(p.name.split(' ')[0])}</span>${pips(lvl, max)}</button>`;
       }
       const cost = orderCost(st, o, you);
       const short = !canAfford(left, cost, creditRate(st, you));
@@ -239,7 +241,7 @@ function ownPlanet(g: GameScreen, r: Region): string {
       const sysWhy = err && !techLock && sysOn(st) && /citizens|slot|station|site|surface|trade hub/i.test(err) ? shortWhy(err) : null;
       const disc = !err && systemCostMult(st, r, k) < 1 ? `<em class="tdisc">−${Math.round((1 - systemCostMult(st, r, k)) * 100)}%</em>` : '';
       const label = k === 'develop' && sysOn(st) && r.bodies ? 'Citizen' : p.name.split(' ')[0];
-      return `<button class="tile ${err ? 'locked' : ''} ${short ? 'short' : ''} ${sysWhy ? 'why' : ''}" data-a="develop" data-proj="${k}"${err ? ` aria-disabled="true"${tip(`⊘ ${techLock ?? shortWhy(err)}`)}` : tip(`${p.name}: ${p.desc}`)}><i class="pi">${PROJ_ICON[k] ?? '▲'}</i><span class="tname">${esc(label)}</span>${max > 1 ? pips(lvl, max) : ''}${sysWhy ? `<span class="twhy">${esc(sysWhy)}</span>` : `<span class="tcost">${costText(cost)}${disc}</span>`}</button>`;
+      return `<button class="tile ${err ? 'locked' : ''} ${short ? 'short' : ''} ${sysWhy ? 'why' : ''}" data-a="develop" data-proj="${k}"${err ? ` aria-disabled="true"${tip(`⊘ ${techLock ?? shortWhy(err)}`)}` : tip(`${p.name}${max > 1 ? ` (level ${lvl}/${max})` : ''}: ${p.desc}`)}><i class="pi">${PROJ_ICON[k] ?? '▲'}</i><span class="tname">${esc(label)}</span>${max > 1 ? pips(lvl, max) : ''}${sysWhy ? `<span class="twhy">${esc(sysWhy)}</span>` : `<span class="tcost">${costText(cost)}${disc}</span>`}</button>`;
     }).join('');
     const way = sysOn(st) && r.bodies && systemCostMult(st, r, 'fortress') < 1 ? ` <span class="trway"${tip('Waystation: few citizens, so military and logistics projects are cheaper here')}>⛯ military −${Math.round((1 - systemCostMult(st, r, 'fortress')) * 100)}%</span>` : '';
     trays += `<div class="tray" data-tray="develop"><div class="trh">▲ Develop${way}</div><div class="tiles">${projects}</div></div>`;
@@ -295,7 +297,7 @@ function foreignPlanet(g: GameScreen, r: Region): string {
       const f = g.fleet(it.join?.fleet ?? (it.order as { fleet?: number } | undefined)?.fleet ?? -1);
       const pct = Math.round((it.odds ?? 0) * 100);
       const col = pct >= 65 ? 'var(--good)' : pct >= 40 ? 'var(--gold)' : 'var(--bad)';
-      return `<button class="odds" data-a="seizewith" data-with="${f?.id ?? -1}"${tip(`Seize with ${f?.name ?? 'fleet'}`)}><span class="ob"><i style="width:${pct}%;background:${col}"></i></span><b style="color:${col}">⚔ ${pct}%</b><small>${esc(f ? f.name.split(' ').slice(-1)[0] : '')}</small></button>`;
+      return `<button class="odds" data-a="seizewith" data-with="${f?.id ?? -1}"${tip(`Seize with ${f?.name ?? 'fleet'}`)}><span class="ob"><i style="width:${pct}%;background:${col}"></i></span><b style="color:${col}">⚔ ${pct}%</b><small>${esc(f ? lastName(f.name) : '')}</small></button>`;
     }).join('');
     const isPlayer = owner !== null && owner >= 0 && owner !== g.you;
     body += `<div class="acts">${r.kind !== 'void' ? ib('influence', '✦', 'Influence', g.orderWhy({ type: 'influence', target: r.id }), '', 'Push loyalty toward you') : ''}${ib('scan', '◎', 'Scan', g.orderWhy({ type: 'scan', target: r.id }), '', 'Reveal this area')}${ib('feint', '☍', 'Feint', g.orderWhy({ type: 'feint', target: r.id }), '', 'Fake signals toward here')}${isPlayer ? ib('pact', '⚭', 'Pact', g.orderWhy({ type: 'pact', with: owner! }), '', `Offer a pact to ${g.pname(owner)}`) : ''}</div>`;
@@ -311,7 +313,12 @@ export function bindCard(g: GameScreen, el: HTMLElement) {
     const t = e.target as HTMLElement;
     const b = t.closest<HTMLElement>('[data-a]');
     if (!b || !el.contains(b)) return;
-    if (b.getAttribute('aria-disabled') === 'true') { audio.ui('error'); b.classList.remove('nope'); void b.offsetWidth; b.classList.add('nope'); return; }
+    if (b.getAttribute('aria-disabled') === 'true') {
+      audio.ui('error'); b.classList.remove('nope'); void b.offsetWidth; b.classList.add('nope');
+      // say why (on a touch screen the reason in the tip was only a long-press away)
+      if (b.dataset.tip) toast(b.dataset.tip);
+      return;
+    }
     // Fate makes its own sounds (arm click, coin on the spend)
     if (b.dataset.a !== 'fate') audio.ui('click');
     cardAction(g, b.dataset.a!, b.dataset, e.shiftKey);

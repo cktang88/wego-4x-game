@@ -205,8 +205,22 @@ export class GameScreen {
       t.style.left = `${Math.round(Math.max(8 + si.l, Math.min(window.innerWidth - w - 8 - si.r, r.left + r.width / 2 - w / 2)))}px`;
       t.style.top = `${Math.round(Math.max(8 + si.t, y))}px`;
     };
-    const hide = () => { shownFor = null; t.classList.add('hidden'); };
+    const hide = () => { shownFor = null; mapTipOn = false; t.classList.add('hidden'); };
     this.hideTip = hide;
+    // the map's marks have no DOM element: the map (render/map.ts, gestures) shows plain-language text at a point
+    let mapTipOn = false;
+    this.mapTip = (text, x = 0, y = 0) => {
+      if (!text) { if (mapTipOn) hide(); return; }
+      if (shownFor) return;   // a DOM tip wins
+      mapTipOn = true;
+      t.innerHTML = glyphHtml(esc(text));
+      t.classList.remove('hidden');
+      const w = t.offsetWidth, hh = t.offsetHeight, si = safeInsets(this.root);
+      let ty = y - hh - 14;
+      if (ty < 8 + si.t) ty = y + 18;
+      t.style.left = `${Math.round(Math.max(8 + si.l, Math.min(window.innerWidth - w - 8 - si.r, x - w / 2)))}px`;
+      t.style.top = `${Math.round(Math.max(8 + si.t, Math.min(window.innerHeight - hh - 8 - si.b, ty)))}px`;
+    };
     this.root.addEventListener('scroll', () => { if (shownFor) hide(); }, true);
     this.tipCheck = () => { if (shownFor && !shownFor.isConnected) hide(); };
     this.root.addEventListener('pointerover', e => {
@@ -244,6 +258,11 @@ export class GameScreen {
   }
   /** Hide the info popover (set up by bindTips). */
   hideTip: () => void = () => {};
+  /**
+   * Show plain-language text for a map mark at client point (x, y), or hide it with null. For hover / long-press on
+   * the canvas (the map has no DOM elements for [data-tip]); a DOM tip that is already up takes precedence.
+   */
+  mapTip: (text: string | null, x?: number, y?: number) => void = () => {};
   /** Hide the info popover if the element it belongs to was re-rendered away. */
   tipCheck: () => void = () => {};
   /** setTimeout that is cancelled when the screen is destroyed. */
@@ -1279,7 +1298,7 @@ export class GameScreen {
   }
 
   /** Phone layout: compact top row, bottom-sheet card, modal buttons folded into the menu. */
-  get phone(): boolean { return window.matchMedia('(max-width: 700px)').matches; }
+  get phone(): boolean { return window.matchMedia('(max-width: 700px), (max-height: 500px) and (max-width: 1000px)').matches; }
 
   select(s: { kind: 'region' | 'fleet'; id: number }) {
     const same = this.sel?.kind === s.kind && this.sel.id === s.id;
@@ -1315,12 +1334,34 @@ export class GameScreen {
   // ================================================================== input
   onResize = () => {
     if (this.destroyed) return;
-    const was = this.root.classList.contains('phone');
+    const was = this.root.className;
     this.root.classList.toggle('phone', this.phone);
-    if (was !== this.phone) this.renderAll();
+    this.layoutClasses();
+    if (was !== this.root.className) this.renderAll(); else this.hud?.fitTop();
     this.map.resize();
     if (!this.map.fitted && this.map.w > 0) this.map.fit(this.st, this.you !== null ? this.st.regions[this.st.players[this.you]?.capital]?.site : undefined);
   };
+  /**
+   * Layout classes for the HUD (shell.css). The UI scales with the root font-size, so widths are measured in rem:
+   *  lay-narrow  < 70rem wide (portrait tablets, narrow windows): the tool buttons stand in a column at the right,
+   *              the strip spans the bottom, notices sit above it;
+   *  lay-mid     < 104rem: the strip is centred in the space left of the tool row, notices above it;
+   *  landscape   a phone on its side (the card becomes a side sheet);
+   *  touch       a coarse pointer: 44px targets, no hover-only affordances.
+   */
+  layoutClasses() {
+    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    const w = window.innerWidth / rem;
+    const phone = this.phone;
+    const cl = this.root.classList;
+    cl.toggle('lay-narrow', !phone && w < 70);
+    cl.toggle('lay-mid', !phone && w >= 70 && w < 104);
+    cl.toggle('landscape', phone && window.innerWidth > window.innerHeight);
+    const touch = window.matchMedia('(pointer: coarse)').matches;
+    cl.toggle('touch', touch);
+    // the founding / record sheets are overlays on <body>, outside the shell
+    document.documentElement.classList.toggle('touch', touch);
+  }
   /** A modal, dialog, battle viewer or curtain is up: the board's shortcuts stay quiet. */
   covered(): boolean { return !!this.curtain || !!document.querySelector('.bv-overlay, .overlay') || this.hud.modalOpen() || heraldOpen() || sagaOpen(); }
   /** The Herald's front page (newest edition, or turn `turn`'s). */

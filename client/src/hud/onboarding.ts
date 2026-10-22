@@ -9,8 +9,10 @@ import { intentFor } from './verbs.ts';
 import { safeInsets } from './util.ts';
 import { ic } from '../art/icons.ts';
 
-type Step = 'drag' | 'seal' | 'build' | 'enemy' | 'research' | 'laws' | 'posture';
-const ALL: Step[] = ['drag', 'seal', 'build', 'enemy', 'research', 'laws', 'posture'];
+type Step = 'drag' | 'seal' | 'build' | 'enemy' | 'research' | 'laws' | 'posture' | 'goal' | 'fate';
+const ALL: Step[] = ['drag', 'seal', 'build', 'enemy', 'research', 'laws', 'posture', 'goal', 'fate'];
+/** One-time callouts that bow out on their own after a few seconds. */
+const TIMED: Step[] = ['enemy', 'laws', 'research', 'posture', 'goal', 'fate'];
 const skipKey = (live: boolean) => `tc.tutorial.${live ? 'live' : 'wego'}`;
 const onceKey = (s: Step) => `tc.teach.${s}`;
 const get = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -57,6 +59,9 @@ export class Teach {
         if (tray && !this.isDone('build')) { next = 'build'; this.sawBuild = true; }
         else if (this.sawBuild && !this.isDone('build')) this.done('build');
         else if (!this.isDone('posture') && !card.classList.contains('hidden') && card.querySelector('[data-posture-row]')) next = 'posture';
+        // the marks nobody could read: the score crests (the goal) and the Fate coins
+        else if (!this.isDone('goal') && st.turn >= 2) next = 'goal';
+        else if (!this.isDone('fate') && st.turn >= 3 && g.hud.h.res.querySelector('[data-k=fate]')) next = 'fate';
         else if (!this.isDone('enemy') && this.enemyToken()) next = 'enemy';
         else if (!this.isDone('research') && st.turn >= 2 && g.canResearchNow()) next = 'research';
         else if (!this.isDone('laws') && st.turn >= 3 && !(st.players[g.you!]?.laws ?? []).length && st.rules.empire?.enabled !== false) next = 'laws';
@@ -86,7 +91,9 @@ export class Teach {
     return f ? f.id : null;
   }
   private text(s: Step): string {
-    return { drag: 'Drag to seize', seal: 'Seal when ready', build: 'Tap to build', enemy: 'Enemy in sight', research: 'Buy a tech', laws: 'Enact a law', posture: 'Read your rival' }[s];
+    const vp = this.g.st.rules.victory.vpTarget;
+    return { drag: 'Drag to seize', seal: 'Seal when ready', build: 'Tap to build', enemy: 'Enemy in sight', research: 'Buy a tech', laws: 'Enact a law', posture: 'Read your rival',
+      goal: `First to ${vp} ♛ points wins`, fate: 'Fate: rare tokens' }[s];
   }
   private render() {
     const el = this.g.hud.h.callout;
@@ -103,9 +110,17 @@ export class Teach {
     const g = this.g, el = g.hud.h.callout, s = this.cur;
     if (!s || el.classList.contains('hidden')) return;
     // timed ones bow out on their own
-    if ((s === 'enemy' || s === 'laws' || s === 'research' || s === 'posture') && performance.now() - this.shownAt > 9000) { this.done(s); return; }
-    let x = 0, y = 0, below = false;
-    const at = (e: Element | null) => { if (!e) return false; const r = e.getBoundingClientRect(); if (!r.width) return false; x = r.left + r.width / 2; y = r.top; return true; };
+    if (TIMED.includes(s) && performance.now() - this.shownAt > 9000) { this.done(s); return; }
+    let x = 0, y = 0, below = false, side: DOMRect | null = null;
+    const at = (e: Element | null) => {
+      if (!e) return false;
+      const r = e.getBoundingClientRect();
+      if (!r.width) return false;
+      x = r.left + r.width / 2; y = r.top;
+      // a tool in the narrow layout's column: point at it from the left (above it would cover the next tool)
+      side = g.root.classList.contains('lay-narrow') && !!e.closest('.hud-br') ? r : null;
+      return true;
+    };
     const onMap = (fid: number | null) => {
       if (fid === null) return false;
       const p = g.lastFleetPos.get(fid);
@@ -119,13 +134,26 @@ export class Teach {
     else if (s === 'build') ok = at(g.hud.h.card.querySelector('[data-tray="build"] .tiles'));
     else if (s === 'posture') ok = at(g.hud.h.card.querySelector('[data-posture-row] .pz'));
     else if (s === 'enemy') ok = onMap(this.enemyToken());
+    else if (s === 'goal') ok = at(g.hud.h.crests.querySelector('.crests'));
+    else if (s === 'fate') ok = at(g.hud.h.res.querySelector('[data-k=fate]'));
     else ok = at(g.hud.h.tools.querySelector(g.phone ? '[data-act=menu]' : '[data-act=empire]'));
     if (!ok) { el.style.visibility = 'hidden'; return; }
     el.style.visibility = '';
     const w = el.offsetWidth, h = el.offsetHeight;
+    el.classList.toggle('left', !!side);
+    if (side) {
+      const sr = side as DOMRect;
+      el.classList.remove('below');
+      el.style.transform = `translate(${Math.round(Math.max(8, sr.left - w - 14))}px, ${Math.round(sr.top + sr.height / 2 - h / 2)}px)`;
+      return;
+    }
     let top = y - h - 12;
     if (top < 56 + safeInsets(g.root).t) { top = y + 40; below = true; }
     el.classList.toggle('below', below);
-    el.style.transform = `translate(${Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, x - w / 2)))}px, ${Math.round(top)}px)`;
+    let left = Math.max(8, Math.min(window.innerWidth - w - 8, x - w / 2));
+    // keep off the tool buttons (the narrow layout's column stands right above the Seal button)
+    const br = g.hud.h.tools.getBoundingClientRect();
+    if (br.width && left + w > br.left - 8 && top < br.bottom && top + h > br.top && left < br.right) left = Math.max(8, br.left - 8 - w);
+    el.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
   }
 }

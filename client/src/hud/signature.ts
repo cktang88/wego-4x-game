@@ -120,7 +120,7 @@ export function fateRow(g: GameScreen, f: Fleet): string {
   if (!pend && st.turn < POSTURE_FROM_TURN && !engaged && !f.limping) return '';
   if (pend) return `<div class="fate-row pend"><b>${F(pend.use)} ${esc(FATE_USES[pend.use]?.name ?? pend.use)}</b><small>spent at seal</small>${g.live ? '' : '<button class="mini" data-a="unfate">↶</button>'}</div>`;
   const uses: FateUse[] = f.limping ? ['rally', 'laststand', 'twist', 'hyperjump'] : ['laststand', 'twist', 'hyperjump'];
-  return `<div class="fate-row"><span class="fz-h"${tip('Fate: rare tokens, spent in public')}>Fate ${coins(left, SG(st).fateStart)}</span>${uses.map(u => fateBtn(g, u, fateWhy(g, u, f.id), `f${f.id}`)).join('')}</div>`;
+  return `<div class="fate-row"><span class="fz-h"${tip(`Fate: ${left} of ${SG(st).fateStart} rare tokens left, spent in public`)}>Fate ${coins(left, SG(st).fateStart)}</span>${uses.map(u => fateBtn(g, u, fateWhy(g, u, f.id), `f${f.id}`)).join('')}</div>`;
 }
 
 // ------------------------------------------------------------------ world card: world postures + Surge
@@ -145,7 +145,7 @@ export function worldSigRows(g: GameScreen, r: Region): string {
   if (fateOn(st) && g.canPlan && st.turn >= POSTURE_FROM_TURN - 1) {
     const pend = pendingFate(g).find(x => x.use === 'surge' && x.region === r.id);
     html += pend ? `<div class="fate-row pend"><b>${F('surge')} Surge</b><small>spent at seal</small>${g.live ? '' : '<button class="mini" data-a="unfate">↶</button>'}</div>`
-      : `<div class="fate-row"><span class="fz-h">Fate ${coins(fateAvail(g), SG(st).fateStart)}</span>${fateBtn(g, 'surge', fateWhy(g, 'surge', undefined, r.id), `r${r.id}`)}</div>`;
+      : `<div class="fate-row"><span class="fz-h"${tip(`Fate: ${fateAvail(g)} of ${SG(st).fateStart} rare tokens left, spent in public`)}>Fate ${coins(fateAvail(g), SG(st).fateStart)}</span>${fateBtn(g, 'surge', fateWhy(g, 'surge', undefined, r.id), `r${r.id}`)}</div>`;
   }
   return html;
 }
@@ -235,9 +235,9 @@ export function postureMap(g: GameScreen): Map<number, string> {
 export function fatePill(g: GameScreen): string {
   if (g.you === null || !fateOn(g.st)) return '';
   const n = fateAvail(g), max = SG(g.st).fateStart;
-  return `<button class="respill fatepill" data-k="fate" aria-label="Fate ${n}"${tip(`Fate: ${n} left · spend from a fleet or world`)}>${coins(n, max)}</button>`;
+  return `<button class="respill fatepill" data-k="fate" aria-label="Fate: ${n} of ${max} tokens left"><small class="fl">Fate</small>${coins(n, max)}</button>`;
 }
 export function fatePop(g: GameScreen): string {
   const n = fateAvail(g);
-  return `<div class="bd"><div class="h">${ic('fate')} Fate ${n}</div>${(['laststand', 'twist', 'hyperjump', 'rally', 'surge'] as FateUse[]).map(u => `<div class="r"><span>${F(u)} ${esc(FATE_USES[u].name)}</span><b>${FATE_USES[u].target === 'region' ? 'world' : 'fleet'}</b></div>`).join('')}<div class="r"><span>Per turn</span><b>${SG(g.st).fatePerTurn}</b></div></div>`;
+  return `<div class="bd"><div class="h">${ic('fate')} Fate <b>${n}</b> left</div><div class="r sub"><span>Rare tokens, spent in public: tap Fate on a fleet or world card.</span></div>${(['laststand', 'twist', 'hyperjump', 'rally', 'surge'] as FateUse[]).map(u => `<div class="r"><span>${F(u)} ${esc(FATE_USES[u].name)}</span><b>${FATE_USES[u].target === 'region' ? 'world' : 'fleet'}</b></div>`).join('')}<div class="r"><span>Per turn</span><b>${SG(g.st).fatePerTurn}</b></div></div>`;
 }
