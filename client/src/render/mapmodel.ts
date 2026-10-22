@@ -3,6 +3,7 @@
 import type { GameState, Region, Pt, Fleet } from '../../../shared/sim/types.ts';
 import { fleetPower } from '../../../shared/sim/graph.ts';
 import { maxGarrison } from '../../../shared/sim/setup.ts';
+import { STAR_NODE, starKindOf } from '../art/stars.ts';
 
 export type Tier = 'strategic' | 'operational' | 'detail';
 export type Lens = 'political' | 'supply' | 'economy' | 'military';
@@ -37,48 +38,85 @@ export function tierFor(screenR: number, prev: Tier | null = null, coarse = coar
   return screenR < lo ? 'strategic' : screenR >= hi ? 'detail' : 'operational';
 }
 
-// ------------------------------------------------------------------ fleet anchor slots
-/** Screen-px offset of an owner's fleet token from its region's site, per tier, and which side its number sits on.
- *  Fixed per owner so a colour always parks in the same place; chosen so tokens never sit on the banner (below
- *  the planet at operational/detail) or on the garrison plate (on the planet at strategic), nor on each other. */
-export interface Slot { dx: number; dy: number; side: -1 | 1 }
-const SLOTS: Record<Tier, Record<string, Slot>> = {
-  strategic: {
-    0: { dx: -27, dy: -4, side: -1 },
-    1: { dx: 27, dy: -4, side: 1 },
-    2: { dx: 0, dy: 27, side: 1 },
-    [-1]: { dx: 0, dy: -29, side: 1 },
-  },
-  operational: {
-    0: { dx: -26, dy: -20, side: -1 },
-    1: { dx: 26, dy: -20, side: 1 },
-    2: { dx: 0, dy: -46, side: 1 },
-    [-1]: { dx: -30, dy: -48, side: -1 },
-  },
-  detail: {
-    0: { dx: -32, dy: -24, side: -1 },
-    1: { dx: 32, dy: -24, side: 1 },
-    2: { dx: 0, dy: -56, side: 1 },
-    [-1]: { dx: -36, dy: -58, side: -1 },
-  },
-};
-/** Fleets sitting on a hyperlane waypoint dot: centred on the dot, owners nudged apart. */
-const LANE_SLOTS: Record<string, Slot> = { 0: { dx: -9, dy: -9, side: -1 }, 1: { dx: 9, dy: -9, side: 1 }, 2: { dx: 0, dy: 12, side: 1 }, [-1]: { dx: 0, dy: -16, side: 1 } };
-export function laneSlot(owner: number): Slot { return LANE_SLOTS[String(owner)] ?? LANE_SLOTS['0']; }
-export function slotFor(tier: Tier, owner: number): Slot { return SLOTS[tier][String(owner)] ?? SLOTS[tier][String(((owner % 3) + 3) % 3)]; }
-
-/** At strategic zoom on a small screen the slots pull in a little so tokens stay inside their region. */
-export function slotScale(tier: Tier, screenR: number): number {
-  if (tier === 'strategic') return Math.max(0.72, Math.min(1, screenR / 66));
-  // zoomed in: the system's art grows with the region, and the tokens park further out around it
-  if (tier === 'detail') return Math.max(1, Math.min(3.5, screenR / 105));
-  return 1;
+// ------------------------------------------------------------------ continuous zoom
+/*
+ * INFORMATION BUDGET PER ZOOM (docs/UX-V2.md §2). Each tier shows only what a player cares about at that distance;
+ * everything else is one hover / tap / click away (map tooltip, card). Tiers are not switches: every layer fades in
+ * or out over a zoom range (zoomW), and sizes grow continuously with zoom (starScale, tokR).
+ *
+ *  STRATEGIC (zoomed out) - who owns what, where the armies are, where the fighting is, where the objectives are.
+ *    Bold owner fills + big spaced empire names; stars as small glowing points; Crowns ringed in gold, the Throne a
+ *    larger gold ring (named); fleets as owner-coloured chevron pips at their star / on their lane (a count only for
+ *    a stack of 2+); battles as one small crossed-swords mark. NO numbers, plates, system names, pips or icons.
+ *  OPERATIONAL (mid) - what can I reach and attack, and where are my forces.
+ *    + system names written in space (letter-spaced, haloed, no plates; lower priority hides first, with hysteresis);
+ *    fleets as compact owner-coloured counters; your idle fleets breathe softly while you plan; planned routes as
+ *    one dashed line with a head (a seize ends in a target reticle). Garrison numbers only for the hovered / selected
+ *    star and the current drag or seize target.
+ *  DETAIL (close) - the full tabletop.
+ *    + painted miniatures on bases, orbiting bodies, orbital structures, and a small garrison figure under each name.
+ */
+export const sstep = (a: number, b: number, x: number) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+export interface ZoomW { s: number; o: number; d: number }
+/** How much of each tier's representation to draw at on-screen median region radius zr (sums to 1). */
+export function zoomW(zr: number, coarse = coarsePointer()): ZoomW {
+  const [a, b] = tierThresholds(coarse);
+  const s = 1 - sstep(a * 0.8, a * 1.15, zr);
+  const d = sstep(b * 0.82, b * 1.18, zr);
+  return { s, o: Math.max(0, 1 - s - d), d };
+}
+/** How much the system art grows when zoomed in (1 up to the operational zoom). */
+export const artGrow = (zr: number) => Math.max(1, Math.min(3.5, zr / 105));
+/** A star's drawn size relative to its footprint: a small glowing point when zoomed out, the full painted star in
+ *  the middle, growing with the region when zoomed in. Continuous in zr. */
+export function starScale(zr: number): number {
+  const lo = 0.4 + 0.6 * sstep(46, 112, zr);
+  return lo * (1 + 0.6 * sstep(130, 230, zr)) * Math.sqrt(artGrow(zr));
+}
+/** A system's star radius in screen px at zoom zr. */
+export function starPx(r: Region, zr: number): number {
+  if (r.kind === 'void') return 2.5;
+  const big = STAR_NODE[starKindOf(r)].foot + (r.kind === 'crown' ? 2 : r.kind === 'home' ? 1.5 : 0);
+  return big * starScale(zr);
+}
+/** A fleet token's radius (screen px) at zoom zr: pip, counter, miniature base. */
+export function tokR(zr: number, coarse = coarsePointer()): number {
+  const w = zoomW(zr, coarse);
+  return w.s * 6 + w.o * 11 + w.d * 22 * Math.pow(artGrow(zr), 0.75);
 }
 
-/** Where an owner's token parks in region r (world units), for `scale` world units per screen px. */
-export function anchorOf(r: Region, owner: number, tier: Tier, scale: number, k = 1): Pt {
-  const s = isLane(r) ? laneSlot(owner) : slotFor(tier, owner);
-  return { x: r.site.x + s.dx * scale * k, y: r.site.y + s.dy * scale * k };
+// ------------------------------------------------------------------ fleet anchor slots
+/** Fleets park beside their star (a short tether to it): yours on the left, rivals opposite on the right (a second
+ *  rival up and to the right), the Warden above. The name sits under the star, so tokens never cover it. Relative
+ *  to the viewer, so "mine" is always on the same side; spectators see seat 0 on the left. */
+let viewer: number | null = null;
+export function setViewer(you: number | null) { viewer = you; }
+export interface Slot { dx: number; dy: number; side: -1 | 1 }
+const DIRS = { mine: { dx: -0.97, dy: -0.24 }, a: { dx: 0.97, dy: -0.24 }, b: { dx: 0.45, dy: -0.89 }, warden: { dx: -0.45, dy: -0.89 } };
+export function slotFor(_tier: Tier | null, owner: number): Slot {
+  if (owner < 0) return { ...DIRS.warden, side: -1 };
+  const me = viewer ?? 0;
+  if (owner === me) return { ...DIRS.mine, side: -1 };
+  // the rival with the lower seat number after you takes the right, the other above-right
+  const others = [0, 1, 2].filter(x => x !== me);
+  return owner === others[0] ? { ...DIRS.a, side: 1 } : { ...DIRS.b, side: 1 };
+}
+/** Fleets on a hyperlane waypoint: on the dot itself; other owners nudged across it. */
+export function laneSlot(owner: number): Slot {
+  const me = viewer ?? 0;
+  if (owner === me) return { dx: 0, dy: 0, side: -1 };
+  return owner < 0 ? { dx: 0, dy: -14, side: 1 } : owner === [0, 1, 2].filter(x => x !== me)[0] ? { dx: 12, dy: -8, side: 1 } : { dx: -12, dy: -8, side: -1 };
+}
+/** Kept for callers of the old API (no longer scales anything). */
+export function slotScale(_tier: Tier, _screenR: number): number { return 1; }
+
+/** Where an owner's token parks in region r (world units), for `scale` world units per screen px; zr = the on-screen
+ *  median region radius (px) the distances are sized for. */
+export function anchorOf(r: Region, owner: number, scale: number, zr: number): Pt {
+  if (isLane(r)) { const s = laneSlot(owner); return { x: r.site.x + s.dx * scale, y: r.site.y + s.dy * scale }; }
+  const s = slotFor(null, owner);
+  const d = starPx(r, zr) + 7 + tokR(zr);
+  return { x: r.site.x + s.dx * d * scale, y: r.site.y + s.dy * d * scale };
 }
 
 // ------------------------------------------------------------------ hyperlanes (shared/ may add `kind: 'lane'` waypoint regions)

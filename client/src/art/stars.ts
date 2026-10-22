@@ -215,7 +215,7 @@ function fogify(cv: HTMLCanvasElement) {
 }
 
 interface Sprite { img: HTMLCanvasElement; R: number; size: number }
-const cache = new SpriteCache<Sprite>(120);
+const cache = new SpriteCache<Sprite>(320);   // kinds x fog x size buckets a continuous zoom passes through
 const MAX_R = 84;
 function bucket(px: number) { return Math.max(2, Math.round(Math.pow(2, Math.round(Math.log2(Math.max(2, px)) * 3) / 3))); }
 
@@ -274,7 +274,9 @@ export function starSprite(kind: StarKind, Rdev: number, fog = false, lazy = tru
   let set = have.get(base);
   if (!set) { set = new Set(); have.set(base, set); }
   const key = `${kind}|${R}|${fog ? 1 : 0}`;
-  if (lazy && R > 20 && !(set.has(R) && cache.has(key))) {
+  // any size not baked yet is stood in for by the nearest baked one (a smooth zoom crosses many buckets: baking
+  // them all synchronously stalled the frame); the exact size lands in idle time
+  if (lazy && R > 5 && !(set.has(R) && cache.has(key))) {
     bakeLater(`star:${key}`, R, () => { bake(kind, R, fog); set!.add(R); });
     let best = -1;
     for (const r of set) if (cache.has(`${kind}|${r}|${fog ? 1 : 0}`) && (best < 0 || Math.abs(Math.log(r / R)) < Math.abs(Math.log(best / R)))) best = r;
@@ -382,6 +384,9 @@ export function drawSpecks(g: CanvasRenderingContext2D, x: number, y: number, fo
     const phi = t * w + h2(seed, i + 3) * TAU;
     const px = x + Math.cos(phi) * R, py = y + Math.sin(phi) * R * ORBIT_FLAT;
     if (b.kind === 'belt') {
+      // a belt reads as rubble strewn along its orbit: a faint band under the rocks
+      g.save(); g.strokeStyle = fog ? 'rgba(142,138,144,0.25)' : 'rgba(205,191,164,0.28)'; g.lineWidth = 2.6 * u; g.lineCap = 'round';
+      g.beginPath(); g.ellipse(x, y, R, R * ORBIT_FLAT, 0, phi - 1.05, phi + 1.05); g.stroke(); g.restore();
       g.fillStyle = fog ? '#8e8a90' : '#cdbfa4';
       for (let k = 0; k < 13; k++) {
         const a = phi - 0.9 + k * 0.15 + (h2(seed, k + 40) - 0.5) * 0.08;

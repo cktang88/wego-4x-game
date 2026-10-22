@@ -9,31 +9,30 @@ import { drawShip, drawPlumes, gunPoints } from '../art/ships.ts';
 import { scheme } from '../art/palette.ts';
 import { CLASS_RANK, classLen } from '../art/palette.ts';
 import { drawBase, drawStand, formation, BASE_SQUASH } from '../art/minis.ts';
-import { drawBodyShadow, onArtReady, artGeneration } from '../art/planets.ts';
+import { drawBodyShadow, artGeneration } from '../art/planets.ts';
 import { drawStarNode, starKindOf, STAR_NODE, drawOrbitLines, drawSpecks, drawTwinkle, drawPulsarBeams, drawAccretionShimmer } from '../art/stars.ts';
 import { matBackdrop, lampOverlay, weaveTile, nebulaPrint, starfield } from '../art/mat.ts';
 import { drawGlow, beam, tracer, fireball, smoke, stamp, shieldHit } from '../art/fx.ts';
-import { enamel, gunmetal, topGlint, stampedText, type Rim } from '../art/plates.ts';
+import { enamel } from '../art/plates.ts';
 import { drawStructure, shieldDome, rockSprite, buoySprite, type Structure } from '../art/structures.ts';
 import { rgb as rgbA, css as cssA, mix as mixA, h2 } from '../art/util.ts';
 import { Rng, hashString } from '../../../shared/sim/rng.ts';
 import { pointInPoly } from '../../../shared/sim/mapgen.ts';
 import { TRAITS as WORLD_TRAITS, VEINS } from '../../../shared/config/empire.ts';
 import { connected, supplied, maxDevAt } from '../../../shared/sim/empire.ts';
-import { citizenCap, sysOn } from '../../../shared/sim/systems.ts';
 import { contestOn, systemStatus } from '../../../shared/sim/contest.ts';
 import { STARS } from '../../../shared/config/systems.ts';
 import { battleViewerOpen } from './battle.ts';
 import { uiScale } from '../ui/dom.ts';
 import { drawIcon, fillIconText, measureIconText, icFor, type IconName } from '../art/icons.ts';
 import {
-  type Tier, type Lens, coarsePointer, medianRegionRadius, tierFor, slotFor, slotScale, anchorOf, powerOf, garrisonPower,
-  garrisonMax, regionEdges, empireLabels, nearestRegion, ROMAN, isLane, hyperlanes,
+  type Tier, type Lens, type ZoomW, coarsePointer, medianRegionRadius, tierFor, slotFor, anchorOf, powerOf, garrisonPower,
+  garrisonMax, regionEdges, empireLabels, nearestRegion, isLane, hyperlanes, zoomW, starPx, tokR, artGrow, setViewer,
 } from './mapmodel.ts';
 import { fleetSpeed, within, findPath } from '../../../shared/sim/graph.ts';
 import {
-  TAU, numFont, nameFont, displayFont, PLATE, INK, desat, inkOn, roundRect, shieldPath, diamondPath, chevronPath, swords,
-  crownGlyph, starGlyph, planet, haloText, letterSpaced, buildingIcon, TRAY_ORDER, hatchTile, hexA as hexA0,
+  TAU, numFont, displayFont, PLATE, INK, desat, inkOn, roundRect, shieldPath, chevronPath, swords,
+  planet, haloText, letterSpaced, hatchTile, hexA as hexA0,
 } from './glyphs.ts';
 
 export type { Tier, Lens } from './mapmodel.ts';
@@ -148,9 +147,12 @@ export class MapRenderer {
   private asteroidCache = new Map<number, Pt[]>();
   private seed = -1;
   fitted = false;
-  private labelBoxes: { x: number; y: number; w: number; h: number }[] = [];
-  /** names hidden by collisions: revealed on hover */
-  private hiddenLabels = new Map<number, { x: number; y: number; w: number; h: number; name: string; font: string }>();
+  /** intel signal markers drawn this frame (world centre), for the tooltip */
+  private signalHits: { x: number; y: number; text: string }[] = [];
+  /** the star under the mouse this frame (hover reveals its name and garrison) */
+  private hovStar: number | null = null;
+  /** battle markers drawn this frame (world centre, radius in design px), for the tooltip */
+  private battleHits: { rid: number; x: number; y: number; r: number }[] = [];
   private hatch: { cut: CanvasPattern | null; dark: CanvasPattern | null } = { cut: null, dark: null };
 
   // ---- semantic zoom
@@ -215,8 +217,10 @@ export class MapRenderer {
     canvas.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') this.mouse = null; }, { passive: true });
     // labels are cached in the static layer: redraw once web fonts arrive
     document.fonts?.ready.then(() => this.invalidate()).catch(() => { /* */ });
-    // planets painted in idle time: refresh the cached layer when they land
-    onArtReady(() => this.invalidate());
+    // sprites painted in idle time (stars, planets) are drawn in the per-frame pass, which picks them up on the next
+    // frame: the cached layer holds no such art, so a bake landing must not force a rebuild (it did, every frame,
+    // while zooming)
+    this.bindTip();
   }
 
   resize() {
@@ -246,16 +250,52 @@ export class MapRenderer {
     const zz = z !== undefined && Number.isFinite(z) && z > 0 ? z : this.cam.z;
     if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
     const to = { x: p.x, y: p.y, z: zz };
+    this.zoomAnim = null;
     if (reducedMotion() || dur <= 0) { this.cam = { ...to }; this.camAnim = null; return; }
     this.camAnim = { from: { ...this.cam }, to, t0: performance.now(), dur, set: { ...this.cam } };
   }
-  get flying() { return !!this.camAnim; }
+  get flying() { return !!this.camAnim || !!this.zoomAnim; }
+  /** Eased zoom by `factor` about screen point (sx, sy) (wheel notches, double-click, zoom buttons): the world point
+   *  under (sx, sy) stays put while the zoom glides over `dur` ms; consecutive calls retarget the same glide, so a
+   *  fast wheel spin is one smooth motion. Reduced motion: instant. Pinch should keep setting cam.z directly. */
+  zoomAt(sx: number, sy: number, factor: number, dur = 240) {
+    if (!(factor > 0) || !Number.isFinite(factor)) return;
+    const Z = this.zoomAnim;
+    const base = Z ? Z.to : this.cam.z;
+    const to = Math.max(0.12, Math.min(3, base * factor));
+    const w = this.toWorld(sx, sy);
+    this.camAnim = null;
+    if (reducedMotion() || dur <= 0) {
+      this.cam.z = to;
+      const a = this.toWorld(sx, sy);
+      this.cam.x += w.x - a.x; this.cam.y += w.y - a.y;
+      this.zoomAnim = null;
+      return;
+    }
+    this.zoomAnim = { sx, sy, wx: w.x, wy: w.y, from: this.cam.z, to, p: 0, last: performance.now(), dur, set: { ...this.cam } };
+  }
+  private zoomAnim: { sx: number; sy: number; wx: number; wy: number; from: number; to: number; p: number; last: number; dur: number; set: Cam } | null = null;
   /** Is world point p inside the viewport, with a margin in screen px? */
   onScreen(p: Pt, margin = 40) {
     const s = this.toScreen(p);
     return s.x >= margin && s.y >= margin && s.x <= this.w - margin && s.y <= this.h - margin;
   }
   private stepCam(now: number) {
+    const Zm = this.zoomAnim;
+    if (Zm) {
+      if (Math.abs(this.cam.x - Zm.set.x) > 1e-6 || Math.abs(this.cam.y - Zm.set.y) > 1e-6 || Math.abs(this.cam.z - Zm.set.z) > 1e-9) this.zoomAnim = null;
+      else {
+        // progress by frame time, capped per frame: a slow frame stretches the glide instead of skipping it
+        const nowT = performance.now();
+        Zm.p += Math.min(34, nowT - Zm.last) / Zm.dur; Zm.last = nowT;
+        const t = clamp01(Zm.p);
+        const e = easeOutCubic(t);
+        const z = Math.exp(Math.log(Zm.from) + (Math.log(Zm.to) - Math.log(Zm.from)) * e);
+        this.cam = { x: Zm.wx - (Zm.sx - this.w / 2) / z, y: Zm.wy - (Zm.sy - this.h / 2) / z, z };
+        Zm.set = { ...this.cam };
+        if (t >= 1) this.zoomAnim = null;
+      }
+    }
     const A = this.camAnim;
     if (!A) return;
     // somebody else moved the camera (drag, pinch, wheel): hand control back immediately
@@ -362,7 +402,7 @@ export class MapRenderer {
     for (const h of this.tokHits) if (h.hit.region === region && h.hit.owner === owner) return this.toScreen(h);
     const r = this.lastState?.regions[region];
     if (!r) return { x: this.w / 2, y: this.h / 2 };
-    return this.toScreen(anchorOf(r, owner, this.tier, this.px(1), this.slotK()));
+    return this.toScreen(anchorOf(r, owner, this.px(1), this.zr));
   }
 
   /** Phone-sized viewport: smaller labels, bigger touch targets. */
@@ -383,9 +423,12 @@ export class MapRenderer {
     if (!st) return 'operational';
     return tierFor(medianRegionRadius(st) * this.zd, prev, this.coarse);
   }
-  private slotK() { return this.lastState ? slotScale(this.tier, medianRegionRadius(this.lastState) * this.zd) : 1; }
-  /** How much the system art (planets, structures, minis) grows at detail zoom (1 elsewhere). */
-  private artK() { return this.lastState ? slotScale('detail', medianRegionRadius(this.lastState) * this.zd) : 1; }
+  /** On-screen median region radius (design px): the one number every zoom-dependent size and fade is a function of. */
+  private get zr() { return this.lastState ? medianRegionRadius(this.lastState) * this.zd : 112; }
+  /** This frame's tier weights (strategic / operational / detail representations fade over a zoom range). */
+  private zw: ZoomW = { s: 0, o: 1, d: 0 };
+  /** How much the system art (planets, structures, minis) grows when zoomed in (1 up to operational). */
+  private artK() { return artGrow(this.zr); }
 
   /** Cached static layer (background, regions, borders, banners): redrawn only when its inputs change. */
   private layer: HTMLCanvasElement | null = null;
@@ -413,12 +456,14 @@ export class MapRenderer {
     this.stepCam(now);
     const prevTier = this._tier;
     this._tier = this.computeTier(prevTier);
+    this.zw = zoomW(this.zr, this.coarse);
+    setViewer(I.you);
     this.trackOwners(I);
     this.rememberGarrisons(I);
     const lens = I.lens ?? 'political';
     // hover & selection live in the dynamic pass (faded), so they don't force a rebuild of the static layer
     const base = [this.objId(st), this.staticSig(I), this.objId(I.visible), I.visible.size, I.you, I.owners.join(','), W, H, this.dpr, this.ui,
-      I.cutOff ? `${this.objId(I.cutOff)}:${I.cutOff.size}` : 0, this._tier, lens, I.peek ? 1 : 0, I.selectedRegion ?? -1, this.lkVer, this.coarse ? 1 : 0].join('|');
+      I.cutOff ? `${this.objId(I.cutOff)}:${I.cutOff.size}` : 0, lens, I.peek ? 1 : 0, this.coarse ? 1 : 0].join('|');
     const cam = this.cam;
     if (!this.lastCam || cam.x !== this.lastCam.x || cam.y !== this.lastCam.y || cam.z !== this.lastCam.z) { this.camMovedAt = now; this.lastCam = { ...cam }; }
     if (!this.layer || this.layer.width !== W || this.layer.height !== H) {
@@ -434,11 +479,11 @@ export class MapRenderer {
     const fast = base === this.layerKey && moving && !!lc && !!this.bgCanvas && Math.abs(Math.log(cam.z / lc.z)) < 1.2;
     if (!fast && (base !== this.layerKey || !camSame)) {
       // tier switch: keep a snapshot of the old layer and crossfade it out (text never scales; the content swaps)
-      if (prevTier && prevTier !== this._tier && this.layerKey && lc && !reducedMotion()) {
+      if (this.layerKey && lc && !reducedMotion() && (prevTier !== this._tier || Math.abs(Math.log(cam.z / lc.z)) > 0.02)) {
         const spare = this.fade?.c ?? this.fadeSpare;
         const c = spare && spare.width === W && spare.height === H ? spare : document.createElement('canvas');
         this.fadeSpare = c;
-        c.width = W; c.height = H;
+        if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
         const x = c.getContext('2d')!;
         x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, W, H); x.drawImage(this.layer, 0, 0);
         this.fade = { c, cam: { ...lc }, t0: now };
@@ -483,12 +528,18 @@ export class MapRenderer {
       for (const rid of I.unsupplied) { const r = st.regions[rid]; if (!r || r.kind === 'void') continue; path(ctx, r.poly); ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fill(); }
     }
     this.drawRegionSelection(I);
+    this.hovStar = this.hoverStar(I);
     this.drawLaneFocus(I);
-    // animated parts of sites (culled to the view)
-    { const a = this.toWorld(-40, -40), b = this.toWorld(this.w + 40, this.h + 40); this.view = { x0: a.x, y0: a.y, x1: b.x, y1: b.y }; }
+    // the board: empire names, stars, their animated parts, names in space (culled with a wide margin: nothing pops)
+    { const a = this.toWorld(-200, -200), b = this.toWorld(this.w + 200, this.h + 200); this.view = { x0: a.x, y0: a.y, x1: b.x, y1: b.y }; }
+    this.reticleLast = this.reticleNow; this.reticleNow = new Set();
+    this.drawEmpireNames(I);
+    this.drawStars(I);
     for (const r of st.regions) this.drawSiteAnim(r, I, this.colorOf(st, I.owners[r.id]));
+    this.drawNames(I);
     this.drawDynamic(I);
     ctx.restore();
+    this.updateTip(I);
   }
 
   /** Draw a cached full-canvas layer rendered at camera `lc` under the current camera (dpr transform already set). */
@@ -625,7 +676,9 @@ export class MapRenderer {
     }
 
     const political = lens === 'political';
-    const fillA = tier === 'strategic' ? 0.44 : tier === 'operational' ? 0.17 : 0.12;
+    const W = this.zw;
+    // bold, flat owner colour (a board game's territories): strongest zoomed out, still clear up close
+    const fillA = W.s * 0.5 + W.o * 0.34 + W.d * 0.26;
     const { conn, sup } = this.supplySets(I);
     // ---------------------------------------------------------------- region fills + terrain textures
     for (const r of st.regions) {
@@ -633,7 +686,7 @@ export class MapRenderer {
       const owner = I.owners[r.id];
       const c = this.regionColor(st, owner);
       path(ctx, r.poly);
-      if (owner === null || owner === undefined) ctx.fillStyle = 'rgba(40,30,70,0.30)';
+      if (owner === null || owner === undefined) ctx.fillStyle = 'rgba(40,30,70,0.26)';
       else ctx.fillStyle = political ? hexA(c, fillA) : hexA(desat(c, 0.8), 0.12);
       ctx.fill();
       // terrain by texture only: void is black and starless, a nebula a soft haze, an asteroid field speckle
@@ -646,10 +699,10 @@ export class MapRenderer {
       if (r.feature === 'asteroids') {
         // a rendered rock field: lit lumps with tiny shadows (screen-constant size, fixed on the mat)
         const pts = this.asteroidCache.get(r.id) ?? [];
-        const big = tier !== 'strategic';
+        const big = W.s < 0.5;
         pts.forEach((p, i) => {
           if (i % (big ? 2 : 3)) return;
-          const sz = ((big ? 1.8 : 1.2) + ((i * 7) % 5) * (big ? 0.55 : 0.3)) * (tier === 'detail' ? Math.sqrt(this.artK()) : 1);
+          const sz = ((big ? 1.8 : 1.2) + ((i * 7) % 5) * (big ? 0.55 : 0.3)) * Math.pow(this.artK(), 0.5);
           const spr = rockSprite(i, sz * this.rdpr);
           const w = (spr.width / this.rdpr) * S;
           ctx.drawImage(spr, p.x - w / 2, p.y - w / 2, w, w);
@@ -670,7 +723,7 @@ export class MapRenderer {
     ctx.strokeStyle = 'rgba(170,150,230,0.10)'; ctx.lineWidth = S;
     for (const r of st.regions) { if (r.poly.length > 2) { path(ctx, r.poly); ctx.stroke(); } }
     const edges = regionEdges(st);
-    const bw = (tier === 'strategic' ? 5 : tier === 'operational' ? 3.4 : 3) * (political ? 1 : 0.6);
+    const bw = (W.s * 4.6 + W.o * 3.4 + W.d * 3) * (political ? 1 : 0.6);
     // one clip (the owner's territory) and one stroke (its outer edges) per owner: the band sits inside the border
     for (const pl of st.players) {
       const mine = st.regions.filter(r => I.owners[r.id] === pl.id && r.poly.length > 2);
@@ -693,37 +746,38 @@ export class MapRenderer {
       ctx.strokeStyle = 'rgba(2,2,8,0.7)'; ctx.lineWidth = 1.3 * S; ctx.stroke();
     }
 
-    // ---------------------------------------------------------------- hyperlanes: etched routes on the mat, beacon buoys
+    // ---------------------------------------------------------------- hyperlanes: a quiet etched thread on the mat
     {
-      const strat = tier === 'strategic';
       ctx.save();
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       ctx.beginPath();
       for (const L of hyperlanes(st)) { L.pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); }
-      // a quiet thread by default (the lanes touching a hovered/selected star or your fleet's reach are lit in the
-      // dynamic pass, see drawLaneFocus): a faint groove and a thin pale core, dim waypoint buoys
-      ctx.strokeStyle = 'rgba(0,0,8,0.3)'; ctx.lineWidth = (strat ? 2.6 : 3.4) * S; ctx.stroke();
-      ctx.strokeStyle = strat ? 'rgba(200,215,255,0.22)' : 'rgba(210,222,255,0.22)'; ctx.lineWidth = (strat ? 1 : 1.1) * S; ctx.stroke();
-      const dr = (strat ? 2.2 : 3.4);
-      const buoy = buoySprite(dr * this.rdpr, false);
-      const bw = (buoy.width / this.rdpr) * S;
-      ctx.globalAlpha = 0.42;
-      for (const r of st.regions) if (isLane(r)) ctx.drawImage(buoy, r.site.x - bw / 2, r.site.y - bw / 2, bw, bw);
+      // lanes touching a hovered/selected star, your selected fleet's reach and routes are lit in the dynamic pass
+      // (drawLaneFocus); waypoint buoys only show there, or faintly up close
+      const lw = W.s * 1 + (1 - W.s) * 1.1;
+      ctx.strokeStyle = 'rgba(0,0,8,0.28)'; ctx.lineWidth = (lw + 1.8) * S; ctx.stroke();
+      ctx.strokeStyle = 'rgba(205,218,255,0.2)'; ctx.lineWidth = lw * S; ctx.stroke();
+      if (W.d > 0.02) {
+        const buoy = buoySprite(3 * this.rdpr, false);
+        const bwd = (buoy.width / this.rdpr) * S;
+        ctx.globalAlpha = 0.3 * W.d;
+        for (const r of st.regions) if (isLane(r)) ctx.drawImage(buoy, r.site.x - bwd / 2, r.site.y - bwd / 2, bwd, bwd);
+      }
       ctx.restore();
     }
 
-    // ---------------------------------------------------------------- supply: cut-off hatch (every tier), network lines (detail / lens)
+    // ---------------------------------------------------------------- supply: cut-off hatch (every tier), network lines (lens / peek)
     const cut = this.cutOffOf(I);
     if (cut?.size) {
       for (const rid of cut) {
         const r = st.regions[rid];
         if (!r) continue;
         path(ctx, r.poly);
-        if (this.hatch.cut) { ctx.globalAlpha = lens === 'supply' ? 1 : 0.65; ctx.fillStyle = this.hatch.cut; ctx.fill(); ctx.globalAlpha = 1; }
-        ctx.save(); ctx.setLineDash([7 * S, 5 * S]); ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.6 * S; ctx.stroke(); ctx.restore();
+        if (this.hatch.cut) { ctx.globalAlpha = lens === 'supply' ? 1 : 0.55; ctx.fillStyle = this.hatch.cut; ctx.fill(); ctx.globalAlpha = 1; }
+        ctx.save(); ctx.setLineDash([7 * S, 5 * S]); ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1.4 * S; ctx.stroke(); ctx.restore();
       }
     }
-    if ((tier === 'detail' || lens === 'supply' || I.peek) && conn && I.you !== null) {
+    if ((lens === 'supply' || I.peek) && conn && I.you !== null) {
       const c = this.regionColor(st, I.you);
       ctx.save();
       ctx.strokeStyle = hexA(c, lens === 'supply' ? 0.85 : 0.45); ctx.lineWidth = (lens === 'supply' ? 3 : 2) * S; ctx.lineCap = 'round';
@@ -737,7 +791,7 @@ export class MapRenderer {
       ctx.stroke();
       ctx.restore();
     }
-    if (tier !== 'strategic' || lens === 'supply') {
+    if (W.d > 0.5 || lens === 'supply') {
       const gates = new Map<number, Region[]>();
       for (const r of st.regions) if (r.buildings.gate && r.owner !== null && I.owners[r.id] === r.owner) { const a = gates.get(r.owner) ?? []; a.push(r); gates.set(r.owner, a); }
       ctx.save();
@@ -748,152 +802,32 @@ export class MapRenderer {
       }
       ctx.restore();
     }
-
-    // ---------------------------------------------------------------- empire names across their territory (strategic)
-    if (tier === 'strategic' && !I.peek) {
-      for (const L of empireLabels(st, I.owners)) {
-        const pl = st.players[L.owner];
-        const name = pl.name.toUpperCase();
-        const span = L.span * this.cam.z;
-        // one line if it fits, else split at the middle word; size measured to the territory's width
-        const words = name.split(/\s+/);
-        const lines = words.length > 1 && span < name.length * 15 ? [words.slice(0, Math.ceil(words.length / 2)).join(' '), words.slice(Math.ceil(words.length / 2)).join(' ')] : [name];
-        const widthAt = (fs: number) => { ctx.font = displayFont(fs * S); return Math.max(...lines.map(l => ctx.measureText(l).width / S + fs * 0.18 * (l.length - 1))); };
-        let fs = 30;
-        const w30 = widthAt(30);
-        fs = Math.min(this.compact ? 18 : 26, (30 * span * 0.95) / Math.max(1, w30));
-        // a territory too small for a readable name gets none (its worlds' plates still name the owner)
-        if (fs < 13) continue;
-        ctx.font = displayFont(fs * S);
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.globalAlpha = political ? 0.6 : 0.3;
-        ctx.lineWidth = 3 * S; ctx.strokeStyle = 'rgba(5,3,12,0.6)'; ctx.lineJoin = 'round';
-        ctx.fillStyle = hexA(pl.color, 1);
-        const lh = fs * 1.1 * S;
-        lines.forEach((l, i) => letterSpaced(ctx, l, L.p.x, L.p.y + (i - (lines.length - 1) / 2) * lh, fs * 0.18 * S, true));
-        ctx.globalAlpha = 1; ctx.textBaseline = 'alphabetic';
-      }
-    }
-
-    // ---------------------------------------------------------------- sites & banners
-    this.labelBoxes = [];
-    this.hiddenLabels.clear();
-    this.bannerHits = [];
-    const prio = (r: Region) => (r.id === I.selectedRegion ? -1 : ({ throne: 0, crown: 1, home: 2, relic: 3, colony: 4, void: 5 } as Record<string, number>)[r.kind] ?? 6);
-    const order = st.regions.filter(r => !isLane(r)).sort((a, b) => prio(a) - prio(b));
-    this.relaxPlates(I, order);
-    // planets and garrison numbers first: they are obstacles for names, and never hidden
-    for (const r of order) this.drawSiteAndCap(r, I, this.bannerTier(r, I));
-    this.tokenObstacles(I);
-    for (const r of order) this.drawBannerExtras(r, I, this.bannerTier(r, I));
-    if (lens === 'economy') for (const r of order) this.drawEconomyIcons(r, I);
+    if (lens === 'economy') for (const r of st.regions) if (!isLane(r)) this.drawEconomyIcons(r, I);
     ctx.restore();
     // the table: lamp pool and vignette over the board (screen space, static)
     if (this.lamp) ctx.drawImage(this.lamp, 0, 0, this.w, this.h);
   }
 
-  /** Fleet tokens park at fixed slots around their world: name plates (placed after) must not sit under them, or a
-   *  miniature ends up standing on a neighbouring world's name. Their boxes join the label obstacles. */
-  private tokenObstacles(I: DrawInput) {
-    if (this.tier === 'strategic' && !I.peek) return;
-    const st = I.state, S = this.px(1), k = this.slotK(), tier = this.tier;
-    const seen = new Set<string>();
-    for (const f of st.fleets) {
-      if (!f.ships.length) continue;
-      const r = st.regions[f.region];
-      if (!r || (I.you !== null && f.owner !== I.you && !I.visible.has(r.id))) continue;
-      const key = `${f.owner}:${f.region}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const a = anchorOf(r, f.owner, tier, S, k);
-      const side = slotFor(tier, f.owner).side;
-      const rb = tier === 'detail' ? 22 * Math.pow(this.artK(), 0.75) : 18;
-      const l = a.x - rb * S - (side < 0 ? 44 * S : 0), rr = a.x + rb * S + (side > 0 ? 44 * S : 0);
-      this.labelBoxes.push({ x: l, y: a.y - 42 * S, w: rr - l, h: 50 * S });
-    }
-  }
+  /** Kept for callers: banners no longer change with selection (the art never jumps in size). */
+  private bannerTier(_r: Region, _I: DrawInput): Tier { return this.tier; }
 
-  /** Strategic plates whose sites sit close together are nudged apart (≤ 16px) so numbers never overprint. */
-  private plateOff = new Map<number, Pt>();
-  private relaxPlates(I: DrawInput, regs: Region[]) {
-    this.plateOff.clear();
-    if (this.tier !== 'strategic' || I.peek) return;
-    const S = this.px(1);
-    const z = this.cam.z;
-    const items = regs.filter(r => r.kind !== 'void' && this.bannerTier(r, I) === 'strategic').map(r => ({ r, x: r.site.x * z, y: r.site.y * z, ox: 0, oy: 0, rad: r.kind === 'crown' || r.kind === 'throne' ? 21 : 15 }));
-    for (let it = 0; it < 8; it++) {
-      for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
-        const a = items[i], b = items[j];
-        const dx = (b.x + b.ox) - (a.x + a.ox), dy = (b.y + b.oy) - (a.y + a.oy);
-        const d = Math.hypot(dx, dy) || 0.01, need = a.rad + b.rad + 2;
-        if (d >= need) continue;
-        const push = (need - d) / 2, ux = dx / d, uy = dy / d;
-        a.ox -= ux * push; a.oy -= uy * push; b.ox += ux * push; b.oy += uy * push;
-      }
-      for (const q of items) { const m = Math.hypot(q.ox, q.oy); if (m > 16) { q.ox *= 16 / m; q.oy *= 16 / m; } }
-    }
-    for (const q of items) if (q.ox || q.oy) this.plateOff.set(q.r.id, { x: q.ox * S, y: q.oy * S });
-  }
-
-  private bannerTier(r: Region, I: DrawInput): Tier {
-    if (I.peek || r.id === I.selectedRegion) return 'detail';
-    return this.tier;
-  }
-
-  private siteR(r: Region, bt: Tier): number {
-    if (r.kind === 'void') return 2.5;
-    if (bt === 'strategic') return 4;
-    // the star's footprint by type (a blue giant is big, a red dwarf small); Crowns and capitals a touch grander
-    const kind = starKindOf(r);
-    const big = STAR_NODE[kind].foot + (r.kind === 'crown' ? 2 : r.kind === 'home' ? 1.5 : 0);
-    return bt === 'detail' ? big * 1.6 * this.artK() : big;
-  }
+  /** A system's star radius (design px) at the current zoom: continuous, so nothing jumps between tiers. */
+  private siteR(r: Region, _bt?: Tier): number { return starPx(r, this.zr); }
   /** A star you can't currently see (fog of war): drawn desaturated and dim. */
   private starFogged(r: Region, I: DrawInput): boolean {
     return I.you !== null && !I.visible.has(r.id) && I.owners[r.id] !== I.you;
   }
-  /** A capital's banner: a little pole with a swallow-tailed pennant in the owner's colour. */
-  private pennant(x: number, y: number, h: number, col: string, S: number) {
-    const { ctx } = this;
-    ctx.save();
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = 'rgba(5,3,12,0.85)'; ctx.lineWidth = 2.6 * S; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - h); ctx.stroke();
-    ctx.strokeStyle = '#e8dcc0'; ctx.lineWidth = 1.2 * S; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - h); ctx.stroke();
-    const fw = h * 0.7, fh = h * 0.42, top = y - h;
-    ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x - fw, top + fh * 0.1); ctx.lineTo(x - fw * 0.72, top + fh * 0.5); ctx.lineTo(x - fw, top + fh * 0.95); ctx.lineTo(x, top + fh); ctx.closePath();
-    ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = 'rgba(5,3,12,0.85)'; ctx.lineWidth = 0.9 * S; ctx.stroke();
-    ctx.beginPath(); ctx.arc(x, top, 1.4 * S, 0, TAU); ctx.fillStyle = '#ffe08a'; ctx.fill();
-    ctx.restore();
-  }
 
-  /** Banner geometry (screen px relative to the site) for region r at banner tier bt. */
-  private capGeom(r: Region, bt: Tier, txt: string) {
-    const C = this.coarse;
-    if (bt === 'strategic') {
-      const nf = C ? 14 : 13;
-      this.ctx.font = numFont(nf * this.px(1));
-      const tw = this.ctx.measureText(txt).width / this.px(1);
-      const w = Math.max(C ? 26 : 23, tw + 10), h = C ? 28 : 25;
-      return { nf, w, h, cy: 0 };
-    }
-    const nf = C ? 17 : 16;
-    this.ctx.font = numFont(nf * this.px(1));
-    const tw = this.ctx.measureText(txt).width / this.px(1);
-    const w = Math.max(C ? 30 : 27, tw + 11), h = C ? 32 : 29;
-    const pr = this.siteR(r, bt);
-    return { nf, w, h, cy: pr + 7 + h / 2 };
-  }
-
-  private garrisonText(r: Region, I: DrawInput): { txt: string; fog: boolean } {
+  private garrisonText(r: Region, I: DrawInput): { txt: string; fog: boolean; known: boolean } {
     const fog = I.you !== null && !I.visible.has(r.id) && r.owner !== I.you;
-    if (r.garrison >= 0 && !fog) return { txt: String(r.garrison), fog };
+    if (r.garrison >= 0 && !fog) return { txt: String(r.garrison), fog, known: true };
     // fogged: a neutral garrison you have a number for shows it plainly (it barely changes); a rival's is a stale
     // estimate ("~N"); never seen at all is "?"
     const lk = this.lastKnown.get(r.id);
     const known = r.garrison >= 0 ? r.garrison : lk;
-    if (known === undefined) return { txt: '?', fog };
+    if (known === undefined) return { txt: '?', fog, known: false };
     const neutral = (I.owners[r.id] ?? null) === null || (I.owners[r.id] ?? -1) < 0;
-    return { txt: neutral ? String(known) : `~${known}`, fog };
+    return { txt: neutral ? String(known) : `~${known}`, fog, known: true };
   }
 
   private sieged(r: Region, st: GameState): Engagement | true | null {
@@ -902,535 +836,298 @@ export class MapRenderer {
     return st.fleets.some(f => f.siege === r.id && f.region === r.id && f.ships.length) ? true : null;
   }
 
-  /** Literal defences under the shield cap: a tower per fortress level, guns, a dome for a planetary shield. */
-  private defenses(r: Region): { k: string; n: number }[] {
-    const b = r.buildings, out: { k: string; n: number }[] = [];
-    if (b.fortress) out.push({ k: 'fortress', n: b.fortress });
-    if (b.battery) out.push({ k: 'battery', n: b.battery });
-    if (b.pshield) out.push({ k: 'pshield', n: 1 });
-    return out;
-  }
-  /** Bottom of the cap (+ defence tab), screen px below the site, per region (filled by drawSiteAndCap). */
-  private capBottom = new Map<number, number>();
-
-  /** The planet (operational/detail) or the garrison plate (strategic), and the banner's shield cap with the garrison. */
-  private drawSiteAndCap(r: Region, I: DrawInput, bt: Tier) {
+  // ================================================================ the board: stars, objectives, names in space
+  /** Every system as its star (a small glowing point zoomed out, the painted star up close), objectives ringed in
+   *  gold, a contested system's blockade ring, and at detail zoom its orbits and orbital structures. Drawn every
+   *  frame (cheap sprite blits), so sizes follow the zoom continuously and nothing pops as the cached layer rebuilds. */
+  private drawStars(I: DrawInput) {
     const { ctx } = this;
     const st = I.state;
     const S = this.px(1);
-    const p = r.site;
-    const owner = I.owners[r.id];
-    const c = this.regionColor(st, owner);
-    const lens = I.lens ?? 'political';
-    if (r.kind === 'void') {
-      ctx.fillStyle = 'rgba(200,200,255,0.35)'; ctx.beginPath(); ctx.arc(p.x, p.y, 2 * S, 0, TAU); ctx.fill();
-      if (bt !== 'strategic') this.drawSystemMarks(r, I, bt, p.x, p.y, 3 * S);
-      return;
-    }
-    const { txt, fog } = this.garrisonText(r, I);
-    const neutral = owner === null || owner === undefined;
-    const fillC = fog ? '#5d5a74' : neutral ? '#34304a' : c;
-    const ink = fog ? '#e4e0f4' : neutral ? '#e9e6f6' : inkOn(c);
-    const kingly = r.kind === 'crown' || r.kind === 'throne';
-    const defs = this.defenses(r);
-    if (bt === 'strategic') {
-      const g = this.capGeom(r, bt, txt);
-      const po = this.plateOff.get(r.id);
-      const p = po ? { x: r.site.x + po.x, y: r.site.y + po.y } : r.site;
-      // the plate *is* the region marker at this zoom: shield for worlds, diamond for Crowns and the Throne
-      ctx.save();
-      ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 6 * S;
-      ctx.shadowOffsetY = 2 * S;
-      if (kingly) {
-        const rx = (g.w / 2 + 7) * S, ry = (g.h / 2 + 7) * S;
-        diamondPath(ctx, p.x, p.y, rx, ry);
-        ctx.fillStyle = '#000'; ctx.fill(); ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-        enamel(ctx, fillC, p.y - ry, p.y + ry, 'gold', (r.kind === 'throne' ? 3.2 : 2.4) * S);
-      } else {
-        shieldPath(ctx, p.x, p.y, g.w * S, g.h * S);
-        ctx.fillStyle = '#000'; ctx.fill(); ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-        enamel(ctx, fillC, p.y - g.h / 2 * S, p.y + g.h / 2 * S, r.kind === 'home' ? 'silver' : 'iron', (r.kind === 'home' ? 2.2 : 1.5) * S);
+    const W = this.zw;
+    const v = this.view;
+    this.bannerHits = [];
+    for (const r of st.regions) {
+      if (isLane(r)) continue;
+      const p = r.site;
+      const R = this.siteR(r);
+      const m = (R * 4 + 60) * S;
+      if (p.x + m < v.x0 || p.x - m > v.x1 || p.y + m < v.y0 || p.y - m > v.y1) continue;
+      const hr = Math.max(R + 5, this.coarse ? 16 : 12);
+      this.bannerHits.push({ rid: r.id, x: p.x, y: p.y, l: -hr, t: -hr, r: hr, b: hr });
+      if (r.kind === 'void') { ctx.fillStyle = 'rgba(200,200,255,0.3)'; ctx.beginPath(); ctx.arc(p.x, p.y, 2 * S, 0, TAU); ctx.fill(); continue; }
+      const fog = this.starFogged(r, I);
+      const kind = starKindOf(r);
+      const pr = R * S;
+      // up close the star draws back a little so its orbiting bodies have room
+      const core = STAR_NODE[kind].core * (1 - 0.38 * W.d);
+      const nb = Math.min(3, (r.bodies?.length ?? 0) + ((r.buildings.station ?? 0) > 0 ? 1 : 0));
+      if (W.d > 0.02 && nb) { ctx.save(); ctx.globalAlpha = W.d; drawOrbitLines(ctx, p.x, p.y, pr, nb, 0.8 * S, fog); ctx.restore(); }
+      drawStarNode(ctx, p.x, p.y, pr * core, R * core * this.rdpr, kind, fog);
+      if (reducedMotion() && kind === 'pulsar') drawPulsarBeams(ctx, p.x, p.y, pr * core, 0.6, r.id, fog ? 0.35 : 1);
+      // objectives: a Crown wears a gold ring, the Throne a larger double ring (hover says what they are worth)
+      if (r.kind === 'crown' || r.kind === 'throne') this.goldRing(r, R, fog);
+      if (r.kind === 'relic' && r.relic && W.d > 0.02) {
+        // an unexcavated relic: a glinting monolith drifting by the star (detail only)
+        const mx = p.x + pr * 1.1, my = p.y + pr * 0.5;
+        ctx.save(); ctx.globalAlpha = W.d; ctx.translate(mx, my); ctx.rotate(0.35);
+        const mg = ctx.createLinearGradient(-3 * S, 0, 3 * S, 0); mg.addColorStop(0, '#f4f7ff'); mg.addColorStop(0.5, '#7d86a8'); mg.addColorStop(1, '#1a1c28');
+        ctx.fillStyle = mg; ctx.fillRect(-2.5 * S, -6 * S, 5 * S, 12 * S);
+        ctx.restore();
       }
-      ctx.restore();
-      ctx.font = numFont(g.nf * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      stampedText(ctx, txt, p.x, p.y + (kingly ? 0.5 : -1.5) * S, ink, S);
-      ctx.textBaseline = 'alphabetic';
-      const hw = kingly ? g.w / 2 + 7 : g.w / 2, hh = kingly ? g.h / 2 + 7 : g.h / 2;
-      // fortified: a little tower on the plate's shoulder
-      if (defs.length && !fog) {
-        const tx = p.x + (hw - 2) * S, ty = p.y - (hh - 2) * S;
-        ctx.beginPath(); ctx.arc(tx, ty, 6.5 * S, 0, TAU); ctx.fillStyle = 'rgba(8,4,16,0.95)'; ctx.fill();
-        buildingIcon(ctx, 'fortress', tx, ty, 4 * S, STONE, 1.2 * S);
+      // a contested system: a dashed blockade ring in the colour of whoever holds space (grey: nobody)
+      if (W.s < 0.98 && contestOn(st) && r.owner !== null && r.bodies) {
+        const cs = systemStatus(st, r);
+        if (cs.contested) {
+          const hc = cs.holder === null ? '#bdb6d6' : this.colorOf(st, cs.holder);
+          const rr = pr * 1.5 + 4 * S;
+          ctx.save(); ctx.globalAlpha = 1 - W.s;
+          ctx.setLineDash([3.2 * S, 2.4 * S]);
+          ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, TAU); ctx.strokeStyle = 'rgba(5,3,12,0.85)'; ctx.lineWidth = 2.6 * S; ctx.stroke();
+          ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, TAU); ctx.strokeStyle = hc; ctx.lineWidth = 1.3 * S; ctx.stroke();
+          ctx.restore();
+        }
       }
-      this.labelBoxes.push({ x: p.x - hw * S, y: p.y - hh * S, w: hw * 2 * S, h: hh * 2 * S });
-      this.bannerHits.push({ rid: r.id, x: p.x, y: p.y, l: -hw, t: -hh, r: hw, b: hh });
-      this.drawSystemMarks(r, I, bt, p.x, p.y, Math.max(hw, hh) * S);
-      return;
+      // ---- detail: the system's orbital pieces as little modelled structures, the planetary shield as a dome
+      if (W.d > 0.02 && !fog) {
+        const b = r.buildings;
+        const list: Structure[] = [];
+        if (b.shipyard) list.push('shipyard');
+        if (b.fortress) list.push('fortress');
+        for (let i = 0; i < Math.min(3, b.battery ?? 0); i++) list.push('battery');
+        if (b.gate) list.push('gate');
+        if (b.depot) list.push('depot');
+        if (b.sensor) list.push('sensor');
+        const angs = [0.32, 2.82, 0.85, 2.3, 1.2, 1.95, 0.0];
+        const team = this.regionColor(st, I.owners[r.id]);
+        ctx.save(); ctx.globalAlpha = W.d;
+        list.slice(0, angs.length).forEach((k, i) => {
+          const a = angs[i];
+          const RR = pr * (1.55 + (i % 2) * 0.12) + 6 * S;
+          const sx = p.x + Math.cos(a) * RR, sy = p.y + Math.sin(a) * RR * 0.85;
+          const sz = (k === 'gate' ? 7 : k === 'shipyard' ? 7 : 5.5) * S * Math.sqrt(this.artK());
+          drawBodyShadow(ctx, sx + sz * 0.4, sy + sz * 0.8, sz * 1.1, 0.4);
+          drawStructure(ctx, k, team, sx, sy, sz, (sz / S) * this.rdpr);
+        });
+        if (b.pshield) shieldDome(ctx, p.x, p.y, pr * 1.28, 1.2 * S);
+        ctx.restore();
+      }
     }
-    // ---- the system IS its star: a painted star sprite (type at a glance), an owner ring, fogged stars dimmed
-    const pr = this.siteR(r, bt) * S;
-    const kind = starKindOf(r);
-    // at detail zoom the star draws back a little so its orbiting bodies have room
-    const core = STAR_NODE[kind].core * (bt === 'detail' ? 0.62 : 1);
-    const starFog = this.starFogged(r, I);
-    if (!neutral && !starFog) {
-      const halo = ctx.createRadialGradient(p.x, p.y, pr * 0.6, p.x, p.y, pr * 2.2);
-      halo.addColorStop(0, hexA(c, 0.16)); halo.addColorStop(1, hexA(c, 0));
-      ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(p.x, p.y, pr * 2.2, 0, TAU); ctx.fill();
-    }
-    // detail zoom: faint orbits for the bodies (the specks themselves ride them in the animated pass)
-    const nb = Math.min(3, (r.bodies?.length ?? 0) + ((r.buildings.station ?? 0) > 0 ? 1 : 0));
-    if (bt === 'detail' && nb) drawOrbitLines(ctx, p.x, p.y, pr, nb, 0.8 * S, starFog);
-    drawStarNode(ctx, p.x, p.y, pr * core, pr * core * this.rdpr / S, kind, starFog);
-    if (reducedMotion() && kind === 'pulsar') drawPulsarBeams(ctx, p.x, p.y, pr * core, 0.6, r.id, starFog ? 0.35 : 1);
-    // the owner's ring: a thin enamel band in their colour round the star (Crowns and the Throne in gold-edged)
-    const rr = pr * core * 1.28;
-    if (!neutral) {
-      ctx.save();
-      ctx.lineWidth = 3.2 * S; ctx.strokeStyle = 'rgba(5,3,12,0.7)'; ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, TAU); ctx.stroke();
-      ctx.lineWidth = 1.7 * S; ctx.strokeStyle = hexA(c, starFog ? 0.5 : 0.95); ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, TAU); ctx.stroke();
-      ctx.restore();
-    }
-    if (r.kind === 'throne') {
-      // the Ring Ruin: broken golden arcs around the throne star
-      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(-0.3);
+  }
+
+  /** A Crown's gold ring / the Throne's double ring and broken Ring Ruin, with a faint regal glow. */
+  private goldRing(r: Region, R: number, fog: boolean) {
+    const { ctx } = this;
+    const S = this.px(1), W = this.zw, p = r.site;
+    const throne = r.kind === 'throne';
+    const rr = Math.max(R * (throne ? 1.45 : 1.32), throne ? 10 : 7.5) * S;
+    ctx.save();
+    if (fog) ctx.globalAlpha = 0.6;
+    drawGlow(ctx, p.x, p.y, rr * 2, [255, 206, 120], (throne ? 0.3 : 0.2) * (fog ? 0.5 : 1));
+    const g = ctx.createLinearGradient(p.x, p.y - rr, p.x, p.y + rr);
+    g.addColorStop(0, '#fff3b8'); g.addColorStop(0.5, '#e2aa3a'); g.addColorStop(1, '#9a6618');
+    const ring = (rad: number, w: number) => {
+      ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, TAU); ctx.strokeStyle = 'rgba(20,12,4,0.8)'; ctx.lineWidth = (w + 1.8) * S; ctx.stroke();
+      ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, TAU); ctx.strokeStyle = g; ctx.lineWidth = w * S; ctx.stroke();
+    };
+    ring(rr, throne ? 2.2 : 1.6);
+    if (throne) ring(rr + 4 * S, 1.1);
+    if (throne && W.s < 0.98) {
+      // the Ring Ruin: broken golden arcs around the throne star (operational and closer)
+      ctx.globalAlpha *= 1 - W.s;
+      ctx.translate(p.x, p.y); ctx.rotate(-0.3);
       ctx.lineCap = 'butt';
       for (let i = 0; i < 7; i++) {
         const a0 = (i / 7) * TAU + 0.15, a1 = a0 + TAU / 7 - 0.32;
-        ctx.strokeStyle = 'rgba(20,12,4,0.85)'; ctx.lineWidth = 3.4 * S; ctx.beginPath(); ctx.ellipse(0, 0, pr * 1.6, pr * 0.62, 0, a0, a1); ctx.stroke();
-        ctx.strokeStyle = i % 2 ? '#e0aa3c' : '#ffe08a'; ctx.lineWidth = 2 * S; ctx.beginPath(); ctx.ellipse(0, 0, pr * 1.6, pr * 0.62, 0, a0, a1); ctx.stroke();
+        ctx.strokeStyle = 'rgba(20,12,4,0.85)'; ctx.lineWidth = 3.4 * S; ctx.beginPath(); ctx.ellipse(0, 0, rr * 1.35, rr * 0.55, 0, a0, a1); ctx.stroke();
+        ctx.strokeStyle = i % 2 ? '#e0aa3c' : '#ffe08a'; ctx.lineWidth = 2 * S; ctx.beginPath(); ctx.ellipse(0, 0, rr * 1.35, rr * 0.55, 0, a0, a1); ctx.stroke();
       }
-      ctx.restore();
-    }
-    if (r.kind === 'relic' && r.relic && bt !== 'detail') drawGlow(ctx, p.x + pr * 0.9, p.y + pr * 0.3, 7 * S, [200, 230, 255], 0.55);
-    if (r.kind === 'relic' && r.relic && bt === 'detail') {
-      // an unexcavated relic: a glinting monolith drifting by the star
-      const mx = p.x + pr * 1.1, my = p.y + pr * 0.5;
-      ctx.save(); ctx.translate(mx, my); ctx.rotate(0.35);
-      const mg = ctx.createLinearGradient(-3 * S, 0, 3 * S, 0); mg.addColorStop(0, '#f4f7ff'); mg.addColorStop(0.5, '#7d86a8'); mg.addColorStop(1, '#1a1c28');
-      ctx.fillStyle = mg; ctx.fillRect(-2.5 * S, -6 * S, 5 * S, 12 * S);
-      ctx.restore();
-      drawGlow(ctx, mx, my - 5 * S, 9 * S, [200, 230, 255], 0.6);
-    }
-    if (r.kind === 'crown') {
-      // a Crown star wears its crown
-      ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 3 * S; ctx.shadowOffsetY = 1 * S;
-      const cr = Math.max(5 * S, pr * 0.42), cy0 = p.y - pr - cr * 0.75;
-      const cg = ctx.createLinearGradient(0, cy0 - cr, 0, cy0 + cr);
-      cg.addColorStop(0, '#fff3b8'); cg.addColorStop(0.45, '#e2aa3a'); cg.addColorStop(1, '#7a4c10');
-      crownGlyph(ctx, p.x, cy0, cr, cg); ctx.strokeStyle = 'rgba(40,24,4,0.85)'; ctx.lineWidth = 0.8 * S; ctx.stroke();
-      ctx.restore();
-    }
-    if (r.kind === 'home' && !neutral) this.pennant(p.x + rr * 0.5, p.y - rr * 0.87, 15 * S * (bt === 'detail' ? Math.sqrt(this.artK()) : 1), c, S);
-    this.drawSystemMarks(r, I, bt, p.x, p.y, pr);
-    // ---- detail tier: the system's orbital pieces as little modelled structures
-    if (bt === 'detail' && !fog) {
-      const b = r.buildings;
-      const list: Structure[] = [];
-      if (b.shipyard) list.push('shipyard');
-      if (b.fortress) list.push('fortress');
-      for (let i = 0; i < Math.min(3, b.battery ?? 0); i++) list.push('battery');
-      if (b.gate) list.push('gate');
-      if (b.depot) list.push('depot');
-      if (b.sensor) list.push('sensor');
-      const angs = [0.32, 2.82, 0.85, 2.3, 1.2, 1.95, 0.0];
-      const team = this.regionColor(st, owner);
-      list.slice(0, angs.length).forEach((k, i) => {
-        const a = angs[i];
-        const R = pr * (1.55 + (i % 2) * 0.12) + 6 * S;
-        const sx = p.x + Math.cos(a) * R, sy = p.y + Math.sin(a) * R * 0.85;
-        const sz = (k === 'gate' ? 7 : k === 'shipyard' ? 7 : 5.5) * S * this.artK();
-        drawBodyShadow(ctx, sx + sz * 0.4, sy + sz * 0.8, sz * 1.1, 0.4);
-        drawStructure(ctx, k, team, sx, sy, sz, (sz / S) * this.rdpr);
-      });
-      if (b.pshield) shieldDome(ctx, p.x, p.y, pr * 1.28, 1.2 * S);
-    } else if (bt === 'operational' && r.buildings.pshield && !fog) shieldDome(ctx, p.x, p.y, pr * 1.3, 1 * S);
-    this.labelBoxes.push({ x: p.x - pr * 1.2, y: p.y - pr * 2.1, w: pr * 2.4, h: pr * 3.2 });
-
-    // ---- shield cap with the garrison number
-    const g = this.capGeom(r, bt, txt);
-    const cx = p.x, cy = p.y + g.cy * S;
-    this.drawCap(r, I, bt, txt, fog);
-    this.drawSoulMarks(r, I, cx, cy, g.w, g.h);
-    let bot = g.cy + g.h / 2;
-    // ---- defence tab under the cap: literal towers / guns / dome, with a level number when > 1
-    if (defs.length) {
-      const mil = lens === 'military';
-      const is = (mil ? 7.5 : 6) * S;
-      ctx.font = numFont(13 * S);
-      const parts = defs.map(d => ({ ...d, w: is * 2 + (d.n > 1 ? ctx.measureText(String(d.n)).width + 2 * S : 0) }));
-      const w = parts.reduce((a, q) => a + q.w, 0) + 4 * S * (parts.length - 1) + 10 * S;
-      const th = is * 2 + 5 * S;
-      const ty = cy + (g.h / 2 - 5) * S;
-      ctx.save();
-      if (lens === 'economy') ctx.globalAlpha = 0.55;
-      roundRect(ctx, cx - w / 2, ty, w, th, 4 * S); gunmetal(ctx, ty, ty + th, fog ? 'rgba(150,145,175,0.5)' : 'rgba(200,204,222,0.7)', 1 * S);
-      let x = cx - w / 2 + 5 * S;
-      for (const q of parts) {
-        buildingIcon(ctx, q.k, x + is, ty + th / 2, is * 0.85, fog ? '#9a97b0' : STONE, 1.3 * S);
-        if (q.n > 1) { ctx.font = numFont(13 * S); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#ffffff'; ctx.fillText(String(q.n), x + is * 2 + 1 * S, ty + th / 2 + 0.5 * S); ctx.textBaseline = 'alphabetic'; }
-        x += q.w + 4 * S;
-      }
-      ctx.restore();
-      bot = (ty + th - p.y) / S;
-      this.labelBoxes.push({ x: cx - w / 2, y: ty, w, h: th });
-    }
-    this.capBottom.set(r.id, bot);
-    const hw = g.w / 2, top = g.cy - g.h / 2;
-    this.labelBoxes.push({ x: cx - hw * S, y: p.y + top * S, w: hw * 2 * S, h: (g.cy + g.h / 2 - top) * S });
-    this.bannerHits.push({ rid: r.id, x: p.x, y: p.y, l: -hw - 4, t: top, r: hw + 4, b: bot });
-  }
-
-  /**
-   * Star systems (docs/SYSTEMS.md) around a system's node: at strategic zoom the painted star on the plate's
-   * shoulder; citizen pips (filled) up to the cap (hollow) on an arc upper right; the contested ring and tags.
-   * Stars are public map knowledge, so fog only dims them.
-   */
-  private drawSystemMarks(r: Region, I: DrawInput, bt: Tier, x: number, y: number, rad: number) {
-    if (!r.star || r.kind === 'lane') return;
-    const { ctx } = this;
-    const S = this.px(1);
-    const st = I.state;
-    const strat = bt === 'strategic';
-    const k = strat ? 1.05 : bt === 'detail' ? 1.8 : 1.45;
-    const ring = rad + (strat ? 5 : 7) * S * k;
-    const at = (deg: number, rr = ring) => ({ x: x + Math.cos((deg * Math.PI) / 180) * rr, y: y + Math.sin((deg * Math.PI) / 180) * rr });
-    ctx.save();
-    // ---- strategic zoom: the plate is the marker, so the system's star sits painted on its shoulder (at closer
-    //      zoom the node itself is the star). Bodies are only drawn at detail zoom, as orbiting specks.
-    if (strat) {
-      const kind = starKindOf(r);
-      const sp = at(232, ring + 1 * S * k);
-      const sr = (kind === 'blue' || kind === 'throne' ? 4.6 : kind === 'red' || kind === 'pulsar' ? 3.2 : 3.9) * S * k;
-      drawStarNode(ctx, sp.x, sp.y, sr, sr * this.rdpr / S, kind, this.starFogged(r, I));
-    }
-    // ---- citizens: filled pips up to the cap (hollow) on an arc, upper right
-    if (sysOn(st) && r.kind !== 'void') {
-      const cap = citizenCap(st, r) ?? 0;
-      const n = Math.min(6, Math.max(cap, r.dev));
-      const step = strat ? 15 : 13;
-      for (let i = 0; i < n; i++) {
-        const pp = at(-78 + i * step, ring - 1 * S * k);
-        const pr = 1.55 * S * k;
-        ctx.beginPath(); ctx.arc(pp.x, pp.y, pr, 0, TAU);
-        if (i < r.dev) { ctx.fillStyle = i < cap ? '#f4dc9c' : '#ffb0a0'; ctx.fill(); ctx.strokeStyle = 'rgba(40,24,4,0.9)'; ctx.lineWidth = 0.7 * S * k; ctx.stroke(); }
-        else { ctx.strokeStyle = 'rgba(244,220,156,0.6)'; ctx.lineWidth = 0.8 * S * k; ctx.stroke(); }
-      }
-    }
-    // ---- step 3: a contested system wears a dashed blockade ring in the colour of whoever holds space (grey: nobody)
-    //      and a ⛓ tag with its contested turns; an Occupied one a ⚑ tag, a Tribute-paying one a ⚖ tag (turns left)
-    if (contestOn(st) && r.owner !== null && r.bodies) {
-      const cs = systemStatus(st, r);
-      // tags stack clockwise from 32°, spaced by their own height so the readable (>= 12.5px) text never collides
-      const fz = Math.max(12.5, 8 * k), th = fz * 1.25 * S, tr = ring + Math.max(6 * S * k, th * 0.6);
-      const step = Math.max(30, (th * 1.15 / tr) * 180 / Math.PI);
-      let deg = 32;
-      const tag = (txt: string, col: string) => {
-        const p = at(deg, tr);
-        deg += step;
-        ctx.font = numFont(fz * S);
-        const w = measureIconText(ctx, txt) + fz * 0.7 * S, h = th;
-        ctx.beginPath(); ctx.roundRect(p.x - w / 2, p.y - h / 2, w, h, h / 2);
-        ctx.fillStyle = 'rgba(8,4,16,0.92)'; ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 1.1 * S * k; ctx.stroke();
-        ctx.fillStyle = '#f6ead0'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; fillIconText(ctx, txt, p.x, p.y + 0.5 * S);
-        ctx.textBaseline = 'alphabetic';
-      };
-      if (cs.contested) {
-        const hc = cs.holder === null ? '#bdb6d6' : this.colorOf(st, cs.holder);
-        const rr = ring + 2.5 * S * k;
-        ctx.setLineDash([3.2 * S * k, 2.4 * S * k]);
-        ctx.beginPath(); ctx.arc(x, y, rr, 0, TAU); ctx.strokeStyle = 'rgba(5,3,12,0.85)'; ctx.lineWidth = 2.6 * S * k; ctx.stroke();
-        ctx.beginPath(); ctx.arc(x, y, rr, 0, TAU); ctx.strokeStyle = hc; ctx.lineWidth = 1.3 * S * k; ctx.stroke();
-        ctx.setLineDash([]);
-        tag(`⛓${cs.contestedTurns}${cs.refugeesIn === 1 ? '!' : ''}`, hc);
-      }
-      if (cs.occupiedLeft > 0) tag(`⚑${cs.occupiedLeft}`, this.colorOf(st, r.owner));
-      if (cs.tribute) tag(`⚖${cs.tributeLeft}`, this.colorOf(st, cs.tribute.to));
     }
     ctx.restore();
   }
 
-  /** Soul layer on a world's banner: the calling medallion on the cap's left shoulder, ringed by tenure segments
-   *  (dormant: grey, dashed), and deed pips over the cap (an engraved deed has a gold rim). */
-  private drawSoulMarks(r: Region, I: DrawInput, cx: number, cy: number, w: number, h: number) {
-    const so = r.story, st = I.state;
-    if (!so || (I.lens ?? 'political') === 'economy') return;
-    const { ctx } = this;
-    const S = this.px(1);
-    const owner = I.owners[r.id];
-    if (so.calling && owner !== null && owner !== undefined && owner >= 0) {
-      const c = CALLINGS[so.calling.id];
-      const dorm = (so.calling.dormantUntil ?? -1) > st.turn;
-      const tier = dorm ? 0 : tenureTier(st, r);
-      const R = 8.5 * S;
-      const mx = cx - (w / 2 + 6) * S, my = cy - (h / 2 - 5) * S;
-      ctx.save();
-      ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 3 * S; ctx.shadowOffsetY = 1 * S;
-      ctx.beginPath(); ctx.arc(mx, my, R, 0, TAU);
-      ctx.fillStyle = '#000'; ctx.fill(); ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-      gunmetal(ctx, my - R, my + R, dorm ? 'rgba(140,140,150,0.6)' : '#c9a35c', 1.1 * S);
-      // tenure: three arcs around the medallion, lit as the calling grows (3, 6, 10 turns)
-      ctx.lineCap = 'butt';
-      for (let i = 0; i < 3; i++) {
-        const a0 = -Math.PI / 2 + (i * TAU) / 3 + 0.22, a1 = a0 + TAU / 3 - 0.44;
-        ctx.beginPath(); ctx.arc(mx, my, R + 2.6 * S, a0, a1);
-        ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.lineWidth = 3.4 * S; ctx.stroke();
-        ctx.beginPath(); ctx.arc(mx, my, R + 2.6 * S, a0, a1);
-        ctx.strokeStyle = i < tier ? '#ffd86b' : dorm ? 'rgba(150,150,160,0.35)' : 'rgba(200,180,140,0.32)'; ctx.lineWidth = 2 * S; ctx.stroke();
-      }
-      drawIcon(ctx, icFor('calling', so.calling.id, c?.icon), mx, my, R * 1.45, dorm ? '#9a98a6' : '#ffe2a0');
-      ctx.restore();
-      this.labelBoxes.push({ x: mx - R - 4 * S, y: my - R - 4 * S, w: (R + 4 * S) * 2, h: (R + 4 * S) * 2 });
-    }
-    if (so.deeds.length) {
-      const n = Math.min(2, so.deeds.length);
-      const y = cy - (h / 2 + 4) * S;
-      for (let i = 0; i < n; i++) {
-        const d = so.deeds[i];
-        const x = cx + (i - (n - 1) / 2) * 9 * S;
-        diamondPath(ctx, x, y, 3.4 * S, 4.2 * S);
-        ctx.fillStyle = d.engraved ? '#ffd86b' : '#d8dbe6'; ctx.fill();
-        ctx.strokeStyle = d.engraved ? '#6a420c' : 'rgba(10,10,18,0.9)'; ctx.lineWidth = 1 * S; ctx.stroke();
-      }
-    }
-  }
-
-  /** Shield cap in the owner colour holding the garrison number (gold edge for Crowns and the Throne). */
-  private drawCap(r: Region, I: DrawInput, bt: Tier, txt: string, fog: boolean) {
-    const { ctx } = this;
-    const S = this.px(1);
-    const owner = I.owners[r.id];
-    const c = this.regionColor(I.state, owner);
-    const neutral = owner === null || owner === undefined;
-    const g = this.capGeom(r, bt, txt);
-    const cx = r.site.x, cy = r.site.y + g.cy * S;
-    const kingly = r.kind === 'crown' || r.kind === 'throne';
-    ctx.save();
-    if ((I.lens ?? 'political') === 'economy') ctx.globalAlpha = 0.55;
-    ctx.shadowColor = 'rgba(0,0,0,0.65)'; ctx.shadowBlur = 5 * S; ctx.shadowOffsetY = 2 * S;
-    shieldPath(ctx, cx, cy, g.w * S, g.h * S);
-    ctx.fillStyle = '#000'; ctx.fill(); ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-    const rim: Rim = kingly ? 'gold' : r.kind === 'home' ? 'silver' : 'iron';
-    enamel(ctx, fog ? '#5d5a74' : neutral ? '#3a3650' : c, cy - g.h / 2 * S, cy + g.h / 2 * S, rim, (kingly ? 2.2 : 1.5) * S);
-    ctx.font = numFont(g.nf * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    stampedText(ctx, txt, cx, cy - g.h * 0.08 * S, fog ? '#e4e0f4' : neutral ? '#ffffff' : inkOn(c), S);
-    ctx.textBaseline = 'alphabetic';
-    ctx.restore();
-  }
-
-  /** Name plate + badges (operational), siege bar, influence bar, and the detail rows (dev pips, building tray, trait/vein). */
-  private drawBannerExtras(r: Region, I: DrawInput, bt: Tier) {
-    if (r.kind === 'void' || bt === 'strategic') return;
+  /** Empire names: large letter-spaced lettering across each territory, zoomed out only (fades as you zoom in). */
+  private empMemo: { key: string; v: { owner: number; p: Pt; span: number; n: number }[] } = { key: '', v: [] };
+  private drawEmpireNames(I: DrawInput) {
+    const a0 = this.zw.s * (I.peek ? 0.3 : 1);
+    if (a0 < 0.02) return;
     const { ctx } = this;
     const st = I.state;
     const S = this.px(1);
-    const C = this.coarse;
-    const p = r.site;
-    const owner = I.owners[r.id];
-    const lens = I.lens ?? 'political';
-    const { txt, fog } = this.garrisonText(r, I);
-    const g = this.capGeom(r, bt, txt);
-    const cx = p.x, cy = p.y + g.cy * S;
-    const kingly = r.kind === 'crown' || r.kind === 'throne';
-    const hit = (b: { x: number; y: number; w: number; h: number }) => this.labelBoxes.some(o => b.x < o.x + o.w && b.x + b.w > o.x && b.y < o.y + o.h && b.y + b.h > o.y);
-
-    // ---- name plate (right of the cap, else left of it, else hidden: names hide before numbers)
-    const nfz = C ? 14 : 13;
-    const name = r.name.toUpperCase();
-    ctx.font = nameFont(nfz * S);
-    const sp = 0.6 * S;
-    const nw = spacedWidth(ctx, name, sp);
-    const badges = this.badges(r, st);
-    const bsz = C ? 17 : 15;
-    const ph = (C ? 21 : 19) * S;
-    const bw0 = badges.length ? badges.length * (bsz + 3) * S + 2 * S : 0;
-    const plateW = 8 * S + nw + bw0 + 8 * S;
-    const py = cy - g.h * 0.1 * S - ph / 2;
-    const tuck = 5 * S;
-    const right = { x: cx + (g.w / 2) * S - tuck, y: py, w: plateW + tuck, h: ph };
-    const left = { x: cx - (g.w / 2) * S - plateW, y: py, w: plateW + tuck, h: ph };
-    const pad = (b: typeof right) => ({ x: b.x + (b === right ? tuck + 1 * S : -3 * S), y: b.y - 1.5 * S, w: b.w - tuck + 2 * S, h: b.h + 3 * S });
-    const capBot = this.capBottom.get(r.id) ?? g.cy + g.h / 2;
-    const below = { x: cx - plateW / 2, y: p.y + (capBot + 3) * S, w: plateW, h: ph };
-    let spot: typeof right | null = null;
-    if (!hit(pad(right))) spot = right; else if (!hit(pad(left))) spot = left;
-    else if (!hit({ x: below.x - 3 * S, y: below.y - 1.5 * S, w: below.w + 6 * S, h: below.h + 3 * S })) spot = below;
-    let underY = 0;
-    const nameCol = fog ? 'rgba(190,186,210,0.7)' : kingly ? 'rgba(255,232,170,0.97)' : 'rgba(232,228,250,0.95)';
-    if (spot) {
-      const isRight = spot === right;
-      if (spot === below) underY = ph + 3 * S;
+    const key = `${this.objId(st.regions)}|${I.owners.join(',')}`;
+    if (this.empMemo.key !== key) this.empMemo = { key, v: empireLabels(st, I.owners) };
+    const political = (I.lens ?? 'political') === 'political';
+    for (const L of this.empMemo.v) {
+      const pl = st.players[L.owner];
+      const name = pl.name.toUpperCase();
+      const span = L.span * this.cam.z / this.ui;
+      // one line if it fits, else split at the middle word; size measured to the territory's width
+      const words = name.split(/\s+/);
+      const lines = words.length > 1 && span < name.length * 14 ? [words.slice(0, Math.ceil(words.length / 2)).join(' '), words.slice(Math.ceil(words.length / 2)).join(' ')] : [name];
+      ctx.font = displayFont(24);
+      const w24 = Math.max(...lines.map(l => ctx.measureText(l).width + 24 * 0.3 * (l.length - 1)));
+      const fs = Math.min(this.compact ? 17 : 22, (24 * span * 0.85) / Math.max(1, w24));
+      // a territory too small for a readable name gets none
+      if (fs < 13) continue;
       ctx.save();
-      ctx.globalAlpha = lens === 'economy' ? 0.7 : 1;
-      roundRect(ctx, spot.x, spot.y, spot.w, ph, 3 * S);
-      gunmetal(ctx, spot.y, spot.y + ph, fog ? 'rgba(150,145,175,0.3)' : hexA(this.regionColor(st, owner), owner === null || owner === undefined ? 0.35 : 0.75), 1.1 * S, fog ? 0.85 : 1);
-      topGlint(ctx, spot.x + 4 * S, spot.x + spot.w - 4 * S, spot.y + 1.2 * S, 0.8 * S, fog ? 0.15 : 0.32);
+      ctx.font = displayFont(fs * S);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.globalAlpha = a0 * (political ? 0.62 : 0.3);
+      ctx.lineWidth = 2.4 * S; ctx.strokeStyle = 'rgba(5,3,12,0.55)'; ctx.lineJoin = 'round';
+      ctx.fillStyle = hexA(pl.color, 1);
+      const lh = fs * 1.15 * S;
+      lines.forEach((l, i) => letterSpaced(ctx, l, L.p.x, L.p.y + (i - (lines.length - 1) / 2) * lh, fs * 0.3 * S, true));
       ctx.restore();
-      const x0 = isRight ? spot.x + tuck : spot.x;
-      const isBelow = spot === below;
-      ctx.font = nameFont(nfz * S); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = nameCol;
-      const tx = x0 + 8 * S + (isRight || isBelow ? 0 : bw0);
-      spacedText(ctx, name, tx, spot.y + ph / 2 + 0.5 * S, sp);
-      ctx.textBaseline = 'alphabetic';
-      let bx = isRight || isBelow ? tx + nw + 4 * S + (bsz / 2) * S : x0 + 6 * S + (bsz / 2) * S;
-      for (const b of badges) { this.badge(b, bx, spot.y + ph / 2, bsz * S, fog); bx += (bsz + 3) * S; }
-      this.labelBoxes.push(spot);
-      // the cap stays in front of the tucked plate end
-      if (!isBelow) this.drawCap(r, I, bt, txt, fog);
-      this.bannerHits.push({ rid: r.id, x: p.x, y: p.y, l: (spot.x - p.x) / S, t: (spot.y - p.y) / S, r: (spot.x + spot.w - p.x) / S, b: (spot.y + spot.h - p.y) / S });
-    } else {
-      this.hiddenLabels.set(r.id, { x: right.x + tuck, y: right.y, w: plateW - bw0, h: ph, name, font: nameFont(nfz * S) });
     }
-
-    let y = p.y + (capBot + 4) * S + underY;
-    // ---- siege: crossed-swords badge + a bar that drains as the garrison falls
-    const sg = this.sieged(r, st);
-    if (sg && r.garrison >= 0) {
-      const max = garrisonMax(st, r, sg === true ? 0 : sg.garrisonStart);
-      const fr = clamp01(r.garrison / max);
-      const bw = Math.max(46, g.w + 22) * S, bh = 7 * S;
-      const bx = cx - bw / 2 + 9 * S;
-      roundRect(ctx, bx - 1.5 * S, y - 1.5 * S, bw + 3 * S, bh + 3 * S, 3 * S); ctx.fillStyle = 'rgba(5,3,12,0.92)'; ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1 * S; ctx.stroke();
-      if (fr > 0) { roundRect(ctx, bx, y, bw * fr, bh, 2 * S); ctx.fillStyle = this.regionColor(st, owner); ctx.fill(); }
-      ctx.strokeStyle = 'rgba(5,3,12,0.8)'; ctx.lineWidth = 1 * S; ctx.beginPath();
-      for (let k = 10; k < max; k += 10) { const x = bx + (bw * k) / max; ctx.moveTo(x, y); ctx.lineTo(x, y + bh); }
-      ctx.stroke();
-      const sx = bx - 10 * S, sy = y + bh / 2;
-      ctx.beginPath(); ctx.arc(sx, sy, 9 * S, 0, TAU); ctx.fillStyle = '#1b0d14'; ctx.fill();
-      ctx.strokeStyle = 'rgba(255,214,176,0.8)'; ctx.lineWidth = 1.2 * S; ctx.stroke();
-      swords(ctx, sx, sy, 5.5 * S, '#ffe7c2', 1.5 * S);
-      this.labelBoxes.push({ x: sx - 9 * S, y: y - 2 * S, w: bw + 20 * S, h: bh + 4 * S });
-      y += bh + 6 * S;
-    }
-    // ---- your influence here: ✦ and a bar in your colour
-    if (I.you !== null && r.owner !== I.you && (r.loyalty[I.you] ?? 0) > 0 && st.players[I.you]) {
-      const thr = r.owner === null ? st.rules.influence.flipThreshold : st.rules.influence.rivalFlipThreshold;
-      const fr = clamp01(r.loyalty[I.you] / Math.max(1e-6, thr));
-      const bw = 36 * S, bh = 5 * S;
-      const box = { x: cx - bw / 2 - 12 * S, y: y - 3 * S, w: bw + 14 * S, h: 12 * S };
-      if (!hit(box)) {
-        drawIcon(ctx, 'influence', cx - bw / 2 - 6 * S, y + bh / 2, 14 * S, st.players[I.you].color, { halo: 'rgba(5,3,12,0.9)', haloWidth: 1.5 * S });
-        roundRect(ctx, cx - bw / 2, y, bw, bh, 2 * S); ctx.fillStyle = 'rgba(5,3,12,0.9)'; ctx.fill();
-        roundRect(ctx, cx - bw / 2, y, Math.max(2 * S, bw * fr), bh, 2 * S); ctx.fillStyle = st.players[I.you].color; ctx.fill();
-        this.labelBoxes.push(box);
-        y += bh + 6 * S;
-      }
-    }
-
-    // ---- detail rows (and the military lens' shipyard tray)
-    if (bt !== 'detail' && lens !== 'military') return;
-    const rows: (() => void)[] = [];
-    const lineH = (C ? 18 : 16) * S;
-    if (bt === 'detail' && owner !== null && owner !== undefined && !fog) {
-      const max = (() => { try { return maxDevAt(st, r.id); } catch { return 5; } })();
-      const n = Math.max(max, r.dev);
-      const pw = 9 * S;
-      const w = n * pw;
-      const box = { x: cx - w / 2, y, w, h: 9 * S };
-      if (!hit(box)) {
-        const yy = y;
-        rows.push(() => {
-          for (let i = 0; i < n; i++) {
-            const x = cx - w / 2 + i * pw + pw / 2;
-            ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + 3.6 * S, yy + 7 * S); ctx.lineTo(x - 3.6 * S, yy + 7 * S); ctx.closePath();
-            if (i < r.dev) { ctx.fillStyle = 'rgba(255,240,200,0.95)'; ctx.fill(); } else { ctx.strokeStyle = 'rgba(220,215,245,0.45)'; ctx.lineWidth = 1 * S; ctx.stroke(); }
-          }
-        });
-        this.labelBoxes.push(box);
-        y += 11 * S;
-      }
-    }
-    const DEF = ['fortress', 'battery', 'pshield'];
-    const keys = TRAY_ORDER.filter(k => (r.buildings[k] ?? 0) > 0 && !DEF.includes(k) && (bt === 'detail' || k === 'shipyard'));
-    const proj = bt === 'detail' && r.project && !fog ? r.project : null;
-    if ((keys.length || proj) && !fog) {
-      const isz = C ? 9 : 8;
-      const cell = (isz * 2 + 6) * S;
-      const n = keys.length + (proj ? 1 : 0);
-      const w = n * cell + 6 * S, h = (isz * 2 + 8) * S;
-      const box = { x: cx - w / 2, y, w, h };
-      if (!hit(box)) {
-        const yy = y;
-        rows.push(() => {
-          roundRect(ctx, box.x, yy, w, h, 4 * S); ctx.fillStyle = PLATE; ctx.fill();
-          let x = box.x + 3 * S + cell / 2;
-          for (const k of keys) {
-            buildingIcon(ctx, k, x, yy + h / 2, isz * S, k === 'extractor' && r.vein ? (VEINS[r.vein]?.color ?? STONE) : STONE, 1.4 * S);
-            const lv = r.buildings[k] ?? 0;
-            if (lv > 1) {
-              ctx.font = numFont(13 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-              haloText(ctx, String(lv), x + isz * S, yy + h - 3 * S, '#ffffff', 'rgba(5,3,12,0.95)', 3 * S);
-              ctx.textBaseline = 'alphabetic';
-            }
-            x += cell;
-          }
-          if (proj) {
-            const key = proj.key;
-            ctx.save(); ctx.globalAlpha = 0.55;
-            if (key === 'develop') { ctx.fillStyle = STONE; ctx.beginPath(); ctx.moveTo(x, yy + 4 * S); ctx.lineTo(x + isz * S, yy + h - 6 * S); ctx.lineTo(x - isz * S, yy + h - 6 * S); ctx.closePath(); ctx.fill(); }
-            else buildingIcon(ctx, key, x, yy + h / 2 - 1 * S, isz * S, STONE, 1.4 * S);
-            ctx.restore();
-            const turns = st.rules.projects[proj.key]?.turns ?? 1;
-            const fr = clamp01(proj.progress / Math.max(1, turns));
-            ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fillRect(x - cell / 2 + 3 * S, yy + h - 4 * S, cell - 6 * S, 2.5 * S);
-            ctx.fillStyle = '#ffffff'; ctx.fillRect(x - cell / 2 + 3 * S, yy + h - 4 * S, (cell - 6 * S) * Math.max(0.08, fr), 2.5 * S);
-          }
-        });
-        this.labelBoxes.push(box);
-        y += h + 3 * S;
-      }
-    }
-    if (bt === 'detail' && st.rules.empire?.enabled !== false && (r.trait || r.vein)) {
-      const T = r.trait ? WORLD_TRAITS[r.trait] : null, V = r.vein ? VEINS[r.vein] : null;
-      const parts: { t: string; c: string }[] = [];
-      if (T) parts.push({ t: `${T.icon} ${T.name.split(' ')[0].toUpperCase()}`, c: 'rgba(225,220,248,0.9)' });
-      if (V) parts.push({ t: `${V.icon} ${V.name.toUpperCase()}`, c: (r.buildings.extractor ?? 0) > 0 ? '#ffffff' : 'rgba(225,220,248,0.75)' });
-      ctx.font = nameFont(13 * S);
-      const gap = 10 * S;
-      const ws = parts.map(q => measureIconText(ctx, q.t));
-      const w = ws.reduce((a, b) => a + b, 0) + gap * (parts.length - 1) + 12 * S;
-      const box = { x: cx - w / 2, y, w, h: lineH };
-      if (!hit(box)) {
-        const yy = y;
-        rows.push(() => {
-          roundRect(ctx, box.x, yy, w, lineH, lineH / 2); ctx.fillStyle = 'rgba(9,6,20,0.7)'; ctx.fill();
-          ctx.font = nameFont(13 * S); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-          let x = box.x + 6 * S;
-          parts.forEach((q, i) => { ctx.fillStyle = q.c; fillIconText(ctx, q.t, x, yy + lineH / 2 + 0.5 * S); x += ws[i] + gap; });
-          ctx.textBaseline = 'alphabetic';
-        });
-        this.labelBoxes.push(box);
-      }
-    }
-    for (const f of rows) f();
   }
 
-  /** At most 2 badges, in priority: Crown/Throne/relic > shipyard > warp gate > vein > academy. */
-  private badges(r: Region, st: GameState): string[] {
-    const out: string[] = [];
-    if (r.kind === 'throne') out.push('throne'); else if (r.kind === 'crown') out.push('crown'); else if (r.kind === 'relic' && r.relic) out.push('relic');
-    if (r.buildings.shipyard) out.push('shipyard');
-    if (r.buildings.gate) out.push('gate');
-    if (r.vein && st.rules.empire?.enabled !== false) out.push(`vein:${r.vein}`);
-    if (r.buildings.academy) out.push('academy');
-    return out.slice(0, 2);
+  // ---- names in space
+  /** Name layout: candidate per system (0 below, 1 right, 2 left, 3 above; -1 hidden), computed in zoom space (never
+   *  depends on the pan, so panning can't make a name pop) and only when the zoom moves a step or the board changes.
+   *  A name already shown keeps its spot while it still (nearly) fits: hysteresis instead of flicker. */
+  private nameMemo: { key: string; show: Map<number, number> } = { key: '', show: new Map() };
+  private nameA = new Map<number, number>();
+  private nameWidth = new Map<string, number>();
+  /** Name size by importance (design px): the Throne largest, Crowns and capitals next, colonies smallest. */
+  private nameFs(r: Region): number {
+    const c = this.coarse ? 0.5 : 0;
+    return (r.kind === 'throne' ? 15 : r.kind === 'crown' ? 13.5 : r.kind === 'home' ? 13 : 12) + c;
   }
-  private badge(b: string, x: number, y: number, size: number, fog: boolean) {
+  private nameW(r: Region): number {
+    const fs = this.nameFs(r), k = `${fs}|${r.name}`;
+    let w = this.nameWidth.get(k);
+    if (w === undefined) {
+      this.ctx.save(); this.ctx.font = displayFont(fs);
+      w = spacedWidth(this.ctx, r.name, fs * 0.12);
+      this.ctx.restore();
+      this.nameWidth.set(k, w);
+    }
+    return w;
+  }
+  /** How visible a system's name is at this zoom (names belong to the operational and detail views). */
+  private nameVis(_r: Region): number { return 1 - this.zw.s; }
+  private nameBox(r: Region, cand: number, R: number): { x: number; y: number; w: number; h: number } {
+    const w = this.nameW(r), h = this.nameFs(r) * 1.2;
+    return cand === 1 ? { x: R + 5, y: -h / 2, w, h } : cand === 2 ? { x: -R - 5 - w, y: -h / 2, w, h } : cand === 3 ? { x: -w / 2, y: -R - 3 - h, w, h } : { x: -w / 2, y: R + 3, w, h };
+  }
+  private layoutNames(I: DrawInput): Map<number, number> {
+    const st = I.state;
+    const qz = Math.round(Math.log(this.zd) * 40);
+    const fleetSig = st.fleets.filter(f => f.ships.length).map(f => `${f.owner}@${f.region}`).sort().join(',');
+    const key = `${this.objId(st.regions)}|${qz}|${I.you}|${this.coarse ? 1 : 0}|${this.ui}|${fleetSig}|${I.owners.join(',')}|${I.selectedRegion}`;
+    if (key === this.nameMemo.key) return this.nameMemo.show;
+    const z = Math.exp(qz / 40);
+    const zr = medianRegionRadius(st) * z;
+    const W = zoomW(zr, this.coarse);
+    const prev = this.nameMemo.show;
+    const boxes: { x: number; y: number; w: number; h: number }[] = [];
+    const sys = st.regions.filter(r => !isLane(r) && r.kind !== 'void');
+    for (const r of sys) { const R = starPx(r, zr); boxes.push({ x: r.site.x * z - R, y: r.site.y * z - R, w: R * 2, h: R * 2 }); }
+    // fleet pieces park beside their star: names must not sit under them
+    const tr = tokR(zr, this.coarse), tall = W.d * 26 * Math.pow(artGrow(zr), 0.75);
+    const seen = new Set<string>();
+    for (const f of st.fleets) {
+      const r = st.regions[f.region];
+      if (!f.ships.length || !r || isLane(r) || seen.has(`${f.owner}:${f.region}`)) continue;
+      seen.add(`${f.owner}:${f.region}`);
+      const a = anchorOf(r, f.owner, 1 / z, zr);
+      boxes.push({ x: a.x * z - tr - 2, y: a.y * z - tr - 2 - tall, w: tr * 2 + 4, h: tr * 2 + 6 + tall });
+    }
+    const hit = (b: { x: number; y: number; w: number; h: number }) => boxes.some(o => b.x < o.x + o.w && b.x + b.w > o.x && b.y < o.y + o.h && b.y + b.h > o.y);
+    const prio = (r: Region) => (r.id === I.selectedRegion ? -1 : ({ throne: 0, crown: 1, home: 2 } as Record<string, number>)[r.kind] ?? (I.owners[r.id] === I.you && I.you !== null ? 3 : 4));
+    const order = sys.slice().sort((a, b) => prio(a) - prio(b) || a.id - b.id);
+    const show = new Map<number, number>();
+    for (const r of order) {
+      if (1 - W.s < 0.02) { show.set(r.id, -1); continue; }
+      const R = starPx(r, zr), cx = r.site.x * z, cy = r.site.y * z;
+      const at = (c: number, inset: number) => { const b = this.nameBox(r, c, R); return { x: cx + b.x + b.w * inset, y: cy + b.y + b.h * inset, w: b.w * (1 - 2 * inset), h: b.h * (1 - 2 * inset) }; };
+      let pick = -1;
+      const was = prev.get(r.id) ?? -1;
+      if (was >= 0 && !hit(at(was, 0.2))) pick = was;
+      else for (let c = 0; c < 4 && pick < 0; c++) { const b = at(c, 0); if (!hit({ x: b.x - 3, y: b.y - 2, w: b.w + 6, h: b.h + 4 })) pick = c; }
+      show.set(r.id, pick);
+      if (pick >= 0) boxes.push(at(pick, 0));
+    }
+    this.nameMemo = { key, show };
+    return show;
+  }
+
+  /** The region an in-progress drag (or the selected fleet's hover preview) is aimed at. */
+  private dragTarget(I: DrawInput): number | null {
+    const D = I.drag;
+    if (!D || D.verb === 'invalid') return null;
+    for (const r of I.state.regions) if (Math.abs(r.site.x - D.to.x) < 1 && Math.abs(r.site.y - D.to.y) < 1) return r.id;
+    return null;
+  }
+
+  /** System names written in space (letter-spaced display caps with a soft dark halo, no plates), fading in and out;
+   *  and the garrison as one small figure under the name, only where it matters (hover, selection, the drag target,
+   *  Space-peek, and faintly everywhere when zoomed right in). */
+  private drawNames(I: DrawInput) {
     const { ctx } = this;
+    const st = I.state;
     const S = this.px(1);
-    const s = size / 2;
-    ctx.save();
-    if (fog) ctx.globalAlpha = 0.6;
-    if (b === 'crown') crownGlyph(ctx, x, y + 0.5 * S, s * 0.85, GOLD);
-    else if (b === 'throne') starGlyph(ctx, { x, y }, s * 0.95, 5, GOLD);
-    else if (b === 'relic') { diamondPath(ctx, x, y, s * 0.7, s * 0.9); ctx.strokeStyle = '#f2f6ff'; ctx.lineWidth = 1.5 * S; ctx.stroke(); }
-    else if (b.startsWith('vein:')) {
-      const V = VEINS[b.slice(5)];
-      drawIcon(ctx, icFor('vein', b.slice(5), V?.icon), x, y, size * 1.05, V ? desat(V.color, 0.35) : STONE);
-    } else buildingIcon(ctx, b, x, y, s * 0.78, STONE, 1.3 * S);
-    ctx.restore();
+    const W = this.zw;
+    const v = this.view;
+    const show = this.layoutNames(I);
+    const hov = this.hovStar;
+    const tgt = this.dragTarget(I);
+    const e = reducedMotion() ? 1 : 1 - Math.exp(-this.dt / 110);
+    for (const r of st.regions) {
+      if (isLane(r) || r.kind === 'void') continue;
+      const pick = show.get(r.id) ?? -1;
+      const focus = r.id === hov || r.id === I.selectedRegion || r.id === tgt;
+      const target = focus ? 1 : pick >= 0 ? this.nameVis(r) : 0;
+      const a0 = this.nameA.get(r.id) ?? (this.nameA.size ? 0 : target);
+      const a = a0 + (target - a0) * e;
+      if (a < 0.01 && target === 0) { this.nameA.delete(r.id); } else this.nameA.set(r.id, a);
+      const p = r.site;
+      if (p.x < v.x0 || p.x > v.x1 || p.y < v.y0 || p.y > v.y1) continue;
+      const R = this.siteR(r) + (this.reticleLast.has(r.id) ? 9 : 0);
+      const b = this.nameBox(r, pick >= 0 ? pick : 0, R);
+      const fog = this.starFogged(r, I);
+      const kingly = r.kind === 'crown' || r.kind === 'throne';
+      if (a >= 0.01) {
+        // drawn in screen space at a fixed font size: the text is crisp and the font string never changes with zoom
+        const fs = this.nameFs(r) * this.ui;
+        const sp = this.toScreen(p);
+        ctx.save();
+        ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+        ctx.globalAlpha = a * (fog ? 0.55 : 1);
+        ctx.font = displayFont(fs);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        const x = sp.x + b.x * this.ui, y = sp.y + (b.y + b.h / 2) * this.ui;
+        const c = ctx as CanvasRenderingContext2D & { letterSpacing?: string };
+        const ls = typeof c.letterSpacing === 'string';
+        if (ls) c.letterSpacing = `${(fs * 0.12).toFixed(1)}px`;
+        ctx.lineJoin = 'round'; ctx.lineWidth = 3.2 * this.ui; ctx.strokeStyle = 'rgba(4,2,12,0.72)';
+        if (ls) ctx.strokeText(r.name, x, y);
+        ctx.fillStyle = fog ? '#c9c4dc' : kingly ? '#ffe3a0' : r.kind === 'home' ? '#f6f1ff' : '#e6e1f6';
+        if (ls) ctx.fillText(r.name, x, y); else spacedText(ctx, r.name, x, y, fs * 0.12);
+        if (ls) c.letterSpacing = '0px';
+        ctx.restore();
+        if (pick >= 0 || focus) this.bannerHits.push({ rid: r.id, x: p.x, y: p.y, l: b.x, t: b.y, r: b.x + b.w, b: b.y + b.h });
+      }
+      // the garrison figure
+      const ga = focus || I.peek ? 1 : W.d * 0.75 * (pick >= 0 ? 1 : 0);
+      if (ga < 0.02) continue;
+      const g = this.garrisonText(r, I);
+      if (!g.known && !focus) continue;
+      const gy = pick === 0 || pick < 0 ? b.y + b.h + 2 : R + 3;
+      const u = this.ui, sp = this.toScreen(p);
+      ctx.save();
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      ctx.globalAlpha = ga * (g.fog ? 0.7 : 1);
+      ctx.font = numFont(12.5 * u); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      const tw = ctx.measureText(g.txt).width;
+      const sw = 7.5 * u, gap = 3 * u, w = sw + gap + tw;
+      const x0 = sp.x - w / 2, yc = sp.y + (gy + 8) * u;
+      shieldPath(ctx, x0 + sw / 2, yc, sw, 9 * u);
+      ctx.lineWidth = 2.6 * u; ctx.strokeStyle = 'rgba(4,2,12,0.7)'; ctx.stroke();
+      ctx.lineWidth = 1.2 * u; ctx.strokeStyle = '#d9d3ee'; ctx.stroke();
+      haloText(ctx, g.txt, x0 + sw + gap, yc + 0.5 * u, '#f3efff', 'rgba(4,2,12,0.75)', 3 * u);
+      ctx.restore();
+    }
   }
 
   /** Economy lens: veins and traits as big icons beside the planet. */
@@ -1469,7 +1166,9 @@ export class MapRenderer {
     const colorOf = (o: number | null | undefined) => this.colorOf(st, o);
 
     // ---------------------------------------------------------------- signals (intel)
+    this.signalHits = [];
     if (I.showSignals) {
+      this.routeHits = [];
       for (const sg of I.signals) {
         const r = st.regions[sg.region];
         if (!r) continue;
@@ -1480,7 +1179,8 @@ export class MapRenderer {
           const b = st.regions.find(x => x.name === m[2]);
           if (a && b) { this.arrow(a.site, b.site, c, true, '', 0.6); continue; }
         }
-        const S = this.px(1), x = r.site.x + 22 * S, y = r.site.y + 10 * S;
+        const S = this.px(1), x = r.site.x + (this.siteR(r) + 12) * S, y = r.site.y + 4 * S;
+        this.signalHits.push({ x, y, text: sg.text });
         roundRect(ctx, x - 10 * S, y - 9 * S, 20 * S, 18 * S, 5 * S); ctx.fillStyle = PLATE; ctx.fill();
         ctx.strokeStyle = c; ctx.lineWidth = 1.5 * S; ctx.stroke();
         drawIcon(ctx, 'scan', x, y, 14 * S, c);
@@ -1488,6 +1188,7 @@ export class MapRenderer {
     }
 
     // ---------------------------------------------------------------- planned orders (under the tokens)
+    this.routeHits = [];
     for (const a of I.plannedArrows) this.arrow(a.from, a.to, a.color, !!a.dashed, a.label, 1, a.kind);
     // arrows that left the plan animate in again when they come back
     for (const k of this.arrowSeen.keys()) if (!this.arrowFrame.has(k)) this.arrowSeen.delete(k);
@@ -1500,9 +1201,6 @@ export class MapRenderer {
       ctx.setLineDash([]); ctx.lineDashOffset = 0; ctx.lineCap = 'butt';
     }
 
-    // ---------------------------------------------------------------- blood-debts: a small drop of blood where the debt was made
-    this.drawDebts(I);
-
     // ---------------------------------------------------------------- fleets, battles
     this.drawTokens(I);
 
@@ -1514,36 +1212,6 @@ export class MapRenderer {
     this.ownFx = this.ownFx.filter(f => I.now - f.t0 < f.dur);
     this.drawFx(I, this.ownFx);
     this.drawParticles(I.now);
-  }
-
-  /** Uncleared blood-debts: a dark drop of blood by the world where the commander fell, rimmed in the creditor's
-   *  colour (subtle: operational and detail zoom only). */
-  private drawDebts(I: DrawInput) {
-    const st = I.state;
-    const debts = st.soul?.debts;
-    if (!debts?.length || this.tier === 'strategic') return;
-    const { ctx } = this;
-    const S = this.px(1);
-    const at = new Map<number, number[]>();
-    for (const d of debts) {
-      if (d.cleared || !st.regions[d.region]) continue;
-      if (I.you !== null && !I.visible.has(d.region) && d.creditor !== I.you && d.debtor !== I.you) continue;
-      (at.get(d.region) ?? at.set(d.region, []).get(d.region)!).push(d.creditor);
-    }
-    for (const [rid, cs] of at) {
-      const r = st.regions[rid];
-      const R = this.worldR(r, I);
-      cs.slice(0, 3).forEach((c, i) => {
-        const x = r.site.x - R - (7 + i * 9) * S, y = r.site.y - R * 0.2;
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.beginPath(); ctx.moveTo(0, -6 * S); ctx.bezierCurveTo(3.5 * S, -1.5 * S, 4.2 * S, 1 * S, 4.2 * S, 2.4 * S); ctx.arc(0, 2.4 * S, 4.2 * S, 0, Math.PI); ctx.bezierCurveTo(-4.2 * S, 1 * S, -3.5 * S, -1.5 * S, 0, -6 * S); ctx.closePath();
-        const gr = ctx.createLinearGradient(-3 * S, -5 * S, 3 * S, 6 * S); gr.addColorStop(0, '#ff6a6a'); gr.addColorStop(0.5, '#a3121c'); gr.addColorStop(1, '#3a0408');
-        ctx.globalAlpha = 0.85; ctx.fillStyle = gr; ctx.fill();
-        ctx.strokeStyle = hexA(this.colorOf(st, c), 0.9); ctx.lineWidth = 1.1 * S; ctx.stroke();
-        ctx.restore();
-      });
-    }
   }
 
   /** Targeting: valid drops get a light outline and a soft glow, strongest near the pointer's path; nothing is
@@ -1589,62 +1257,61 @@ export class MapRenderer {
   }
 
   // ================================================================ tokens
-  /** Group fleets into one token per owner per region (fanned out for your expanded stack / detail tier), replace
-   *  opposing tokens in battles with a roundel, and draw it all with eased positions. */
+  /** Group fleets into one piece per owner per system (fanned out for your expanded stack), park it beside its star
+   *  (or on its lane dot), and draw it with eased positions; battles add one marker at the star. */
   private drawTokens(I: DrawInput) {
     const { ctx } = this;
     const st = I.state;
     const now = I.now;
     const S = this.px(1);
-    const tier = this.tier;
+    const W = this.zw;
     const reduced = reducedMotion();
-    const k = this.slotK();
-    const restR = 82 * S * Math.max(1, k);
+    const zr = this.zr;
+    const tr = tokR(zr, this.coarse);
     this.drawnPos.clear();
     this.tokHits = [];
+    this.battleHits = [];
     // ---- per-fleet motion tracks (trails, heading, arrival pings, warp-in)
     const seen = new Set<number>();
     for (const f of I.fleets) {
       if (f.ghost) continue;
       seen.add(f.id);
       const color = this.colorOf(st, f.owner);
-      let tr = this.tracks.get(f.id);
-      if (!tr) {
-        tr = { x: f.pos.x, y: f.pos.y, vx: 0, vy: 0, ang: 0, trail: [], born: this.fleetsReset || reduced ? -1e9 : now, travel: 0, moving: false, draw: f, color };
-        this.tracks.set(f.id, tr);
-        if (tr.born === now) this.ring(f.pos, color, 500, 6, 34);
+      let trk = this.tracks.get(f.id);
+      if (!trk) {
+        trk = { x: f.pos.x, y: f.pos.y, vx: 0, vy: 0, ang: 0, trail: [], born: this.fleetsReset || reduced ? -1e9 : now, travel: 0, moving: false, draw: f, color };
+        this.tracks.set(f.id, trk);
       } else {
-        const dx = f.pos.x - tr.x, dy = f.pos.y - tr.y;
+        const dx = f.pos.x - trk.x, dy = f.pos.y - trk.y;
         const d = Math.hypot(dx, dy);
-        if (d > S * 160) { tr.trail.length = 0; tr.vx = tr.vy = 0; }
-        else { const dt = Math.max(1, this.dt); const a = Math.min(1, dt / 60); tr.vx += (dx / dt - tr.vx) * a; tr.vy += (dy / dt - tr.vy) * a; }
-        const sp = Math.hypot(tr.vx, tr.vy) / S;
+        if (d > S * 160) { trk.trail.length = 0; trk.vx = trk.vy = 0; }
+        else { const dt = Math.max(1, this.dt); const a = Math.min(1, dt / 60); trk.vx += (dx / dt - trk.vx) * a; trk.vy += (dy / dt - trk.vy) * a; }
+        const sp = Math.hypot(trk.vx, trk.vy) / S;
         const moving = sp > 0.02 && f.alpha > 0;
-        if (moving) tr.travel += d / S;
-        else if (tr.moving && tr.travel > 40 && !reduced) { this.ring(f.pos, color, 650, 8, 30); tr.travel = 0; }
-        if (!moving && sp < 0.005) tr.travel = 0;
-        tr.moving = moving;
-        const target = moving && sp > 0.05 ? Math.atan2(tr.vy, tr.vx) + Math.PI / 2 : 0;
-        let da = target - tr.ang;
+        if (moving) trk.travel += d / S;
+        else if (!moving && sp < 0.005) trk.travel = 0;
+        trk.moving = moving;
+        const target = moving && sp > 0.05 ? Math.atan2(trk.vy, trk.vx) + Math.PI / 2 : 0;
+        let da = target - trk.ang;
         while (da > Math.PI) da -= TAU;
         while (da < -Math.PI) da += TAU;
-        tr.ang += da * Math.min(1, this.dt / (moving ? 90 : 260));
+        trk.ang += da * Math.min(1, this.dt / (moving ? 90 : 260));
       }
-      tr.x = f.pos.x; tr.y = f.pos.y; tr.draw = f; tr.color = color;
-      if (!reduced && tr.moving) tr.trail.push({ x: f.pos.x, y: f.pos.y, t: now });
-      while (tr.trail.length && now - tr.trail[0].t > 700) tr.trail.shift();
-      if (reduced) tr.trail.length = 0;
+      trk.x = f.pos.x; trk.y = f.pos.y; trk.draw = f; trk.color = color;
+      if (!reduced && trk.moving) trk.trail.push({ x: f.pos.x, y: f.pos.y, t: now });
+      while (trk.trail.length && now - trk.trail[0].t > 700) trk.trail.shift();
+      if (reduced) trk.trail.length = 0;
     }
     for (const id of this.tracks.keys()) if (!seen.has(id)) this.tracks.delete(id);
 
-    // ---- group
+    // ---- group: a fleet is IN a system (parked beside its star), ON a lane dot, or travelling a lane (its position)
     const groups = new Map<string, Tok>();
     const { sup } = this.supplySets(I);
     for (const f of I.fleets) {
       if (f.ghost || f.alpha <= 0.02) continue;
       let rid = f.region !== undefined && st.regions[f.region] ? f.region : -1;
       let rest = false;
-      const rr = (q: Region) => (isLane(q) ? 30 * S : restR);
+      const rr = (q: Region) => (isLane(q) ? 30 * S : (this.siteR(q) + tr + 50) * S);
       if (rid >= 0) { const q = st.regions[rid]; rest = Math.hypot(f.pos.x - q.site.x, f.pos.y - q.site.y) <= rr(q); }
       if (!rest) {
         const n = nearestRegion(st, f.pos);
@@ -1654,27 +1321,24 @@ export class MapRenderer {
       const key = rest ? `${f.owner}:${rid}` : `f${f.id}`;
       let t = groups.get(key);
       if (!t) {
-        const slot = slotFor(tier, f.owner);
-        const po = rest ? this.plateOff.get(rid) : undefined;
-        const an = rest ? anchorOf(st.regions[rid], f.owner, tier, S, k) : f.pos;
-        t = { key, owner: f.owner, region: rid, fleets: [], rest, target: po ? { x: an.x + po.x, y: an.y + po.y } : an, side: slot.side, power: 0, ships: 0, selected: false, idle: false, oos: false, alpha: 0, moving: false, ang: 0, born: -1e9 };
+        const slot = slotFor(null, f.owner);
+        const an = rest ? anchorOf(st.regions[rid], f.owner, S, zr) : f.pos;
+        t = { key, owner: f.owner, region: rid, fleets: [], rest, target: an, side: slot.side, power: 0, ships: 0, selected: false, idle: false, oos: false, alpha: 0, moving: false, ang: 0, born: -1e9 };
         groups.set(key, t);
       }
       t.fleets.push(f);
     }
-    // ---- fan out your stack (expanded region, or detail tier)
+    // ---- fan out your stack when you open it: further out along its side, in fixed slots
     const toks: Tok[] = [];
     for (const t of groups.values()) {
-      const fan = t.rest && t.fleets.length > 1 && t.owner === I.you && I.you !== null && (I.expanded === t.region || tier === 'detail');
+      const fan = t.rest && t.fleets.length > 1 && t.owner === I.you && I.you !== null && I.expanded === t.region;
       if (!fan) { toks.push(t); continue; }
       const fl = t.fleets.slice().sort((a, b) => a.id - b.id);
-      const slot = slotFor(tier, t.owner);
-      const dirX = slot.dx === 0 ? 1 : Math.sign(slot.dx);
+      const slot = slotFor(null, t.owner);
+      const step = (tr * 2 + 8) * S;
       fl.forEach((f, i) => {
         const col = i % 3, row = Math.floor(i / 3);
-        const fk = tier === 'detail' ? Math.pow(this.artK(), 0.75) : 1;
-        const dx = dirX * col * 74 * fk * S, dy = -row * 52 * fk * S;
-        toks.push({ ...t, key: `x${f.id}`, fleets: [f], target: { x: t.target.x + dx, y: t.target.y + dy } });
+        toks.push({ ...t, key: `x${f.id}`, fleets: [f], target: { x: t.target.x + slot.dx * col * step, y: t.target.y - row * step } });
       });
     }
     // ---- stats per token
@@ -1692,8 +1356,8 @@ export class MapRenderer {
       }
       t.power = pw; t.ships = ships; t.oos = oos;
       if (!t.rest) {
-        const tr = this.tracks.get(t.fleets[0].id);
-        t.moving = !!tr?.moving; t.ang = tr?.ang ?? 0;
+        const trk = this.tracks.get(t.fleets[0].id);
+        t.moving = !!trk?.moving; t.ang = trk?.ang ?? 0;
       } else {
         // point along the order: your planned arrow, else the fleet's route (on a hyperlane: where it is heading)
         const a = t.owner === I.you ? arrowsFrom(t.region) : undefined;
@@ -1706,28 +1370,23 @@ export class MapRenderer {
     }
     this.fleetsReset = false;
 
-    // ---- battles: opposing tokens in an engaged region become a roundel
+    // ---- battles you can see
     const engaged = new Map<number, Engagement>();
     for (const e of st.engagements ?? []) if (st.regions[e.region] && (I.you === null || I.visible.has(e.region) || toks.some(t => t.rest && t.region === e.region && t.owner === I.you))) engaged.set(e.region, e);
-    const inBattle = new Map<number, Tok[]>();
-    const drawList: Tok[] = [];
-    for (const t of toks) {
-      if (t.rest && engaged.has(t.region)) { (inBattle.get(t.region) ?? inBattle.set(t.region, []).get(t.region)!).push(t); continue; }
-      drawList.push(t);
-    }
+    const drawList = toks;
 
-    // ---- hyperlane waypoints in use: brighter dots where a fleet sits or is heading through
-    {
+    // ---- hyperlane waypoints your fleets sit on or are heading through: the dots show where the route goes
+    if (I.you !== null) {
       const hot = new Set<number>();
-      for (const t of toks) if (t.rest && isLane(st.regions[t.region])) hot.add(t.region);
-      for (const f of st.fleets) for (const rid of f.route?.path ?? []) if (isLane(st.regions[rid])) hot.add(rid);
+      for (const t of toks) if (t.owner === I.you && t.rest && isLane(st.regions[t.region])) hot.add(t.region);
+      for (const f of st.fleets) if (f.owner === I.you) for (const rid of f.route?.path ?? []) if (isLane(st.regions[rid])) hot.add(rid);
       if (hot.size) {
-        ctx.fillStyle = 'rgba(245,242,255,0.95)';
-        const dr = (tier === 'strategic' ? 3 : 4.5) * S;
+        ctx.fillStyle = 'rgba(245,242,255,0.8)';
+        const dr = (2.2 + 1.2 * (1 - W.s)) * S;
         for (const rid of hot) { const q = st.regions[rid].site; ctx.beginPath(); ctx.arc(q.x, q.y, dr, 0, TAU); ctx.fill(); }
       }
     }
-    // ---- multi-turn routes (WEGO; LIVE routes come in as planned arrows): along the lane dots, ETA in turns at the head
+    // ---- multi-turn routes (WEGO; LIVE routes come in as planned arrows): one dashed line along the lane dots
     if (st.mode !== 'live') {
       const shown = new Set(I.fleets.map(f => f.id));
       for (const f of st.fleets) {
@@ -1737,7 +1396,10 @@ export class MapRenderer {
         if (pts.length < 2) continue;
         let eta = 0;
         try { eta = Math.max(1, Math.ceil(rt.path.length / Math.max(1, fleetSpeed(st, f)))); } catch { eta = rt.path.length; }
-        this.routeArrow(pts, this.colorOf(st, f.owner), `${eta}T`, rt.seize !== null && rt.seize !== undefined);
+        const dest = rt.path[rt.path.length - 1];
+        const seize = rt.seize !== null && rt.seize !== undefined;
+        this.routeArrow(pts, this.colorOf(st, f.owner), seize, dest, f.owner === I.you);
+        this.routeHits.push({ pts, kind: seize ? 'seize' : 'route', to: seize ? rt.seize! : dest, owner: f.owner, eta, fleet: f.id });
       }
     }
 
@@ -1754,23 +1416,23 @@ export class MapRenderer {
       }
     }
 
-    // ---- engine trails under every token in flight: an additive streak in the house's engine colour
+    // ---- engine trails under every piece in flight: an additive streak in the house's engine colour
     ctx.save();
     ctx.lineCap = 'round';
     ctx.globalCompositeOperation = 'lighter';
     for (const t of drawList) {
       if (t.rest) continue;
-      const tr = this.tracks.get(t.fleets[0].id);
-      if (!tr || tr.trail.length < 2) continue;
-      const eng = cssA(scheme(t.owner, tr.color).engine);
-      const pts = tr.trail;
-      const lift = -this.miniGeom().stand * S;
+      const trk = this.tracks.get(t.fleets[0].id);
+      if (!trk || trk.trail.length < 2) continue;
+      const eng = cssA(scheme(t.owner, trk.color).engine);
+      const pts = trk.trail;
+      const lift = -this.miniGeom().stand * S * W.d;
       for (let i = 1; i < pts.length; i++) {
         const kk = i / pts.length;
         const age = clamp01(1 - (now - pts[i].t) / 700);
-        ctx.globalAlpha = 0.75 * kk * age;
+        ctx.globalAlpha = 0.6 * kk * age;
         ctx.strokeStyle = eng;
-        ctx.lineWidth = S * (1.5 + 5 * kk);
+        ctx.lineWidth = S * (1.2 + 3.5 * kk);
         ctx.beginPath(); ctx.moveTo(pts[i - 1].x, pts[i - 1].y + lift); ctx.lineTo(pts[i].x, pts[i].y + lift); ctx.stroke();
       }
     }
@@ -1795,8 +1457,10 @@ export class MapRenderer {
         d = { x: start.x, y: start.y, ang: t.ang, bank: 0, born: fresh ? now : -1e9, owner: t.owner, region: t.region, ids: [], color, last: t };
         this.tokDisp.set(t.key, d);
       }
+      // zoom changes the parking distance continuously: follow it exactly (easing would make pieces swim while zooming)
       const dx = t.target.x - d.x, dy = t.target.y - d.y;
-      if (reduced || Math.hypot(dx, dy) > 400 * S || !t.rest) { d.x = t.target.x; d.y = t.target.y; }
+      const camMoving = this.now - this.camMovedAt < 60;
+      if (reduced || camMoving || Math.hypot(dx, dy) > 400 * S || !t.rest) { d.x = t.target.x; d.y = t.target.y; }
       else { d.x += dx * ease; d.y += dy * ease; }
       let da = t.ang - d.ang;
       while (da > Math.PI) da -= TAU;
@@ -1816,7 +1480,7 @@ export class MapRenderer {
       if (!reduced && !this.fleetsReset && d.ids.every(id => !presentIds.has(id))) this.tokVanish.push({ t: d.last, x: d.x, y: d.y, ang: d.ang, color: d.color, t0: now });
     }
 
-    // ---- draw: in-transit first, then parked (so parked numbers read on top)
+    // ---- draw: in-transit first, then parked, the selected one on top
     drawList.sort((a, b) => Number(a.rest) - Number(b.rest) || Number(a.selected) - Number(b.selected));
     const anySel = drawList.find(t => t.selected);
     if (!anySel) this.selFleet = null;
@@ -1832,25 +1496,20 @@ export class MapRenderer {
       const kk = clamp01((now - v.t0) / 420);
       this.drawToken({ ...v.t, selected: false, idle: false }, { x: v.x, y: v.y, ang: v.ang }, v.color, now, 1 + 0.25 * kk, 1 - kk, I, false);
     }
-    // ghost fleets (plan preview): faint chevrons, not hit-testable
+    // ghost fleets (plan preview): faint pieces, not hit-testable
     for (const f of I.fleets) {
       if (!f.ghost) continue;
       const c = this.colorOf(st, f.owner);
-      ctx.save(); ctx.globalAlpha = 0.35 * f.alpha; ctx.translate(f.pos.x, f.pos.y);
-      ctx.restore();
       ctx.save(); ctx.globalAlpha = 0.4 * f.alpha;
-      drawShip(ctx, f.pos.x, f.pos.y - this.miniGeom().stand * S, this.miniGeom().len * S, this.miniGeom().len * this.rdpr, (f.cls?.[0]) ?? 'frigate', f.owner, c, 0);
+      if (W.d > 0.5) drawShip(ctx, f.pos.x, f.pos.y - this.miniGeom().stand * S, this.miniGeom().len * S, this.miniGeom().len * this.rdpr, (f.cls?.[0]) ?? 'frigate', f.owner, c, 0);
+      else { ctx.translate(f.pos.x, f.pos.y); chevronPath(ctx, tr * 0.8 * S); ctx.fillStyle = c; ctx.fill(); }
       ctx.restore();
     }
 
-    // ---- battle roundels + aftermath markers
-    for (const [rid, e] of engaged) {
-      const r = st.regions[rid];
-      if (tier !== 'strategic' && !isLane(r)) this.drawSkirmish(r, e, inBattle.get(rid) ?? [], I);
-      else this.drawRoundel(r, e, inBattle.get(rid) ?? [], I);
-    }
-    // sieges without a battle: the besiegers bombard the world
-    if (tier !== 'strategic' && !reduced) for (const t of drawList) {
+    // ---- one battle marker per fight, at its star
+    for (const [rid, e] of engaged) this.drawBattle(st.regions[rid], e, drawList.filter(t => t.rest && t.region === rid), I);
+    // sieges without a battle: the besiegers bombard the world (the tabletop, detail zoom only)
+    if (W.d > 0.3 && !reduced) for (const t of drawList) {
       if (!t.rest || engaged.has(t.region)) continue;
       const r = st.regions[t.region];
       if (!r || isLane(r)) continue;
@@ -1862,21 +1521,10 @@ export class MapRenderer {
     this.drawAftermath(I, engaged);
   }
 
-  private tokSizes() {
-    const C = this.coarse;
-    const t = this.tier;
-    if (t === 'strategic') return { R: 8, nf: C ? 14 : 13, sf: 0, ph: C ? 18 : 17 };
-    return { R: t === 'detail' ? 11 : 10, nf: C ? 16 : 15, sf: 13, ph: C ? 21 : 20 };
-  }
-
-  /** Mini geometry per tier (css px): base radius, lead hull length, flight-stand height. */
-  private miniGeom(n = 1) {
-    const tier = this.tier;
-    if (tier === 'strategic') return { rb: 11, len: 20, stand: 7, max: 1 };
-    if (tier === 'operational') return { rb: 16, len: 34, stand: 13, max: 3 };
+  /** Miniature geometry at detail zoom (design px): base radius, lead hull length, flight-stand height. */
+  private miniGeom() {
     const K = Math.pow(this.artK(), 0.75);
-    void n;
-    return { rb: 19 * K, len: 36 * K, stand: 15 * K, max: 8 };
+    return { rb: 19 * K, len: 30 * K, stand: 14 * K, max: 3 };
   }
 
   /** The hull classes of a token's fleets, biggest first. */
@@ -1891,344 +1539,262 @@ export class MapRenderer {
     return out.sort((a, b) => (CLASS_RANK[b] ?? 0) - (CLASS_RANK[a] ?? 0));
   }
 
-  /** Draw a fleet token: miniatures on clear flight stands over one enamel base (the base rim is the owner colour and
-   *  the hit area), a cast shadow on the mat, a gunmetal number plate with the power, status badges, a pennant. */
+  /** A fleet piece, as the zoom calls for it (crossfaded over a zoom range): a chevron pip zoomed out, a round
+   *  counter with a ship arrow in the middle, painted miniatures on a base up close. A parked piece is tethered to
+   *  its star. A stack of 2+ fleets carries a small count chip. Strength is shown only when selected (and in the
+   *  hover tooltip); status is encoded on the piece (idle breathes, out of supply has an amber dashed rim). */
   private drawToken(t: Tok, d: { x: number; y: number; ang: number; bank?: number }, c: string, now: number, scale: number, alpha: number, I: DrawInput, hit = true) {
     const { ctx } = this;
     const S = this.px(1);
-    const Z = this.tokSizes();
-    const G = this.miniGeom();
-    const tier = this.tier;
+    const W = this.zw;
     const reduced = reducedMotion();
     const lensDim = (I.lens ?? 'political') === 'economy' || (I.lens ?? 'political') === 'supply' ? 0.7 : 1;
     const fill = t.owner === -1 ? WARDEN : c;
     const sel = t.selected;
     const owner = t.owner;
-    const cls = this.classesOf(I, t.fleets);
-    const n = Math.min(G.max, cls.length);
-    const lead = cls[0] ?? 'frigate';
-    const len0 = G.len * (0.8 + 0.2 * classLen(lead) / 1.06);
-    // formation (ship-local units of the lead's length), centred, rotated to the heading
-    const F = formation(n);
-    let mx = 0, my = 0; for (const f of F) { mx += f.x / n; my += f.y / n; }
-    // the squadron is laid out on the base in screen space (a wedge, lead toward the heading's vertical sense) and
-    // each model turns to the heading on its own stand: reads cleanly at any angle
-    const flip = Math.cos(d.ang) < -0.2 ? -1 : 1;
-    const spacing = tier === 'detail' ? 0.72 : 0.78;
-    const pos = F.map((f, i) => ({ x: (f.x - mx) * len0 * spacing * 1.05, y: (f.y - my) * len0 * spacing * flip, s: f.s, cls: cls[i] }));
-    let ext = 0; for (const q of pos) ext = Math.max(ext, Math.hypot(q.x, q.y));
-    const rb = Math.max(G.rb, ext + len0 * (n > 1 ? 0.36 : 0.3));
-    const ry = rb * BASE_SQUASH;
-    // Signature: what this token is betting this turn, and its public marks
+    const mine = I.you !== null && owner === I.you;
+    const tr = tokR(this.zr, this.coarse);
     const pmap = I.postures;
     const tPost = pmap ? t.fleets.map(f => pmap.get(f.id)).find(Boolean) ?? null : null;
     const sfl = t.fleets.map(f => this.fleetById(I.state, f.id)).filter((x): x is Fleet => !!x);
     const turnNow = I.state.turn;
-    const dug = sfl.some(f => f.dugIn !== null && f.dugIn !== undefined && f.dugIn >= turnNow);
     const exposed = sfl.some(f => f.exposed !== null && f.exposed !== undefined && f.exposed >= turnNow);
+    const dug = sfl.some(f => f.dugIn !== null && f.dugIn !== undefined && f.dugIn >= turnNow);
     const fated = sfl.some(f => f.fate && f.fate.turn === turnNow);
-    const lurking = tPost === 'ambush' && owner === I.you;
+    const lurking = tPost === 'ambush' && mine;
+    const A = clamp01(alpha * lensDim * (lurking ? 0.62 : 1));
+    // the tether: a short line from the star's edge to the piece (it belongs to that system)
+    const reg = t.rest ? I.state.regions[t.region] : undefined;
+    if (reg && !isLane(reg) && hit) {
+      const R = (this.siteR(reg) + 1.5) * S;
+      const dx = d.x - reg.site.x, dy = d.y - reg.site.y, L = Math.hypot(dx, dy) || 1;
+      const end = L - tr * S * 0.85;
+      if (end > R + 2 * S) {
+        ctx.save(); ctx.globalAlpha = A * 0.6; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(reg.site.x + dx / L * R, reg.site.y + dy / L * R); ctx.lineTo(reg.site.x + dx / L * end, reg.site.y + dy / L * end);
+        ctx.strokeStyle = 'rgba(4,2,12,0.6)'; ctx.lineWidth = 2.6 * S; ctx.stroke();
+        ctx.strokeStyle = fill; ctx.lineWidth = 1.2 * S; ctx.stroke();
+        ctx.restore();
+      }
+    }
     ctx.save();
-    ctx.globalAlpha = clamp01(alpha * lensDim * (lurking ? 0.62 : 1));
     ctx.translate(d.x, d.y);
     if (scale !== 1) ctx.scale(scale, scale);
-    if (fated && !reduced) {
-      // a Fate in force: a slow gold-violet halo under the base
+    if (fated && !reduced && W.d > 0.02) {
       const k = 0.5 + 0.5 * Math.sin(now / 420);
-      drawGlow(ctx, 0, 0, rb * S * 1.7, [220, 180, 255], 0.35 + 0.2 * k);
+      ctx.globalAlpha = A * W.d;
+      drawGlow(ctx, 0, 0, tr * S * 1.7, [220, 180, 255], 0.35 + 0.2 * k);
     }
-    drawBase(ctx, 0, 0, rb * S, rb * this.rdpr, fill, { sel, oos: t.oos, big: n > 2 });
-    if (lurking) {
-      // lying in wait: a dashed, dimmed rim (only its owner sees the token at all)
-      ctx.save(); ctx.setLineDash([3 * S, 3 * S]); ctx.strokeStyle = 'rgba(230,220,255,0.85)'; ctx.lineWidth = 1.4 * S;
-      ctx.beginPath(); ctx.ellipse(0, 0, rb * S * 1.12, ry * S * 1.12, 0, 0, TAU); ctx.stroke(); ctx.restore();
+    if (W.d > 0.01) { ctx.globalAlpha = A * W.d; this.drawMinis(t, d, fill, now, I); }
+    if (W.o > 0.01) { ctx.globalAlpha = A * W.o; this.drawCounter(d.ang, fill, sel, tr, S); }
+    if (W.s > 0.01) {
+      ctx.globalAlpha = A * W.s;
+      ctx.save(); ctx.rotate(d.ang); chevronPath(ctx, tr * 1.25 * S);
+      ctx.lineJoin = 'round'; ctx.strokeStyle = sel ? '#ffffff' : 'rgba(4,2,12,0.92)'; ctx.lineWidth = (sel ? 2.4 : 2) * S; ctx.stroke();
+      ctx.fillStyle = fill; ctx.fill();
+      ctx.restore();
     }
-    if (exposed) {
-      ctx.save(); ctx.strokeStyle = 'rgba(255,90,80,0.9)'; ctx.lineWidth = 2 * S;
-      ctx.beginPath(); ctx.ellipse(0, 0, rb * S * 1.14, ry * S * 1.14, 0, 0, TAU); ctx.stroke(); ctx.restore();
+    ctx.globalAlpha = A;
+    const ry = tr * (W.d > 0 ? 1 - 0.54 * W.d : 1);
+    // status on the piece: idle (yours, while you plan) breathes softly; out of supply: amber dashed rim; exposed: red
+    const rim = (col: string, dash: number[], w: number, k = 1.18) => {
+      ctx.save(); ctx.setLineDash(dash.map(x => x * S)); ctx.strokeStyle = col; ctx.lineWidth = w * S;
+      ctx.beginPath(); ctx.ellipse(0, 0, tr * S * k, ry * S * k, 0, 0, TAU); ctx.stroke(); ctx.restore();
+    };
+    if (mine && t.idle && !sel && W.s < 0.98) {
+      const br = reduced ? 0.5 : 0.5 + 0.5 * Math.sin(now / 520);
+      ctx.save(); ctx.globalAlpha = A * (1 - W.s) * (0.2 + 0.35 * br); rim('#ffffff', [], 1.6, 1.3); ctx.restore();
     }
-    // models: back to front
-    const bob = reduced || t.moving ? 0 : Math.sin(now / 850 + (t.fleets[0]?.id ?? 0) * 1.7) * 1.3;
-    const order = pos.map((q, i) => ({ ...q, i })).sort((a, b) => a.y - b.y);
-    const team = fill;
-    const eng = t.moving ? 1.1 : 0.3;
-    for (const q of order) {
-      const gx = q.x * S, gy = q.y * BASE_SQUASH * S;
-      const L = len0 * q.s * (0.78 + 0.22 * classLen(q.cls) / classLen(lead));
-      const st = (G.stand + (q.i === 0 ? 2 : 0)) * S;
-      const sy = gy - st + bob * S * (q.i % 2 ? 0.7 : 1);
-      drawStand(ctx, gx, gy, sy + L * S * 0.05, Math.max(1.2, L * 0.07) * S);
-      drawShip(ctx, gx, sy, L * S, L * this.rdpr * (scale > 1 ? scale : 1), q.cls, owner, team, d.ang, {
-        shadow: { dx: st * 0.3, dy: st * 0.95, alpha: 0.42 }, engine: eng, bank: d.bank ?? 0,
-      });
-    }
-    // the fleet's banner: a pennant on a pole at the base's outer rim (operational + detail), with its sigil, rank
-    // chevrons down the pole, scar notches cut into the cloth, an Oathbreaker crack; a limping fleet's pennant droops
-    // and it trails smoke
-    if (tier !== 'strategic' && owner >= 0) {
-      const sfs = t.fleets.map(f => this.fleetById(I.state, f.id)).filter((x): x is Fleet => !!x && !!x.banner && x.ships.length > 0);
-      const lead = sfs.sort((a, b) => b.commander.rank - a.commander.rank)[0];
-      const limp = t.fleets.map(f => this.fleetById(I.state, f.id)).find(x => x?.limping);
-      if (limp && !reduced) {
-        for (let i = 0; i < 4; i++) {
-          const k = ((now / 1400) + i / 4) % 1;
-          smoke(ctx, (-t.side * 4 + Math.sin(i * 2.3 + k * 4) * 5) * S, (-G.stand * 0.6 - k * 34) * S, (5 + k * 12) * S, 0.42 * (1 - k));
-        }
-      }
-      if (lead?.banner) {
-        const pk = tier === 'detail' ? Math.pow(this.artK(), 0.4) : 1;
-        const dir = -t.side;
-        const bx = dir * rb * 0.78 * S, by = ry * 0.2 * S;
-        const top = by - (G.stand * 0.9 + len0 * 0.5 + 10) * S;
-        ctx.strokeStyle = 'rgba(8,8,14,0.9)'; ctx.lineWidth = 2.6 * S; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx, top - 2 * S); ctx.stroke();
-        const pg = ctx.createLinearGradient(bx - 1.2 * S, 0, bx + 1.2 * S, 0); pg.addColorStop(0, '#fff0c0'); pg.addColorStop(1, '#8a6420');
-        ctx.strokeStyle = pg; ctx.lineWidth = 1.2 * S; ctx.stroke();
-        ctx.fillStyle = '#ffe08a'; ctx.beginPath(); ctx.arc(bx, top - 2.5 * S, 1.8 * S, 0, TAU); ctx.fill();
-        const fw = 22 * S * pk, fh = 15 * S * pk;
-        const wv = reduced || lead.limping ? 0 : Math.sin(now / 300 + lead.id) * 1.4 * S;
-        ctx.save();
-        ctx.translate(bx, top);
-        if (lead.limping) ctx.rotate(dir * 1.2);
-        ctx.beginPath(); ctx.moveTo(0, 0);
-        ctx.quadraticCurveTo(dir * fw * 0.5, wv, dir * fw, 1.5 * S + wv * 0.7);
-        ctx.lineTo(dir * fw * 0.74, fh * 0.52 + wv * 0.4);
-        ctx.lineTo(dir * fw, fh + wv * 0.3);
-        ctx.quadraticCurveTo(dir * fw * 0.5, fh + wv * 0.6, 0, fh);
-        ctx.closePath();
-        ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 3 * S; ctx.shadowOffsetY = 1.5 * S; ctx.fillStyle = '#000'; ctx.fill(); ctx.restore();
-        enamel(ctx, lead.limping ? desat(fill, 0.45) : fill, 0, fh, lead.commander.rank >= 4 ? 'gold' : 'iron', 0.9 * S);
-        // scar notches: bites out of the cloth's lower edge
-        const sc = Math.min(3, lead.scars?.length ?? 0);
-        for (let i = 0; i < sc; i++) {
-          const x = dir * fw * (0.2 + i * 0.18);
-          ctx.beginPath(); ctx.moveTo(x - 2.2 * S, fh + 0.5 * S); ctx.lineTo(x, fh - 3.6 * S); ctx.lineTo(x + 2.2 * S, fh + 0.5 * S); ctx.closePath();
-          ctx.fillStyle = 'rgba(12,6,8,0.95)'; ctx.fill();
-        }
-        drawSigil(ctx, lead.banner.sigil, dir * fw * 0.4, fh * 0.48 + wv * 0.5, 10.5 * S * pk, goldPaint(ctx, 0, fh), true);
-        if (lead.oathbreaker) {
-          ctx.strokeStyle = '#ff4a3a'; ctx.lineWidth = 1.3 * S; ctx.beginPath();
-          ctx.moveTo(dir * fw * 0.62, 0.5 * S); ctx.lineTo(dir * fw * 0.48, fh * 0.4); ctx.lineTo(dir * fw * 0.6, fh * 0.6); ctx.lineTo(dir * fw * 0.44, fh); ctx.stroke();
-        }
-        ctx.restore();
-        // rank chevrons down the pole (Legend: a star)
-        const rank = lead.commander.rank;
-        const cy0 = top + fh + 5 * S;
-        if (rank >= 5) starGlyph(ctx, { x: bx, y: cy0 + 1 * S }, 4.5 * S, 5, GOLD);
-        else for (let i = 0; i < Math.min(4, rank - 1); i++) {
-          const yy = cy0 + i * 3.6 * S;
-          ctx.strokeStyle = 'rgba(8,6,2,0.9)'; ctx.lineWidth = 2.6 * S; ctx.beginPath(); ctx.moveTo(bx - 3.6 * S, yy); ctx.lineTo(bx, yy - 2.6 * S); ctx.lineTo(bx + 3.6 * S, yy); ctx.stroke();
-          ctx.strokeStyle = GOLD; ctx.lineWidth = 1.3 * S; ctx.stroke();
-        }
+    if (t.oos) rim('rgba(255,196,90,0.95)', [3, 2.5], 1.8, 1.24);
+    if (exposed) rim('rgba(255,90,80,0.9)', [], 2, 1.3);
+    if (lurking) rim('rgba(230,220,255,0.85)', [3, 3], 1.4, 1.36);
+    // a stack of 2+ fleets: a small count chip under the piece
+    let below = tr + 3;
+    if (t.fleets.length > 1) {
+      const txt = String(t.fleets.length);
+      ctx.font = numFont(12 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      if (W.s > 0.6) haloText(ctx, txt, (tr + 5) * S, (tr * 0.6) * S, '#ffffff', 'rgba(4,2,12,0.85)', 3 * S);
+      else {
+        const cw = ctx.measureText(txt).width + 8 * S, ch = 15 * S, cy = (ry + 2) * S;
+        roundRect(ctx, -cw / 2, cy, cw, ch, 4 * S); ctx.fillStyle = 'rgba(8,4,16,0.94)'; ctx.fill();
+        ctx.strokeStyle = hexA(fill, 0.9); ctx.lineWidth = 1.2 * S; ctx.stroke();
+        ctx.fillStyle = '#ffffff'; ctx.fillText(txt, 0, cy + ch / 2 + 0.5 * S);
+        below = ry + 2 + 15 + 2;
       }
     }
-    // power number (+ ship count) on a gunmetal plate beside the base
-    const pw = String(Math.max(0, Math.round(t.power)));
-    ctx.font = numFont(Z.nf * S);
-    const w1 = ctx.measureText(pw).width;
-    const sub = Z.sf ? String(t.ships) : '';
-    let w2 = 0;
-    if (sub) { ctx.font = numFont(Z.sf * S, 600); w2 = ctx.measureText(sub).width + 2 * S; }
-    const pw2 = w1 + w2 + 10 * S, ph = Z.ph * S;
-    const gap = rb * S + 2 * S;
-    const px0 = t.side > 0 ? gap : -gap - pw2;
-    const py0 = -ph / 2 - (tier === 'strategic' ? 2 : 4) * S;
-    roundRect(ctx, px0, py0, pw2, ph, 3 * S);
-    gunmetal(ctx, py0, py0 + ph, sel ? '#ffffff' : hexA(fill, 0.95), (sel ? 2.4 : 1.6) * S);
-    topGlint(ctx, px0 + 3 * S, px0 + pw2 - 3 * S, py0 + 1.2 * S, 0.8 * S, 0.3);
-    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    ctx.font = numFont(Z.nf * S);
-    stampedText(ctx, pw, px0 + 5 * S, py0 + ph / 2 + 0.5 * S, '#ffffff', S);
-    if (sub) {
-      ctx.font = numFont(Z.sf * S, 600); ctx.fillStyle = 'rgba(214,210,236,0.9)';
-      ctx.fillText(sub, px0 + 5 * S + w1 + 2 * S, py0 + ph / 2 + 3 * S);
+    // selected: its strength (attack power) under it, and its posture if it has one
+    if (sel) {
+      const txt = String(Math.max(0, Math.round(t.power)));
+      ctx.font = numFont(13 * S); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      const w = 14 * S + ctx.measureText(txt).width, y = -(tr + 9 + W.d * (this.miniGeom().stand + this.miniGeom().len * 0.7)) * S;
+      drawIcon(ctx, 'attack', -w / 2 + 6 * S, y, 13 * S, '#ffe6b0', { halo: 'rgba(4,2,12,0.9)', haloWidth: 2.5 * S });
+      haloText(ctx, txt, -w / 2 + 14 * S, y + 0.5 * S, '#ffffff', 'rgba(4,2,12,0.85)', 3 * S);
     }
-    // posture / dug-in / exposed medallions along the front of the base (strategic: the posture only)
-    {
+    if (tPost && tPost !== 'steady' && (sel || W.d > 0.5) || (dug && W.d > 0.5)) {
       const marks: { t: IconName; fill: string; ink: string }[] = [];
-      if (tPost && tPost !== 'steady') marks.push({ t: icFor('posture', tPost, POSTURES[tPost]?.icon), fill: owner === I.you ? '#1d1f26' : '#3a1418', ink: owner === I.you ? '#ffe2a0' : '#ffb0a0' });
-      if (dug && tier !== 'strategic') marks.push({ t: icFor('state', 'dug'), fill: '#2a2a30', ink: '#d8dbe6' });
-      if (exposed) marks.push({ t: icFor('state', 'exposed'), fill: '#5a1010', ink: '#ffd0c8' });
-      if (marks.length) {
-        const R = (tier === 'strategic' ? 8.5 : 10) * S;
-        let x = -((marks.length - 1) * (R * 2 + 2 * S)) / 2;
-        const y = ry * S + R * 0.6;
-        ctx.font = numFont(Math.max(13 * S, R * 1.3), 700); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        for (const m of marks) {
-          ctx.beginPath(); ctx.arc(x, y, R, 0, TAU);
-          ctx.fillStyle = m.fill; ctx.fill();
-          ctx.strokeStyle = '#c9a35c'; ctx.lineWidth = 1.1 * S; ctx.stroke();
-          drawIcon(ctx, m.t, x, y, R * 1.35, m.ink);
-          x += R * 2 + 2 * S;
-        }
-        ctx.textBaseline = 'alphabetic';
+      if (tPost && tPost !== 'steady') marks.push({ t: icFor('posture', tPost, POSTURES[tPost]?.icon), fill: mine ? '#1d1f26' : '#3a1418', ink: mine ? '#ffe2a0' : '#ffb0a0' });
+      if (dug && W.d > 0.5) marks.push({ t: icFor('state', 'dug'), fill: '#2a2a30', ink: '#d8dbe6' });
+      const R = 9 * S;
+      let x = -tr * S - R * 0.6;
+      for (const m of marks) {
+        ctx.beginPath(); ctx.arc(x, ry * S, R, 0, TAU); ctx.fillStyle = m.fill; ctx.fill();
+        ctx.strokeStyle = '#c9a35c'; ctx.lineWidth = 1.1 * S; ctx.stroke();
+        drawIcon(ctx, m.t, x, ry * S, R * 1.35, m.ink);
+        x -= R * 2 + 2 * S;
       }
-    }
-    // a limping fleet: where it is limping to, and when it gets there
-    if (tier !== 'strategic') {
-      const lf = t.fleets.map(f => this.fleetById(I.state, f.id)).find(x => x?.limping);
-      if (lf?.limping) {
-        let eta = 0;
-        try { eta = lf.route?.path.length ? Math.max(1, Math.ceil(lf.route.path.length / Math.max(1, fleetSpeed(I.state, lf)))) : 0; } catch { eta = 0; }
-        const lt = eta ? `⌂ ${eta}${I.state.mode === 'live' ? '' : 'T'}` : '⌂';
-        ctx.font = numFont(13 * S, 700);
-        const lw = measureIconText(ctx, lt) + 8 * S, lh = 16 * S;
-        const lx = px0 + (t.side > 0 ? 0 : pw2 - lw), ly = py0 + ph + 2 * S;
-        roundRect(ctx, lx, ly, lw, lh, 3 * S); ctx.fillStyle = 'rgba(40,22,10,0.95)'; ctx.fill();
-        ctx.strokeStyle = 'rgba(255,170,110,0.8)'; ctx.lineWidth = 1 * S; ctx.stroke();
-        ctx.fillStyle = '#ffcf9e'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; fillIconText(ctx, lt, lx + 4 * S, ly + lh / 2 + 0.5 * S);
-      }
-    }
-    // status badges at the base's inner shoulder: ⚠ out of supply, Zz idle (can take orders)
-    const badge = t.oos ? '⚠' : t.idle && !sel ? 'Zz' : '';
-    const topY = -(G.stand + len0 * 0.55) * S;
-    if (badge) {
-      const bx = -t.side * rb * 0.85 * S, by = -(G.stand * 0.9) * S;
-      const bf = this.coarse ? 13.5 : 13;
-      ctx.font = numFont(bf * S);
-      const bw = Math.max(17 * S, ctx.measureText(badge).width + 7 * S), bh = 16 * S;
-      roundRect(ctx, bx - bw / 2, by - bh / 2, bw, bh, bh / 2);
-      ctx.fillStyle = t.oos ? '#ffd27a' : '#f2efff'; ctx.fill();
-      ctx.strokeStyle = 'rgba(8,4,16,0.9)'; ctx.lineWidth = 1.2 * S; ctx.stroke();
-      ctx.fillStyle = INK; ctx.textAlign = 'center';
-      if (t.oos) drawIcon(ctx, 'warning', bx, by, 13 * S, INK); else ctx.fillText(badge, bx, by + 0.5 * S);
     }
     ctx.textBaseline = 'alphabetic';
     ctx.restore();
     if (!hit) return;
     for (const f of t.fleets) this.drawnPos.set(f.id, { x: d.x, y: d.y });
-    const l = Math.min(-rb, px0 / S) - 4, r = Math.max(rb, (px0 + pw2) / S) + 4;
-    this.tokHits.push({ x: d.x, y: d.y, l, t: Math.min(topY / S, -ph / S / 2) - 4, r, b: ry + 6, cr: Math.max(this.hitR(), rb * 1.05), hit: { region: t.region, owner: t.owner, fleetIds: t.fleets.map(f => f.id) } });
+    const top = tr + W.d * (this.miniGeom().stand + this.miniGeom().len * 0.5);
+    const hr = Math.max(this.hitR() * 0.8, tr + 4);
+    this.tokHits.push({ x: d.x, y: d.y, l: -hr, t: -top - 4, r: hr, b: tr + 6, cr: Math.max(this.hitR(), tr + 5), hit: { region: t.region, owner: t.owner, fleetIds: t.fleets.map(f => f.id) } });
+  }
+
+  /** The operational counter: a round enamel disc in the owner colour with a ship arrow pointing along its heading. */
+  private drawCounter(ang: number, fill: string, sel: boolean, tr: number, S: number) {
+    const { ctx } = this;
+    const R = tr * S;
+    ctx.beginPath(); ctx.arc(0, 1.6 * S, R, 0, TAU); ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fillStyle = fill; ctx.fill();
+    const g = ctx.createRadialGradient(-R * 0.35, -R * 0.45, R * 0.1, 0, 0, R);
+    g.addColorStop(0, 'rgba(255,255,255,0.42)'); g.addColorStop(0.55, 'rgba(255,255,255,0.05)'); g.addColorStop(1, 'rgba(0,0,0,0.3)');
+    ctx.fillStyle = g; ctx.fill();
+    ctx.lineWidth = (sel ? 2.4 : 1.6) * S; ctx.strokeStyle = sel ? '#ffffff' : 'rgba(5,3,12,0.92)'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, R - 2 * S, 0, TAU); ctx.strokeStyle = 'rgba(255,255,255,0.32)'; ctx.lineWidth = 0.9 * S; ctx.stroke();
+    ctx.save(); ctx.rotate(ang); chevronPath(ctx, R * 0.58);
+    ctx.fillStyle = inkOn(fill) === INK ? 'rgba(11,7,22,0.9)' : '#ffffff'; ctx.fill();
+    ctx.restore();
+    if (sel) { ctx.beginPath(); ctx.arc(0, 0, R + 3 * S, 0, TAU); ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 1.2 * S; ctx.stroke(); }
+  }
+
+  /** Detail zoom: miniatures on clear flight stands over one enamel base (the base rim is the owner colour), and the
+   *  fleet's pennant with its sigil and rank (a limping fleet's pennant droops and it trails smoke). */
+  private drawMinis(t: Tok, d: { x: number; y: number; ang: number; bank?: number }, fill: string, now: number, I: DrawInput) {
+    const { ctx } = this;
+    const S = this.px(1);
+    const G = this.miniGeom();
+    const reduced = reducedMotion();
+    const owner = t.owner;
+    const cls = this.classesOf(I, t.fleets);
+    const n = Math.min(G.max, cls.length);
+    const lead = cls[0] ?? 'frigate';
+    const len0 = G.len * (0.8 + 0.2 * classLen(lead) / 1.06);
+    const F = formation(n);
+    let mx = 0, my = 0; for (const f of F) { mx += f.x / n; my += f.y / n; }
+    const flip = Math.cos(d.ang) < -0.2 ? -1 : 1;
+    const pos = F.map((f, i) => ({ x: (f.x - mx) * len0 * 0.72 * 1.05, y: (f.y - my) * len0 * 0.72 * flip, s: f.s, cls: cls[i] }));
+    let ext = 0; for (const q of pos) ext = Math.max(ext, Math.hypot(q.x, q.y));
+    const rb = G.rb * (n > 2 ? 1.18 : n > 1 ? 1.08 : 1);
+    void ext;
+    drawBase(ctx, 0, 0, rb * S, rb * this.rdpr, fill, { sel: t.selected, oos: t.oos, big: n > 2 });
+    const bob = reduced || t.moving ? 0 : Math.sin(now / 850 + (t.fleets[0]?.id ?? 0) * 1.7) * 1.3;
+    const order = pos.map((q, i) => ({ ...q, i })).sort((a, b) => a.y - b.y);
+    const eng = t.moving ? 1.1 : 0.3;
+    for (const q of order) {
+      const gx = q.x * S, gy = q.y * BASE_SQUASH * S;
+      const L = len0 * q.s * (0.78 + 0.22 * classLen(q.cls) / classLen(lead));
+      const stH = (G.stand + (q.i === 0 ? 2 : 0)) * S;
+      const sy = gy - stH + bob * S * (q.i % 2 ? 0.7 : 1);
+      drawStand(ctx, gx, gy, sy + L * S * 0.05, Math.max(1.2, L * 0.07) * S);
+      drawShip(ctx, gx, sy, L * S, L * this.rdpr, q.cls, owner, fill, d.ang, { shadow: { dx: stH * 0.3, dy: stH * 0.95, alpha: 0.42 }, engine: eng, bank: d.bank ?? 0 });
+    }
+    if (owner < 0) return;
+    const sfs = t.fleets.map(f => this.fleetById(I.state, f.id)).filter((x): x is Fleet => !!x && !!x.banner && x.ships.length > 0);
+    const ld = sfs.sort((a, b) => b.commander.rank - a.commander.rank)[0];
+    const limp = t.fleets.map(f => this.fleetById(I.state, f.id)).find(x => x?.limping);
+    if (limp && !reduced) {
+      for (let i = 0; i < 4; i++) {
+        const k = ((now / 1400) + i / 4) % 1;
+        smoke(ctx, (-t.side * 4 + Math.sin(i * 2.3 + k * 4) * 5) * S, (-G.stand * 0.6 - k * 34) * S, (5 + k * 12) * S, 0.42 * (1 - k));
+      }
+    }
+    if (!ld?.banner) return;
+    const pk = Math.pow(this.artK(), 0.4);
+    const dir = -t.side;
+    const ry = rb * BASE_SQUASH;
+    const bx = dir * rb * 0.78 * S, by = ry * 0.2 * S;
+    const top = by - (G.stand * 0.9 + len0 * 0.5 + 10) * S;
+    ctx.strokeStyle = 'rgba(8,8,14,0.9)'; ctx.lineWidth = 2.6 * S; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx, top - 2 * S); ctx.stroke();
+    const pg = ctx.createLinearGradient(bx - 1.2 * S, 0, bx + 1.2 * S, 0); pg.addColorStop(0, '#fff0c0'); pg.addColorStop(1, '#8a6420');
+    ctx.strokeStyle = pg; ctx.lineWidth = 1.2 * S; ctx.stroke();
+    const fw = 22 * S * pk, fh = 15 * S * pk;
+    const wv = reduced || ld.limping ? 0 : Math.sin(now / 300 + ld.id) * 1.4 * S;
+    ctx.save();
+    ctx.translate(bx, top);
+    if (ld.limping) ctx.rotate(dir * 1.2);
+    ctx.beginPath(); ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(dir * fw * 0.5, wv, dir * fw, 1.5 * S + wv * 0.7);
+    ctx.lineTo(dir * fw * 0.74, fh * 0.52 + wv * 0.4);
+    ctx.lineTo(dir * fw, fh + wv * 0.3);
+    ctx.quadraticCurveTo(dir * fw * 0.5, fh + wv * 0.6, 0, fh);
+    ctx.closePath();
+    enamel(ctx, ld.limping ? desat(fill, 0.45) : fill, 0, fh, ld.commander.rank >= 4 ? 'gold' : 'iron', 0.9 * S);
+    drawSigil(ctx, ld.banner.sigil, dir * fw * 0.4, fh * 0.48 + wv * 0.5, 10.5 * S * pk, goldPaint(ctx, 0, fh), true);
+    if (ld.oathbreaker) {
+      ctx.strokeStyle = '#ff4a3a'; ctx.lineWidth = 1.3 * S; ctx.beginPath();
+      ctx.moveTo(dir * fw * 0.62, 0.5 * S); ctx.lineTo(dir * fw * 0.48, fh * 0.4); ctx.lineTo(dir * fw * 0.6, fh * 0.6); ctx.lineTo(dir * fw * 0.44, fh); ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // ================================================================ battles on the board
   private shotSeen = new Set<string>();
-  /** A world's on-screen radius (ctx units) at its banner tier. */
-  private worldR(r: Region, I: DrawInput) { return this.siteR(r, this.bannerTier(r, I)) * this.px(1); }
+  /** A world's on-screen radius (ctx units). */
+  private worldR(r: Region, _I: DrawInput) { return this.siteR(r) * this.px(1); }
 
-  /** Operational/detail battle: each side's miniatures face off around the contested world, exchanging fire in their
-   *  house's style (lances, broadsides, plasma), the garrison answers from the surface; a compact roundel overlay
-   *  (swords, balance ring, round count) floats over the world. Side tokens keep their plates and hit areas. */
-  private drawSkirmish(r: Region, e: Engagement, toks: Tok[], I: DrawInput) {
+  /** One clear battle marker: crossed swords in a ring, on the star zoomed out and just above it closer in (the
+   *  pieces stay at their places beside the star). Round, odds and progress are in its tooltip. Up close, the pieces
+   *  exchange fire in their house's style and the garrison answers from the surface. */
+  private drawBattle(r: Region, _e: Engagement, toks: Tok[], I: DrawInput) {
     const { ctx } = this;
-    const st = I.state;
     const S = this.px(1);
+    const W = this.zw;
     const now = I.now;
     const reduced = reducedMotion();
-    const tier = this.tier;
-    const K = tier === 'detail' ? Math.pow(this.artK(), 0.75) : 1;
-    const pr = this.worldR(r, I);
-    // one token per owner
-    const byOwner = new Map<number, Tok>();
-    for (const t of toks) {
-      const o = byOwner.get(t.owner);
-      if (!o) byOwner.set(t.owner, { ...t, fleets: t.fleets.slice(), key: `b${r.id}:${t.owner}` });
-      else { o.fleets.push(...t.fleets); o.power += t.power; o.ships += t.ships; o.selected ||= t.selected; o.idle ||= t.idle; o.oos ||= t.oos; }
-    }
-    const sides = [...byOwner.values()].sort((a, b) => (a.owner === I.you ? -1 : b.owner === I.you ? 1 : a.owner - b.owner));
-    const owner = I.owners[r.id];
-    const garrison = r.garrison > 0 ? { owner: owner ?? -2, color: this.regionColor(st, owner) } : null;
-    const m = sides.length;
-    const R = pr + (58 + (m > 2 ? 8 : 0)) * K * S;
-    // pick each side's station around the world: preferred angles first, avoiding banners, plates and each other
-    const G0 = this.miniGeom();
-    const boxAt = (a: number) => {
-      const x = r.site.x + Math.cos(a) * R, y = r.site.y + Math.sin(a) * R * 0.8;
-      const w = (G0.rb * 2.2 + 40) * K * S, h = (G0.stand + G0.len) * K * S;
-      return { x: x - w / 2, y: y - h, w, h: h + G0.rb * 0.6 * K * S };
-    };
-    const over = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
-    const prefs = m === 1 ? [-2.3, -0.84, -1.57, -2.85, -0.3, 2.6, 0.55] : m === 2 ? [-2.62, -0.52, -1.57, -2.95, -0.2, 2.6, 0.55] : [-2.85, -1.57, -0.3, -2.2, -0.95, 2.6, 0.55];
-    const angs: number[] = [];
-    const taken: { x: number; y: number; w: number; h: number }[] = [];
-    for (let i = 0; i < m; i++) {
-      let best = prefs[i % prefs.length], bs = Infinity;
-      prefs.forEach((a, j) => {
-        if (angs.includes(a)) return;
-        const b = boxAt(a);
-        let sc = j * 0.02 * b.w * b.h;
-        for (const o of this.labelBoxes) sc += over(b, o);
-        for (const o of taken) sc += over(b, o) * 3;
-        // keep opposing sides on opposite flanks when possible
-        if (i === 1 && angs.length && Math.sign(Math.cos(a)) === Math.sign(Math.cos(angs[0]))) sc += b.w * b.h * 0.3;
-        if (sc < bs) { bs = sc; best = a; }
-      });
-      angs.push(best); taken.push(boxAt(best));
-    }
-    const pos = sides.map((t, i) => ({ t, x: r.site.x + Math.cos(angs[i]) * R, y: r.site.y + Math.sin(angs[i]) * R * 0.8 }));
-    // facing: toward the world (sieges) or toward the middle of the enemy line
-    const tgtOf = (i: number) => {
-      const others = pos.filter((_, j) => j !== i);
-      if (garrison && garrison.owner !== sides[i].owner) return r.site;
-      if (!others.length) return r.site;
-      return { x: others.reduce((a, q) => a + q.x, 0) / others.length, y: others.reduce((a, q) => a + q.y, 0) / others.length };
-    };
-    const live = new Set<string>();
-    pos.forEach((q, i) => {
-      const tg = tgtOf(i);
-      const ang = Math.atan2(tg.y - q.y, tg.x - q.x) + Math.PI / 2;
-      live.add(q.t.key);
-      let d = this.tokDisp.get(q.t.key);
-      if (!d) { d = { x: q.x, y: q.y, ang, bank: 0, born: -1e9, owner: q.t.owner, region: r.id, ids: [], color: this.colorOf(st, q.t.owner), last: q.t }; this.tokDisp.set(q.t.key, d); }
-      d.x = q.x; d.y = q.y; d.ang = ang; d.ids = q.t.fleets.map(f => f.id); d.last = q.t;
-      q.t.side = Math.cos(angs[i]) >= 0 ? 1 : -1;
-      this.drawToken(q.t, d, this.colorOf(st, q.t.owner), now, 1, q.t.alpha, I, true);
-    });
-    // ---- the exchange of fire
-    const G = this.miniGeom();
-    const lift = (G.stand + 2) * S;
-    const shooters: { owner: number; x: number; y: number; planet: boolean }[] = pos.map(q => ({ owner: q.t.owner, x: q.x, y: q.y - lift, planet: false }));
-    if (garrison) shooters.push({ owner: garrison.owner, x: r.site.x, y: r.site.y, planet: true });
-    if (!reduced && shooters.length > 1) {
-      ctx.save();
-      shooters.forEach((sh, si) => {
-        const enemies = shooters.filter(o => o.owner !== sh.owner);
-        if (!enemies.length) return;
-        const period = 900 + si * 170;
-        const ph = (r.id * 337 + si * 491) % period;
-        const k = Math.floor((now + ph) / period), t0 = k * period - ph;
-        for (let j = 0; j < 4; j++) {
-          const ts = t0 + j * 95;
-          const age = now - ts;
-          const tgt = enemies[(k + j) % enemies.length];
-          const seed = r.id * 7919 + si * 131 + k * 17 + j;
-          const jit = (n: number) => (h2(seed, n) - 0.5);
-          const from = sh.planet ? { x: sh.x + Math.cos(-1.9 + jit(1) * 2) * pr * 0.9, y: sh.y + Math.sin(-1.9 + jit(1) * 2) * pr * 0.9 } : { x: sh.x + jit(1) * G.len * 0.7 * S, y: sh.y + jit(2) * G.len * 0.3 * S };
-          let to: Pt;
-          if (tgt.planet) { const a = Math.atan2(from.y - tgt.y, from.x - tgt.x) + jit(3) * 1.2; to = { x: tgt.x + Math.cos(a) * pr * 0.75, y: tgt.y + Math.sin(a) * pr * 0.75 }; }
-          else to = { x: tgt.x + jit(3) * G.len * 0.6 * S, y: tgt.y + jit(4) * G.len * 0.3 * S };
-          this.weaponShot(sh.owner, sh.planet, from, to, age, S * K, `${r.id}:${si}:${k}:${j}`, tgt.planet ? pr : 0, tgt.planet ? { x: tgt.x, y: tgt.y } : null);
-        }
-      });
-      ctx.restore();
-    }
-    // ---- roundel overlay: crossed swords over the world, balance ring, round count
-    const list: Side[] = sides.map(t => ({ owner: t.owner, color: this.colorOf(st, t.owner), power: t.power, ids: t.fleets.map(f => f.id), garrison: 0, garrisonOnly: false }));
-    if (garrison) list.push({ owner: garrison.owner, color: garrison.color, power: garrisonPower(st, r), ids: [], garrison: r.garrison, garrisonOnly: true });
-    const total = list.reduce((a, q) => a + Math.max(0, q.power), 0) || 1;
-    const D = (this.coarse ? 13 : 12) * S;
-    const P = { x: r.site.x, y: r.site.y - pr - D - 5 * S };
+    const lane = isLane(r);
+    const R = lane ? 0 : this.siteR(r);
+    const D = W.s * 8.5 + (1 - W.s) * 11 + (this.coarse ? 1.5 : 0);
+    const lift = lane ? 0 : (1 - W.s) * (R + D + 4);
+    const P = { x: r.site.x, y: r.site.y - lift * S };
     const beat = reduced ? 0 : Math.max(0, Math.sin((now / 700) * Math.PI)) ** 4;
-    drawGlow(ctx, P.x, P.y, D * 2.6, [255, 140, 70], 0.35 + 0.25 * beat);
-    ctx.beginPath(); ctx.arc(P.x, P.y, D, 0, TAU);
-    ctx.fillStyle = '#1b0d14'; ctx.fill();
-    // balance ring: each side's share of the strength, in its colour
-    let a0 = -Math.PI / 2;
-    ctx.lineWidth = 3.4 * S;
-    for (const sd of list) { const da = (Math.max(0, sd.power) / total) * TAU; if (da > 0.02) { ctx.strokeStyle = sd.color; ctx.beginPath(); ctx.arc(P.x, P.y, D + 1.5 * S, a0, a0 + da); ctx.stroke(); } a0 += da; }
-    ctx.strokeStyle = 'rgba(255,214,176,0.85)'; ctx.lineWidth = 1 * S; ctx.beginPath(); ctx.arc(P.x, P.y, D - 0.8 * S, 0, TAU); ctx.stroke();
-    swords(ctx, P.x, P.y, D * 0.6, '#ffe7c2', 2 * S);
-    const rc = `R${e.rounds}`;
-    ctx.font = numFont(13 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const rw = ctx.measureText(rc).width + 8 * S;
-    roundRect(ctx, P.x + D + 5 * S, P.y - 7 * S, rw, 14 * S, 7 * S); gunmetal(ctx, P.y - 7 * S, P.y + 7 * S, 'rgba(255,214,176,0.6)', 1 * S);
-    ctx.fillStyle = '#ffd6b0'; ctx.fillText(rc, P.x + D + 5 * S + rw / 2, P.y + 0.5 * S);
-    ctx.textBaseline = 'alphabetic';
-    // drifting smoke over the fight
-    if (!reduced) for (let i = 0; i < 4; i++) {
-      const life = 3200, tt = ((now + i * 800 + r.id * 97) % life) / life;
-      const sx = r.site.x + (h2(r.id, i) - 0.5) * pr * 3, sy = r.site.y - pr * 0.8 + (h2(r.id, i + 9) - 0.5) * pr * 1.4 - tt * 16 * S;
-      smoke(ctx, sx, sy, (10 + tt * 14) * S * K, 0.35 * Math.sin(tt * Math.PI));
-    }
+    drawGlow(ctx, P.x, P.y, D * 2.4 * S, [255, 140, 70], 0.22 + 0.2 * beat);
+    ctx.beginPath(); ctx.arc(P.x, P.y, D * S, 0, TAU); ctx.fillStyle = '#1b0d14'; ctx.fill();
+    ctx.lineWidth = 1.7 * S; ctx.strokeStyle = 'rgba(255,214,176,0.92)'; ctx.stroke();
+    swords(ctx, P.x, P.y, D * 0.6 * S, '#ffe7c2', Math.max(1.4, D * 0.17) * S);
+    this.battleHits.push({ rid: r.id, x: P.x, y: P.y, r: D + 5 });
+    if (W.d < 0.3 || reduced || lane) return;
+    // ---- the exchange of fire (detail)
+    const G = this.miniGeom();
+    const lift2 = (G.stand + 2) * S;
+    const owner = I.owners[r.id];
+    const shooters: { owner: number; x: number; y: number; planet: boolean }[] = [];
+    for (const t of toks) { const d = this.tokDisp.get(t.key); if (d) shooters.push({ owner: t.owner, x: d.x, y: d.y - lift2, planet: false }); }
+    if (r.garrison > 0) shooters.push({ owner: owner ?? -2, x: r.site.x, y: r.site.y, planet: true });
+    if (shooters.length < 2) return;
+    const pr = R * S, K = Math.pow(this.artK(), 0.75);
+    ctx.save();
+    ctx.globalAlpha = W.d;
+    shooters.forEach((sh, si) => {
+      const enemies = shooters.filter(o => o.owner !== sh.owner);
+      if (!enemies.length) return;
+      const period = 900 + si * 170;
+      const ph = (r.id * 337 + si * 491) % period;
+      const k = Math.floor((now + ph) / period), t0 = k * period - ph;
+      for (let j = 0; j < 4; j++) {
+        const age = now - (t0 + j * 95);
+        const tgt = enemies[(k + j) % enemies.length];
+        const seed = r.id * 7919 + si * 131 + k * 17 + j;
+        const jit = (n: number) => (h2(seed, n) - 0.5);
+        const from = sh.planet ? { x: sh.x + Math.cos(-1.9 + jit(1) * 2) * pr * 0.9, y: sh.y + Math.sin(-1.9 + jit(1) * 2) * pr * 0.9 } : { x: sh.x + jit(1) * G.len * 0.7 * S, y: sh.y + jit(2) * G.len * 0.3 * S };
+        let to: Pt;
+        if (tgt.planet) { const a = Math.atan2(from.y - tgt.y, from.x - tgt.x) + jit(3) * 1.2; to = { x: tgt.x + Math.cos(a) * pr * 0.75, y: tgt.y + Math.sin(a) * pr * 0.75 }; }
+        else to = { x: tgt.x + jit(3) * G.len * 0.6 * S, y: tgt.y + jit(4) * G.len * 0.3 * S };
+        this.weaponShot(sh.owner, sh.planet, from, to, age, S * K, `${r.id}:${si}:${k}:${j}`, tgt.planet ? pr : 0, tgt.planet ? { x: tgt.x, y: tgt.y } : null);
+      }
+    });
+    ctx.restore();
     if (this.shotSeen.size > 400) this.shotSeen.clear();
   }
 
@@ -2284,89 +1850,6 @@ export class MapRenderer {
     }
   }
 
-  /** Crossed-swords disc ringed by a balance arc (each side ∝ its strength), each side's number beside it, the round count. */
-  private drawRoundel(r: Region, e: Engagement, toks: Tok[], I: DrawInput) {
-    const { ctx } = this;
-    const st = I.state;
-    const S = this.px(1);
-    const tier = this.tier;
-    const C = this.coarse;
-    const now = I.now;
-    const reduced = reducedMotion();
-    // sides: fleet tokens by owner, plus the garrison (on its owner's side, or a neutral side)
-    const sides = new Map<number, Side>();
-    for (const t of toks) {
-      const s = sides.get(t.owner) ?? { owner: t.owner, color: this.colorOf(st, t.owner), power: 0, ids: [], garrison: 0, garrisonOnly: false };
-      s.power += t.power; s.ids.push(...t.fleets.map(f => f.id));
-      sides.set(t.owner, s);
-    }
-    const owner = I.owners[r.id];
-    if (r.garrison > 0) {
-      const gk = owner === null || owner === undefined ? -2 : owner;
-      const s = sides.get(gk) ?? { owner: gk, color: this.regionColor(st, owner), power: 0, ids: [], garrison: 0, garrisonOnly: true };
-      s.power += garrisonPower(st, r); s.garrison = r.garrison;
-      sides.set(gk, s);
-    }
-    const list = [...sides.values()].sort((a, b) => (a.owner === I.you ? -1 : b.owner === I.you ? 1 : 0) || (a.garrisonOnly ? 1 : 0) - (b.garrisonOnly ? 1 : 0) || a.owner - b.owner);
-    const total = list.reduce((a, s) => a + Math.max(0, s.power), 0) || 1;
-    const D = (tier === 'strategic' ? 13 : 15) * S + (C ? 2 * S : 0);
-    const lane = isLane(r);
-    // on the planet itself (its tokens are replaced, the banner stays below); above the plate at strategic zoom
-    const P = lane ? { x: r.site.x, y: r.site.y } : tier === 'strategic' ? { x: r.site.x, y: r.site.y - 30 * S } : { x: r.site.x, y: r.site.y - 4 * S };
-    // the disc throbs (harder at strategic zoom, where it is the thing to notice) and flickers like firelight
-    const strong = tier === 'strategic';
-    const beat = reduced ? 0 : Math.max(0, Math.sin((now / 700) * Math.PI)) ** 4;
-    const Dz = D * (1 + (strong ? 0.14 : 0.07) * beat);
-    const flick = reduced ? 1 : 0.85 + 0.25 * Math.sin(now / 47 + r.id) * Math.sin(now / 83 + r.id * 3);
-    const gl = ctx.createRadialGradient(P.x, P.y, 0, P.x, P.y, D * 2.3);
-    gl.addColorStop(0, `rgba(255,140,70,${(0.3 + (strong ? 0.25 : 0.12) * beat) * flick})`); gl.addColorStop(1, 'rgba(255,80,40,0)');
-    ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(P.x, P.y, D * 2.3, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.arc(P.x, P.y, Dz, 0, TAU); ctx.fillStyle = '#1b0d14'; ctx.fill();
-    ctx.strokeStyle = 'rgba(255,214,176,0.85)'; ctx.lineWidth = 1.5 * S; ctx.stroke();
-    swords(ctx, P.x, P.y, Dz * 0.62, '#ffe7c2', 2.2 * S);
-    // balance bar under the disc: each side's share of the fighting strength, in its colour (a tug of war)
-    const bw = (tier === 'strategic' ? 44 : 56) * S, bh = 6 * S, by = P.y - D - 12 * S;
-    roundRect(ctx, P.x - bw / 2 - 1.5 * S, by - 1.5 * S, bw + 3 * S, bh + 3 * S, 3 * S); ctx.fillStyle = 'rgba(5,3,12,0.95)'; ctx.fill();
-    let bx = P.x - bw / 2;
-    for (const sd of list) { const w = (Math.max(0, sd.power) / total) * bw; if (w > 0.5 * S) { ctx.fillStyle = sd.color; ctx.fillRect(bx, by, w, bh); } bx += w; }
-    // round counter
-    const rc = `R${e.rounds}`;
-    ctx.font = numFont(13 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const rw = ctx.measureText(rc).width + 8 * S;
-    roundRect(ctx, P.x + bw / 2 + 4 * S, by + bh / 2 - 7 * S, rw, 14 * S, 7 * S); ctx.fillStyle = 'rgba(5,3,12,0.95)'; ctx.fill();
-    ctx.fillStyle = '#ffd6b0'; ctx.fillText(rc, P.x + bw / 2 + 4 * S + rw / 2, by + bh / 2 + 0.5 * S);
-    // side numbers: first left, second right, others above
-    const Z = this.tokSizes();
-    // a garrison fighting alone already shows its number on the banner: it only takes part in the balance bar
-    list.filter(s => !s.garrisonOnly || isLane(r)).forEach((s, i) => {
-      const txt = s.garrisonOnly ? String(s.garrison) : String(Math.round(s.power));
-      ctx.font = numFont(Z.nf * S);
-      const w = ctx.measureText(txt).width + (s.garrisonOnly ? 18 * S : 10 * S), h = Z.ph * S;
-      const pos = i === 0 ? { x: P.x - D - 6 * S - w, y: P.y - h / 2 } : i === 1 ? { x: P.x + D + 6 * S, y: P.y - h / 2 } : { x: P.x - w / 2, y: P.y - D - 18 * S - h - (i - 2) * (h + 3 * S) };
-      roundRect(ctx, pos.x, pos.y, w, h, 4 * S);
-      ctx.fillStyle = PLATE; ctx.fill();
-      ctx.strokeStyle = s.color; ctx.lineWidth = 2 * S; ctx.stroke();
-      ctx.textBaseline = 'middle';
-      if (s.garrisonOnly) {
-        shieldPath(ctx, pos.x + 8 * S, pos.y + h / 2, 9 * S, 11 * S); ctx.fillStyle = s.color; ctx.fill();
-        ctx.textAlign = 'left'; ctx.fillStyle = '#ffffff'; ctx.fillText(txt, pos.x + 15 * S, pos.y + h / 2 + 0.5 * S);
-      } else { ctx.textAlign = 'center'; ctx.fillStyle = '#ffffff'; ctx.fillText(txt, pos.x + w / 2, pos.y + h / 2 + 0.5 * S); }
-      ctx.textBaseline = 'alphabetic';
-      if (s.ids.length) {
-        const c = { x: pos.x + w / 2, y: pos.y + h / 2 };
-        for (const id of s.ids) this.drawnPos.set(id, c);
-        this.tokHits.push({ x: c.x, y: c.y, l: -w / S / 2 - 4, t: -h / S / 2 - 6, r: w / S / 2 + 4, b: h / S / 2 + 6, cr: this.hitR(), hit: { region: r.id, owner: s.owner, fleetIds: s.ids.slice() } });
-      }
-    });
-    // sparks thrown off the fight
-    this.sparkAcc += this.dt / Math.max(1, engagedCount(st));
-    if (!reduced && this.sparkAcc > (this.compact ? 140 : 90)) {
-      this.sparkAcc = 0;
-      this.spark(P.x, P.y, Math.random() < 0.5 ? '#ffd27a' : '#ff8a4c', 2, 0.12, 420);
-      if (Math.random() < 0.35) this.flash(r.site.x + (Math.random() - 0.5) * this.px(40), r.site.y + (Math.random() - 0.5) * this.px(30));
-    }
-  }
-
   /** A battle that ended last turn leaves a pennant in the winner's colour, fading. */
   private drawAftermath(I: DrawInput, engaged: Map<number, Engagement>) {
     const st = I.state;
@@ -2385,12 +1868,13 @@ export class MapRenderer {
       let t0 = this.aftermathSeen.get(key);
       if (t0 === undefined) { t0 = now; this.aftermathSeen.set(key, t0); if (this.aftermathSeen.size > 64) this.aftermathSeen.delete(this.aftermathSeen.keys().next().value!); }
       const age = now - t0;
-      const a = Math.min(1, age / 300) * (0.55 + 0.45 * Math.max(0, 1 - age / 6000));
+      // planted, then gone: an aftermath is news, not a permanent mark on the board
+      const a = Math.min(1, age / 300) * Math.max(0, 1 - age / 5000);
+      if (a <= 0) continue;
       const r = st.regions[b.region];
       const c = this.colorOf(st, b.winner);
       // the victor's banner planted on the world (top of the plate at strategic zoom)
-      const po = this.plateOff.get(r.id);
-      const base = this.tier === 'strategic' && !isLane(r) ? { x: r.site.x + (po?.x ?? 0), y: r.site.y + (po?.y ?? 0) - 12 * S } : { x: r.site.x, y: r.site.y - 3 * S };
+      const base = { x: r.site.x, y: r.site.y - (this.siteR(r) * 0.6) * S };
       const top = base.y - 24 * S;
       ctx.save();
       ctx.globalAlpha = a;
@@ -2489,12 +1973,13 @@ export class MapRenderer {
     const r = rid !== null ? I.state.regions[rid] : null;
     if (!r || isLane(r) || r.kind === 'void') return null;
     const p = this.toScreen(r.site);
-    const R = Math.max(18, this.siteR(r, this.bannerTier(r, I)) + 8) * this.ui;
+    const R = Math.max(14, this.siteR(r) + 6) * this.ui;
     return Math.hypot(p.x - m.x, p.y - m.y) <= R ? r.id : null;
   }
 
-  /** Per-segment target brightness: 0.8 for lanes touching a hovered/selected star, 0.55 for the lanes your
-   *  hovered/selected fleet can reach this turn, 1 along its route or planned path. Nothing while dragging. */
+  /** Per-segment target brightness: 0.5 for lanes touching a hovered/selected star, 0.34 for the lanes your
+   *  selected fleet can reach this turn (a hovered one lights only its route), 1 along its route or planned path.
+   *  Nothing while dragging. */
   private laneTargets(I: DrawInput, segs: LaneSeg[]): Map<number, number> {
     const st = I.state;
     const stars: number[] = [];
@@ -2503,27 +1988,28 @@ export class MapRenderer {
     if (sr !== null && st.regions[sr] && !isLane(st.regions[sr])) stars.push(sr);
     const hs = dragging ? null : this.hoverStar(I);
     if (hs !== null && !stars.includes(hs)) stars.push(hs);
-    const fleets = new Set<number>();
+    const fleets = new Set<number>(), hovered = new Set<number>();
     if (!dragging && I.you !== null) {
       for (const f of I.fleets) if (f.selected && f.owner === I.you && !f.ghost) fleets.add(f.id);
       const hit = this.mouse ? this.tokenAt(this.mouse.x, this.mouse.y) : null;
-      if (hit && hit.owner === I.you) for (const id of hit.fleetIds) fleets.add(id);
+      if (hit && hit.owner === I.you) for (const id of hit.fleetIds) { fleets.add(id); hovered.add(id); }
     }
     if (dragging) stars.length = 0;
     const fl = [...fleets].map(id => this.fleetById(st, id)).filter((f): f is Fleet => !!f && !!st.regions[f.region]);
     const arrows = I.plannedArrows.map(a => `${a.from.x},${a.from.y}>${a.to.x},${a.to.y}`).join(';');
-    const key = `${this.objId(st)}|${stars.join(',')}|${fl.map(f => `${f.id}@${f.region}`).join(',')}|${arrows}`;
+    const key = `${this.objId(st)}|${stars.join(',')}|${fl.map(f => `${f.id}@${f.region}${hovered.has(f.id) ? 'h' : ''}`).join(',')}|${arrows}`;
     if (key === this.laneMemo.key) return this.laneMemo.t;
     const t = new Map<number, number>();
     const idx = laneIndex(st, segs);
     const bump = (si: number, v: number) => { if ((t.get(si) ?? 0) < v) t.set(si, v); };
-    for (const rid of stars) for (const si of idx.touch.get(rid) ?? []) bump(si, 0.8);
+    for (const rid of stars) for (const si of idx.touch.get(rid) ?? []) bump(si, 0.5);
     const markPath = (ids: number[]) => { for (let i = 1; i < ids.length; i++) { const si = idx.pair.get(pairKey(ids[i - 1], ids[i])); if (si !== undefined) bump(si, 1); } };
     for (const f of fl) {
       let sp = 1;
       try { sp = Math.max(1, fleetSpeed(st, f)); } catch { /* */ }
-      const reach = within(st, f.region, sp);
-      segs.forEach((g, si) => { if (reach.has(g.u) && reach.has(g.v)) bump(si, 0.55); });
+      // this turn's reach, softly, only for the fleet you selected (not every fleet the mouse passes over)
+      const sel = I.fleets.some(d => d.id === f.id && d.selected);
+      if (sel) { const reach = within(st, f.region, sp); segs.forEach((g, si) => { if (reach.has(g.u) && reach.has(g.v)) bump(si, 0.34); }); }
       if (f.route?.path?.length) markPath([f.region, ...f.route.path]);
       // your plan for it this turn: the chain of planned arrows that starts at its token (or its system)
       const near = (a: Pt, b: Pt | undefined) => !!b && Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;
@@ -2611,21 +2097,6 @@ export class MapRenderer {
       ctx.strokeStyle = `rgba(220,205,255,${0.35 * a})`; ctx.lineWidth = this.px(1.5); ctx.stroke();
     }
   }
-  /** Names hidden by collisions fade in over everything while hovered. */
-  private drawHoverLabels(I: DrawInput) {
-    const { ctx } = this;
-    for (const [rid, a] of this.hoverA) {
-      const hl = this.hiddenLabels.get(rid);
-      if (!hl || a < 0.05) continue;
-      ctx.save(); ctx.globalAlpha = a;
-      roundRect(ctx, hl.x, hl.y, hl.w, hl.h, hl.h / 2); ctx.fillStyle = PLATE; ctx.fill();
-      ctx.font = hl.font; ctx.fillStyle = 'rgba(232,228,250,0.95)'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillText(hl.name, hl.x + this.px(8), hl.y + hl.h / 2 + this.px(0.5));
-      ctx.restore();
-    }
-    void I;
-  }
-
   private drawRegionSelection(I: DrawInput) {
     const rid = I.selectedRegion;
     if (rid !== this.selRegion) { this.selRegion = rid; this.selRegionT0 = I.now; }
@@ -2654,40 +2125,34 @@ export class MapRenderer {
     const p = r.site;
     const t = I.now / 1000;
     const S = this.px(1);
-    const bt = this.bannerTier(r, I);
-    if (bt === 'strategic') {
-      if (r.kind === 'throne' && !reduced) {
-        const br = 0.5 + 0.5 * Math.sin(t * 1.4);
-        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 44 * S);
-        g.addColorStop(0, `rgba(255,236,170,${0.12 + 0.1 * br})`); g.addColorStop(1, 'rgba(255,200,90,0)');
-        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, 44 * S, 0, TAU); ctx.fill();
-      }
-      return;
-    }
     if (r.kind === 'void' || isLane(r)) return;
-    const pr = this.siteR(r, bt) * S;
+    const W = this.zw;
+    const pr = this.siteR(r) * S;
     // off screen: nothing to animate (the map has many stars; phones must stay smooth)
     const v = this.view;
-    const m = pr * 3;
+    const m = pr * 5;
     if (p.x + m < v.x0 || p.x - m > v.x1 || p.y + m < v.y0 || p.y - m > v.y1) return;
     const kind = starKindOf(r);
-    const core = pr * STAR_NODE[kind].core * (bt === 'detail' ? 0.62 : 1);
+    const core = pr * STAR_NODE[kind].core * (1 - 0.38 * W.d);
     const fog = this.starFogged(r, I);
     if (!reduced) {
       if (r.kind === 'throne') {
         const br = 0.5 + 0.5 * Math.sin(t * 1.4);
-        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, pr * 4.5);
+        const gr = Math.max(pr * 4.5, 30 * S);
+        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, gr);
         g.addColorStop(0, `rgba(255,236,170,${0.2 + 0.14 * br})`); g.addColorStop(1, 'rgba(255,200,90,0)');
-        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, pr * 4.5, 0, TAU); ctx.fill();
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, gr, 0, TAU); ctx.fill();
       } else if (kind === 'pulsar') drawPulsarBeams(ctx, p.x, p.y, core, t, r.id, fog ? 0.35 : 1);
       else if (kind === 'blackhole') drawAccretionShimmer(ctx, p.x, p.y, core, t, r.id, fog ? 0.4 : 1);
       else if (!fog) drawTwinkle(ctx, p.x, p.y, core, kind, t, r.id);
     }
     // detail zoom: the bodies as tiny specks riding their orbits (frozen with reduced motion)
-    if (bt === 'detail' && r.bodies) {
+    if (W.d > 0.02 && r.bodies) {
       const bodies: { kind: string; q?: string; adj?: string }[] = r.bodies.slice(0, 3);
       if ((r.buildings.station ?? 0) > 0) bodies.push({ kind: 'station' });
+      ctx.save(); ctx.globalAlpha = W.d;
       if (bodies.length) drawSpecks(ctx, p.x, p.y, pr, bodies.slice(0, 3), reduced ? 0 : t, r.id * 7919 + 13, S * Math.sqrt(this.artK()), this.rdpr / S, r.kind, r.name, fog);
+      ctx.restore();
     }
     void c;
   }
@@ -2695,18 +2160,53 @@ export class MapRenderer {
   private view = { x0: -1e9, y0: -1e9, x1: 1e9, y1: 1e9 };
 
   // ================================================================ arrows
-  /** A planned-order arrow: owner colour, roman slot badge at the midpoint, swords head for a seize, dashed for a
-   *  join / route in transit, a non-roman label (LIVE ETA) at the head. */
+  /** Routes and planned orders drawn this frame (world polylines), for the map tooltip. */
+  /** systems wearing an attack reticle (this frame / last frame): their names step down to clear it */
+  private reticleNow = new Set<number>();
+  private reticleLast = new Set<number>();
+  private routeHits: { pts: Pt[]; kind: 'route' | 'seize' | Order['type']; to: number; owner: number; eta: number; fleet: number | null }[] = [];
+  /** The region whose star sits at world point p (an arrow's end), or -1. */
+  private regionAtSite(p: Pt): number {
+    const st = this.lastState;
+    if (!st) return -1;
+    for (const r of st.regions) if (Math.abs(r.site.x - p.x) < 1 && Math.abs(r.site.y - p.y) < 1) return r.id;
+    return -1;
+  }
+  /** Attack target: a reticle (ring + four ticks) round the target star in the attacker's colour. */
+  private reticle(p: Pt, rid: number, color: string, alpha = 1) {
+    const { ctx } = this;
+    const S = this.px(1);
+    const r = this.lastState?.regions[rid];
+    const R = ((r && !isLane(r) ? this.siteR(r) : 4) + 7) * S;
+    this.reticleNow.add(rid);
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.lineCap = 'round';
+    const draw = () => {
+      ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, TAU);
+      for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + Math.PI / 4; ctx.moveTo(p.x + Math.cos(a) * (R - 5 * S), p.y + Math.sin(a) * (R - 5 * S)); ctx.lineTo(p.x + Math.cos(a) * (R + 2 * S), p.y + Math.sin(a) * (R + 2 * S)); }
+    };
+    draw(); ctx.strokeStyle = 'rgba(5,3,12,0.75)'; ctx.lineWidth = 4.4 * S; ctx.stroke();
+    draw(); ctx.strokeStyle = color; ctx.lineWidth = 2 * S; ctx.stroke();
+    ctx.restore();
+    return R / S;
+  }
+
+  /** A planned order: one clean dashed line in the owner colour with a head at the destination (hollow for a join);
+   *  a seize ends in a target reticle round the star it attacks. A label is only kept for LIVE ETAs and the join "+". */
   arrow(a: Pt, b: Pt, color: string, dashed: boolean, label: string, alpha: number, kind: Order['type'] = 'move') {
     const { ctx } = this;
     const dx = b.x - a.x, dy = b.y - a.y;
     const L = Math.hypot(dx, dy) || 1;
     const nx = -dy / L, ny = dx / L;
-    const bend = Math.min(60, L * 0.18);
+    const bend = Math.min(60, L * 0.14);
     const cx = (a.x + b.x) / 2 + nx * bend, cy = (a.y + b.y) / 2 + ny * bend;
     const s = this.px(1);
-    const shrink = 20 * s;
-    const t1 = shrink / L, t2full = 1 - shrink / L;
+    const seize = kind === 'seize';
+    const to = this.regionAtSite(b);
+    let endGap = 20;
+    if (seize && to >= 0) { const r = this.lastState!.regions[to]; endGap = (isLane(r) ? 4 : this.siteR(r)) + 12; }
+    const t1 = 18 * s / L, t2full = 1 - endGap * s / L;
     if (t2full <= t1) return;
     const key = `${a.x | 0},${a.y | 0},${b.x | 0},${b.y | 0},${color},${dashed ? 1 : 0}`;
     this.arrowFrame.add(key);
@@ -2715,93 +2215,276 @@ export class MapRenderer {
     const grow = easeOutCubic(clamp01((this.now - born) / 380));
     const t2 = t1 + (t2full - t1) * grow;
     const q = (t: number) => ({ x: (1 - t) ** 2 * a.x + 2 * (1 - t) * t * cx + t * t * b.x, y: (1 - t) ** 2 * a.y + 2 * (1 - t) * t * cy + t * t * b.y });
-    const p2 = q(t2), pm = q(0.5), pb = q(Math.max(t1, t2 - 0.02));
-    const seize = kind === 'seize';
+    const p2 = q(t2), pb = q(Math.max(t1, t2 - 0.02));
+    const pts: Pt[] = [];
+    for (let i = 0; i <= 16; i++) pts.push(q(t1 + (t2 - t1) * (i / 16)));
+    if (alpha >= 0.9) this.routeHits.push({ pts, kind, to, owner: -9, eta: 0, fleet: null });
     ctx.save();
     ctx.globalAlpha = alpha;
-    // dark casing so the arrow reads over any fill
-    const trace = () => { ctx.beginPath(); ctx.moveTo(q(t1).x, q(t1).y); const N = 16; for (let i = 1; i <= N; i++) { const pp = q(t1 + (t2 - t1) * (i / N)); ctx.lineTo(pp.x, pp.y); } };
+    const trace = () => { ctx.beginPath(); pts.forEach((pp, i) => (i ? ctx.lineTo(pp.x, pp.y) : ctx.moveTo(pp.x, pp.y))); };
     ctx.lineCap = 'round';
-    trace(); ctx.strokeStyle = 'rgba(5,3,12,0.55)'; ctx.lineWidth = 6 * s; ctx.stroke();
-    ctx.strokeStyle = color; ctx.lineWidth = 3 * s;
-    if (dashed) { ctx.setLineDash([7 * s, 6 * s]); ctx.lineDashOffset = reducedMotion() ? 0 : -(this.now / 45) * s; }
+    trace(); ctx.strokeStyle = 'rgba(5,3,12,0.5)'; ctx.lineWidth = 5.5 * s; ctx.stroke();
+    ctx.strokeStyle = color; ctx.lineWidth = 2.6 * s;
+    ctx.setLineDash([8 * s, 6 * s]); ctx.lineDashOffset = reducedMotion() ? 0 : -(this.now / 60) * s;
     trace(); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
-    if (!dashed && grow >= 1 && !reducedMotion()) {
-      const ph = ((this.now / 1500) + ((a.x * 7 + b.y * 3) % 1000) / 1000) % 1;
-      const sp = q(t1 + (t2 - t1) * ph);
-      const fade = Math.sin(ph * Math.PI);
-      ctx.fillStyle = `rgba(255,255,255,${0.85 * fade})`;
-      ctx.beginPath(); ctx.arc(sp.x, sp.y, 2.4 * s, 0, TAU); ctx.fill();
-    }
     const ang = Math.atan2(p2.y - pb.y, p2.x - pb.x);
-    if (seize && grow >= 0.9) {
-      ctx.beginPath(); ctx.arc(p2.x, p2.y, 10 * s, 0, TAU); ctx.fillStyle = 'rgba(5,3,12,0.92)'; ctx.fill();
-      ctx.strokeStyle = color; ctx.lineWidth = 2 * s; if (dashed) ctx.setLineDash([3 * s, 2 * s]); ctx.stroke(); ctx.setLineDash([]);
-      swords(ctx, p2.x, p2.y, 6.5 * s, '#ffffff', 1.7 * s);
-    } else {
-      ctx.fillStyle = color;
+    if (seize && grow >= 0.9 && to >= 0) this.reticle(b, to, color);
+    else {
       ctx.beginPath(); ctx.moveTo(p2.x + Math.cos(ang) * 10 * s, p2.y + Math.sin(ang) * 10 * s);
       ctx.lineTo(p2.x + Math.cos(ang + 2.5) * 10 * s, p2.y + Math.sin(ang + 2.5) * 10 * s);
       ctx.lineTo(p2.x + Math.cos(ang - 2.5) * 10 * s, p2.y + Math.sin(ang - 2.5) * 10 * s); ctx.closePath();
-      if (dashed && kind !== 'move') { ctx.fillStyle = 'rgba(5,3,12,0.9)'; ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = 1.6 * s; ctx.stroke(); } else ctx.fill();
+      ctx.strokeStyle = 'rgba(5,3,12,0.8)'; ctx.lineWidth = 1.6 * s; ctx.stroke();
+      if (dashed && kind !== 'move' && !seize) { ctx.fillStyle = 'rgba(5,3,12,0.9)'; ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = 1.6 * s; ctx.stroke(); }
+      else { ctx.fillStyle = color; ctx.fill(); }
     }
-    if (label && grow > 0.5) {
-      const ls = grow < 1 ? easeOutBack(clamp01((grow - 0.5) / 0.5)) : 1;
-      ctx.font = numFont(13 * s * ls); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      if (ROMAN.test(label)) {
-        const w = Math.max(20 * s, ctx.measureText(label).width + 10 * s) * ls;
-        roundRect(ctx, pm.x - w / 2, pm.y - 9 * s * ls, w, 18 * s * ls, 9 * s * ls); ctx.fillStyle = 'rgba(8,4,16,0.94)'; ctx.fill();
-        ctx.strokeStyle = color; ctx.lineWidth = 1.5 * s; ctx.stroke();
-        ctx.fillStyle = '#fff'; ctx.fillText(label, pm.x, pm.y + 0.5 * s);
-      } else {
-        // ETA at the head
-        const w = measureIconText(ctx, label) + 10 * s;
-        const hx = p2.x + Math.cos(ang) * 4 * s + (Math.cos(ang) >= 0 ? 8 * s : -8 * s - w), hy = p2.y - 20 * s;
-        roundRect(ctx, hx, hy, w, 17 * s, 4 * s); ctx.fillStyle = 'rgba(8,4,16,0.92)'; ctx.fill();
-        ctx.strokeStyle = hexA(color, 0.8); ctx.lineWidth = 1 * s; ctx.stroke();
-        ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; fillIconText(ctx, label, hx + 5 * s, hy + 9 * s);
-      }
+    // only a LIVE ETA ("3h") or the join "+" is spelled out on the map; order slots live in the strip
+    if (label && !/^[IVX]+$/.test(label) && grow > 0.5) {
+      ctx.font = numFont(13 * s); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      const w = measureIconText(ctx, label);
+      const hx = p2.x + (Math.cos(ang) >= 0 ? 10 * s : -10 * s - w), hy = p2.y - 14 * s;
+      haloText(ctx, label, hx, hy, '#ffffff', 'rgba(5,3,12,0.85)', 3 * s);
       ctx.textBaseline = 'alphabetic';
     }
     ctx.restore();
   }
 
-  /** A route along hyperlane dots: dashed polyline in the owner colour, head (or swords for a seize), ETA label. */
-  private routeArrow(pts: Pt[], color: string, label: string, seize: boolean) {
+  /** A route along hyperlane dots: one dashed polyline in the owner colour, a head at the destination, or the target
+   *  reticle for a seize. Rivals' routes are fainter. */
+  private routeArrow(pts: Pt[], color: string, seize: boolean, dest: number, mine: boolean) {
     const { ctx } = this;
     const s = this.px(1);
     const end = pts[pts.length - 1], prev = pts[pts.length - 2];
     const L = Math.hypot(end.x - prev.x, end.y - prev.y) || 1;
-    const back = Math.min(L * 0.5, 16 * s);
+    const r = this.lastState?.regions[dest];
+    const back = Math.min(L * 0.6, ((r && !isLane(r) ? this.siteR(r) : 3) + (seize ? 12 : 6)) * s);
     const tip = { x: end.x - ((end.x - prev.x) / L) * back, y: end.y - ((end.y - prev.y) / L) * back };
     const ang = Math.atan2(end.y - prev.y, end.x - prev.x);
     ctx.save();
+    ctx.globalAlpha = mine ? 1 : 0.6;
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     const trace = () => { ctx.beginPath(); pts.slice(0, -1).forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.lineTo(tip.x, tip.y); };
-    trace(); ctx.strokeStyle = 'rgba(5,3,12,0.55)'; ctx.lineWidth = 6 * s; ctx.stroke();
-    ctx.setLineDash([7 * s, 6 * s]); ctx.lineDashOffset = reducedMotion() ? 0 : -(this.now / 45) * s;
-    trace(); ctx.strokeStyle = color; ctx.lineWidth = 3 * s; ctx.stroke();
+    trace(); ctx.strokeStyle = 'rgba(5,3,12,0.5)'; ctx.lineWidth = 5.5 * s; ctx.stroke();
+    ctx.setLineDash([8 * s, 6 * s]); ctx.lineDashOffset = reducedMotion() ? 0 : -(this.now / 60) * s;
+    trace(); ctx.strokeStyle = color; ctx.lineWidth = 2.6 * s; ctx.stroke();
     ctx.setLineDash([]); ctx.lineDashOffset = 0;
-    if (seize) {
-      ctx.beginPath(); ctx.arc(tip.x, tip.y, 10 * s, 0, TAU); ctx.fillStyle = 'rgba(5,3,12,0.92)'; ctx.fill();
-      ctx.strokeStyle = color; ctx.lineWidth = 2 * s; ctx.stroke();
-      swords(ctx, tip.x, tip.y, 6.5 * s, '#ffffff', 1.7 * s);
-    } else {
-      ctx.fillStyle = color;
+    if (seize) this.reticle(end, dest, color);
+    else {
       ctx.beginPath(); ctx.moveTo(tip.x + Math.cos(ang) * 10 * s, tip.y + Math.sin(ang) * 10 * s);
       ctx.lineTo(tip.x + Math.cos(ang + 2.5) * 10 * s, tip.y + Math.sin(ang + 2.5) * 10 * s);
-      ctx.lineTo(tip.x + Math.cos(ang - 2.5) * 10 * s, tip.y + Math.sin(ang - 2.5) * 10 * s); ctx.closePath(); ctx.fill();
-    }
-    if (label) {
-      ctx.font = numFont(13 * s); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-      const w = measureIconText(ctx, label) + 10 * s;
-      const hx = tip.x + (Math.cos(ang) >= 0 ? 12 * s : -12 * s - w), hy = tip.y - 22 * s;
-      roundRect(ctx, hx, hy, w, 17 * s, 4 * s); ctx.fillStyle = 'rgba(8,4,16,0.92)'; ctx.fill();
-      ctx.strokeStyle = hexA(color, 0.8); ctx.lineWidth = 1 * s; ctx.stroke();
-      ctx.fillStyle = '#fff'; fillIconText(ctx, label, hx + 5 * s, hy + 9 * s);
-      ctx.textBaseline = 'alphabetic';
+      ctx.lineTo(tip.x + Math.cos(ang - 2.5) * 10 * s, tip.y + Math.sin(ang - 2.5) * 10 * s); ctx.closePath();
+      ctx.strokeStyle = 'rgba(5,3,12,0.8)'; ctx.lineWidth = 1.6 * s; ctx.stroke();
+      ctx.fillStyle = color; ctx.fill();
     }
     ctx.restore();
+  }
+
+  // ================================================================ map tooltip
+  /** Hover anything on the map (tap on touch) to learn what it is: a small plain-words card next to the pointer.
+   *  The renderer owns it because it knows what is drawn where; it reuses the shell's `.uxtip` look. */
+  private tipEl: HTMLDivElement | null = null;
+  private tipKey = '';
+  private tapAt: { x: number; y: number; until: number } | null = null;
+  private tipCand = { key: '', t: 0 };
+  private quietUntil = 0;
+  private downAt: { x: number; y: number; t: number } | null = null;
+  private bindTip() {
+    const c = this.canvas;
+    const local = (e: PointerEvent) => { const r = c.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+    c.addEventListener('pointerdown', e => {
+      this.tapAt = null;
+      this.downAt = e.pointerType === 'mouse' ? null : { ...local(e), t: performance.now() };
+    }, { passive: true });
+    c.addEventListener('pointerup', e => {
+      const d = this.downAt;
+      this.downAt = null;
+      if (!d || e.pointerType === 'mouse') return;
+      const p = local(e);
+      if (performance.now() - d.t < 450 && Math.hypot(p.x - d.x, p.y - d.y) < 12) this.tapAt = { ...p, until: performance.now() + 3500 };
+    }, { passive: true });
+    c.addEventListener('pointercancel', () => { this.downAt = null; this.tapAt = null; }, { passive: true });
+  }
+
+  private updateTip(I: DrawInput) {
+    const tapping = this.tapAt && performance.now() < this.tapAt.until ? this.tapAt : null;
+    const pt = this.mouse ?? tapping;
+    // quiet while dragging, while the selected fleet previews an order (the shell's preview card speaks then), just
+    // after a drop (the shell may pop an offer there), and until the mouse has rested on a mark for a moment
+    if (I.drag) this.quietUntil = performance.now() + 900;
+    const busy = !!I.drag || performance.now() < this.quietUntil || battleViewerOpen() || !this.canvas.isConnected;
+    let tip = pt && !busy ? this.tipFor(I, pt.x, pt.y) : null;
+    if (tip && !tapping) {
+      if (tip.key !== this.tipCand.key) this.tipCand = { key: tip.key, t: performance.now() };
+      if (tip.key !== this.tipKey && performance.now() - this.tipCand.t < 350) tip = null;
+    }
+    if (!tip) {
+      if (this.tipEl && this.tipKey) { this.tipEl.style.display = 'none'; this.tipKey = ''; }
+      return;
+    }
+    if (!this.tipEl) {
+      const el = document.createElement('div');
+      el.className = 'uxtip maptip';
+      el.setAttribute('role', 'tooltip');
+      el.style.cssText = 'position:fixed;display:none;pointer-events:none;white-space:normal;max-width:17rem;';
+      (this.canvas.parentElement ?? document.body).appendChild(el);
+      this.tipEl = el;
+    }
+    const el = this.tipEl;
+    if (tip.key !== this.tipKey) { el.innerHTML = tip.html; this.tipKey = tip.key; el.style.display = 'block'; }
+    const cr = this.canvas.getBoundingClientRect();
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const ax = cr.left + pt!.x, ay = cr.top + pt!.y;
+    let y = ay - h - (tapping ? 34 : 18);
+    if (y < 8) y = ay + 24;
+    const x = Math.max(8, Math.min(window.innerWidth - w - 8, ax - w / 2));
+    el.style.left = `${Math.round(x)}px`; el.style.top = `${Math.round(Math.min(window.innerHeight - h - 8, y))}px`;
+  }
+
+  /** What is under screen point (x, y), in plain words: a fleet piece, a battle, a star (or its name), a route, a
+   *  hyperlane waypoint. */
+  private tipFor(I: DrawInput, x: number, y: number): { key: string; html: string } | null {
+    const st = I.state;
+    const tok = this.tokenAt(x, y);
+    if (tok) return { key: `f${tok.fleetIds.join(',')}|${st.turn}`, html: this.fleetTip(I, tok) };
+    for (const b of this.battleHits) {
+      const c = this.toScreen(b);
+      if (Math.hypot(c.x - x, c.y - y) <= b.r * this.ui) return { key: `b${b.rid}|${st.turn}`, html: this.battleTip(I, b.rid) };
+    }
+    for (const g of this.signalHits) {
+      const c = this.toScreen(g);
+      if (Math.abs(c.x - x) <= 11 * this.ui && Math.abs(c.y - y) <= 10 * this.ui) return { key: `i${g.text}`, html: tipHtml('Intel report', [g.text, 'Reports can be feints: a rival may fake movement.']) };
+    }
+    const star = this.bannerAt(x, y);
+    if (star !== null) return { key: `s${star}|${st.turn}|${I.owners[star]}`, html: this.starTip(I, star) };
+    const w = this.toWorld(x, y), tol = 7 / this.cam.z * this.ui;
+    for (const h of this.routeHits) {
+      for (let i = 1; i < h.pts.length; i++) {
+        if (segDist(w, h.pts[i - 1], h.pts[i]) <= tol) return { key: `r${h.kind}${h.to}${h.fleet}`, html: this.routeTip(I, h) };
+      }
+    }
+    for (const r of st.regions) {
+      if (!isLane(r)) continue;
+      const c = this.toScreen(r.site);
+      if (Math.hypot(c.x - x, c.y - y) <= 7 * this.ui) return { key: `w${r.id}`, html: tipHtml('Hyperlane waypoint', ['One jump of travel along this lane. Fleets move a few jumps a turn; a route through the dots shows the way.']) };
+    }
+    return null;
+  }
+
+  private ownerName(I: DrawInput, o: number | null | undefined, cap = true): string {
+    if (o === null || o === undefined || o === -2) return cap ? 'Unclaimed' : 'unclaimed';
+    if (o === -1) return 'The Warden';
+    if (o === I.you) return cap ? 'Yours' : 'you';
+    return I.state.players[o]?.name ?? 'Unknown';
+  }
+
+  private starTip(I: DrawInput, rid: number): string {
+    const st = I.state, r = st.regions[rid];
+    const owner = I.owners[rid];
+    const V = st.rules.victory as typeof st.rules.victory & { vpPerThronePerTurn?: number; vpPerRelic?: number; crownMajorityVp?: number };
+    const lines: string[] = [];
+    const kindWord = r.kind === 'throne' ? 'The Throne' : r.kind === 'crown' ? 'Crown world' : r.kind === 'home' ? 'Capital' : r.kind === 'relic' ? 'Relic site' : r.kind === 'void' ? 'Empty space' : 'Colony world';
+    lines.push(`${kindWord} · ${owner === I.you && I.you !== null ? 'yours' : this.ownerName(I, owner)}`);
+    if (r.kind === 'crown') lines.push(`Hold it to score ${V.vpPerCrownPerTurn ?? 1} victory point each turn${V.crownMajorityVp ? ` (+${V.crownMajorityVp} more while you hold 2 or more Crowns)` : ''}.`);
+    if (r.kind === 'throne') lines.push('Hold it to score victory points every turn, more the longer you keep it.');
+    if (r.kind === 'relic' && r.relic) lines.push(`An unexcavated relic: excavate it for ${V.vpPerRelic ?? 2} victory points.`);
+    if (r.kind !== 'void') {
+      const g = this.garrisonText(r, I);
+      const mine = owner === I.you && I.you !== null;
+      if (!g.known) lines.push('Defenders unknown: not scouted yet.');
+      else if (mine) lines.push(`Defenders ${g.txt}: your garrison here.`);
+      else lines.push(`Defenders ${g.txt}${g.fog ? ' (last seen)' : ''}: the garrison you must beat to take it.`);
+    }
+    const fogged = this.starFogged(r, I);
+    if (!fogged) {
+      const b = r.buildings;
+      const parts: string[] = [];
+      if (b.fortress) parts.push(`fortress ${b.fortress}`);
+      if (b.battery) parts.push(`${b.battery} batter${b.battery > 1 ? 'ies' : 'y'}`);
+      if (b.pshield) parts.push('planetary shield');
+      if (b.shipyard) parts.push('shipyard');
+      if (b.gate) parts.push('warp gate');
+      if (b.depot) parts.push('supply depot');
+      if (b.academy) parts.push('academy');
+      if (b.extractor) parts.push('extractor');
+      if (parts.length) lines.push(`Built: ${parts.join(', ')}.`);
+      if (owner !== null && owner !== undefined && owner >= 0 && r.kind !== 'void') {
+        let max = 0; try { max = maxDevAt(st, rid); } catch { max = 0; }
+        if (max) lines.push(`Development ${r.dev} of ${max}.`);
+      }
+    }
+    if (st.rules.empire?.enabled !== false) {
+      const T = r.trait ? WORLD_TRAITS[r.trait] : null, Vn = r.vein ? VEINS[r.vein] : null;
+      if (T) lines.push(`${T.name}: ${T.desc}`);
+      if (Vn) lines.push(`${Vn.name} vein: ${Vn.desc}`);
+    }
+    const sg = this.sieged(r, st);
+    if (sg && r.garrison >= 0) lines.push(`Under siege: garrison ${r.garrison} of ${garrisonMax(st, r, sg === true ? 0 : sg.garrisonStart)} left.`);
+    if (I.you !== null && owner !== I.you && (r.loyalty[I.you] ?? 0) > 0) {
+      const thr = owner === null || owner === undefined ? st.rules.influence.flipThreshold : st.rules.influence.rivalFlipThreshold;
+      lines.push(`Your influence here: ${Math.round(clamp01(r.loyalty[I.you] / Math.max(1e-6, thr)) * 100)}% of the way to winning it over.`);
+    }
+    if (contestOn(st) && r.owner !== null && r.bodies) {
+      const cs = systemStatus(st, r);
+      if (cs.contested) lines.push(`Contested: ${cs.holder === null ? 'nobody' : this.ownerName(I, cs.holder)} holds its space (the dashed ring), ${cs.contestedTurns} turn${cs.contestedTurns === 1 ? '' : 's'} so far.`);
+      if (cs.occupiedLeft > 0) lines.push(`Occupied: ${cs.occupiedLeft} turn${cs.occupiedLeft === 1 ? '' : 's'} left.`);
+      if (cs.tribute) lines.push(`Paying tribute to ${this.ownerName(I, cs.tribute.to, false)}: ${cs.tributeLeft} turn${cs.tributeLeft === 1 ? '' : 's'} left.`);
+    }
+    if (this.cutOffOf(I)?.has(rid)) lines.push('Cut off from your capital: half yield (the hatching).');
+    if (r.story?.calling && owner !== null && owner !== undefined && owner >= 0) { const c = CALLINGS[r.story.calling.id]; if (c) lines.push(`Calling: ${c.name}.`); }
+    const debts = (st.soul?.debts ?? []).filter(d => !d.cleared && d.region === rid);
+    if (debts.length) lines.push(`Blood-debt owed here (${debts.length}).`);
+    return tipHtml(r.name, lines, 'Click for the full card.');
+  }
+
+  private fleetTip(I: DrawInput, hit: TokenHit): string {
+    const st = I.state;
+    const fl = hit.fleetIds.map(id => this.fleetById(st, id)).filter((f): f is Fleet => !!f);
+    const mine = hit.owner === I.you && I.you !== null;
+    const power = Math.round(fl.reduce((a, f) => a + powerOf(st, f), 0));
+    const ships = fl.reduce((a, f) => a + f.ships.length, 0);
+    const who = mine ? 'Your' : hit.owner === -1 ? "The Warden's" : `${this.ownerName(I, hit.owner)}`;
+    const title = fl.length > 1 ? `${who} ${fl.length} fleets` : `${who} fleet${fl[0]?.name ? `: ${fl[0].name}` : ''}`;
+    const lines = [`Strength ${power} (${ships} ship${ships === 1 ? '' : 's'}): its attack power in battle.`];
+    const r = st.regions[hit.region];
+    if (r) lines.push(isLane(r) ? 'On a hyperlane, between systems.' : `At ${r.name}.`);
+    const f0 = fl.find(f => f.route?.path?.length);
+    if (f0?.route) {
+      const dest = st.regions[f0.route.seize ?? f0.route.path[f0.route.path.length - 1]];
+      let eta = 0; try { eta = Math.max(1, Math.ceil(f0.route.path.length / Math.max(1, fleetSpeed(st, f0)))); } catch { eta = 0; }
+      if (dest) lines.push(`${f0.route.seize !== null && f0.route.seize !== undefined ? 'Attacking' : 'Moving to'} ${dest.name}${eta && st.mode !== 'live' ? `, arrives in ${eta} turn${eta === 1 ? '' : 's'}` : ''}.`);
+    }
+    if (mine && I.fleets.some(d => hit.fleetIds.includes(d.id) && d.idle)) lines.push('Idle: no orders yet this turn (it breathes).');
+    if (fl.some(f => (f.oos ?? 0) > 0)) lines.push('Out of supply (amber rim): it weakens each turn away from supply.');
+    if (fl.some(f => f.limping)) lines.push('Limping home: cannot attack and dies if caught.');
+    if (fl.some(f => f.exposed !== null && f.exposed !== undefined && f.exposed >= st.turn)) lines.push('Exposed (red rim): caught out this turn.');
+    const post = I.postures ? hit.fleetIds.map(id => I.postures!.get(id)).find(Boolean) : null;
+    if (post && post !== 'steady') lines.push(`Posture: ${POSTURES[post]?.name ?? post}.`);
+    return tipHtml(title, lines, mine ? 'Drag it onto a system to give an order.' : '');
+  }
+
+  private battleTip(I: DrawInput, rid: number): string {
+    const st = I.state, r = st.regions[rid];
+    const e = (st.engagements ?? []).find(x => x.region === rid);
+    const sides = new Map<number, number>();
+    for (const f of st.fleets) if (f.region === rid && f.ships.length) sides.set(f.owner, (sides.get(f.owner) ?? 0) + powerOf(st, f));
+    const owner = I.owners[rid];
+    const gp = r.garrison > 0 ? garrisonPower(st, r) : 0;
+    const gk = owner === null || owner === undefined ? -2 : owner;
+    if (gp) sides.set(gk, (sides.get(gk) ?? 0) + gp);
+    const total = [...sides.values()].reduce((a, b) => a + b, 0) || 1;
+    const list = [...sides.entries()].sort((a, b) => b[1] - a[1]);
+    const lines = [`${list.map(([o, p]) => `${this.ownerName(I, o)} ${Math.round(p)}${o === gk && gp ? ' (with the garrison)' : ''}`).join(' vs ')}.`];
+    if (list.length > 1) lines.push(`Odds: ${this.ownerName(I, list[0][0], false) === 'you' ? 'you are' : `${this.ownerName(I, list[0][0])} is`} favoured, about ${Math.round((list[0][1] / total) * 100)}% of the strength.`);
+    if (r.garrison >= 0 && e) lines.push(`Garrison ${r.garrison} of ${garrisonMax(st, r, e.garrisonStart)} left.`);
+    return tipHtml(`Battle at ${r.name}${e ? `, round ${e.rounds}` : ''}`, lines, 'It goes on next turn unless one side breaks.');
+  }
+
+  private routeTip(I: DrawInput, h: { kind: string; to: number; owner: number; eta: number; fleet: number | null }): string {
+    const st = I.state;
+    const dest = st.regions[h.to];
+    const name = dest ? (isLane(dest) ? 'a hyperlane waypoint' : dest.name) : 'there';
+    if (h.kind === 'seize') return tipHtml(`Attack target: ${name}`, [`${h.fleet !== null ? this.ownerName(I, h.owner) === 'Yours' ? 'Your fleet' : `${this.ownerName(I, h.owner)} fleet` : 'Your fleet'} will try to seize it${h.eta ? `, arriving in ${h.eta} turn${h.eta === 1 ? '' : 's'}` : ''}.`, 'The reticle marks the system under attack.']);
+    if (h.kind === 'route') return tipHtml(`Route to ${name}`, [`${this.ownerName(I, h.owner) === 'Yours' ? 'Your fleet' : `${this.ownerName(I, h.owner)} fleet`} is on its way${h.eta ? `, arriving in ${h.eta} turn${h.eta === 1 ? '' : 's'}` : ''}.`]);
+    return tipHtml(`Planned ${h.kind === 'move' ? 'move' : h.kind}: ${name}`, ['An order in your plan for this turn (the strip below lists them).']);
   }
 
   /** The arrow under a drag: marching dashes toward the head, a verb glyph at the head; the head eases (snaps) to `to`. */
@@ -3016,7 +2699,6 @@ export class MapRenderer {
         fillIconText(ctx, fx.text, P.x, y, { halo: `rgba(6,3,14,${0.7 * Math.min(1, (1 - t) * 2)})`, haloWidth: this.px(3) });
       }
     }
-    if (list === this.ownFx) this.drawHoverLabels(I);
   }
 
   /** Particles that belong to an effect, spawned on its first visible frame. */
@@ -3144,8 +2826,6 @@ export function regionLayout(st: GameState, fleets: { id: number; region: number
   const out = new Map<number, Pt>();
   if (!(scale > 0)) scale = 2.5;
   const Rs = medianRegionRadius(st) / scale;
-  const tier = tierFor(Rs, null);
-  const k = slotScale(tier, Rs);
   let byId: Map<number, number> | null = null;
   const ownerOf = (id: number): number => {
     if (!byId) {
@@ -3158,7 +2838,7 @@ export function regionLayout(st: GameState, fleets: { id: number; region: number
   for (const f of fleets) {
     const r = st.regions[f.region];
     if (!r) continue;
-    out.set(f.id, anchorOf(r, f.owner ?? ownerOf(f.id), tier, scale, k));
+    out.set(f.id, anchorOf(r, f.owner ?? ownerOf(f.id), scale, Rs));
   }
   return out;
 }
@@ -3200,4 +2880,16 @@ function laneIndex(st: GameState, segs: LaneSeg[]) {
   v = { pair, touch };
   idxCache.set(segs, v);
   return v;
+}
+
+/** Distance from p to the segment ab (world units). */
+function segDist(p: Pt, a: Pt, b: Pt): number {
+  const bx = b.x - a.x, by = b.y - a.y, L2 = bx * bx + by * by || 1;
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * bx + (p.y - a.y) * by) / L2));
+  return Math.hypot(p.x - (a.x + bx * t), p.y - (a.y + by * t));
+}
+const escTip = (t: string) => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+/** A map tooltip: a bold title, plain-words lines, an optional faint hint. */
+function tipHtml(title: string, lines: string[], hint = ''): string {
+  return `<b>${escTip(title)}</b>${lines.map(l => `<br>${escTip(l)}`).join('')}${hint ? `<br><span style="opacity:.62">${escTip(hint)}</span>` : ''}`;
 }

@@ -34,57 +34,75 @@ a full-screen modal over the board.
   - The modal buttons fold into ≡ and the notification chips into one badge.
   - All touch targets are at least 44pt.
 
-## 2. Map (renderer): semantic zoom, one object per idea
-**Three tiers, chosen by zoom.** Tiers switch with a 150ms crossfade. Text never scales with zoom; the content swaps instead.
+## 2. Map (renderer): a readable board, an information budget per zoom
+**The board carries the information, not badges.** Like a printed wargame board: owner colour fills the territory,
+names are printed in space, pieces stand in exactly one place. Everything else is one hover, tap or click away
+(the map tooltip, the card). **If a mark can't explain itself in one hover, it isn't on the resting map.**
 
-1. **Strategic** (whole map fits; the phone default):
-   - Owner fill at about 45% with thick borders, and each empire's name large across its territory.
-   - Crowns and the Throne shown as diamonds.
-   - One number per region: its garrison, on a small shield plate.
-   - One fleet token per owner per region.
-   - Battle roundels.
-   - Cut-off hatch (the only supply mark at this tier).
-   - No region names, badges, buildings or veins.
-2. **Operational** (the desktop default):
-   - **Region banner:** a pill under the planet. On the left, a shield cap in the owner colour holds the garrison number in big bold digits. On the right, the name on a dark plate.
-   - A fortification ring around the cap scales with fortress, batteries and shield, so a fortified world looks chunkier.
-   - **Siege:** a bar under the banner drains as the garrison falls.
-   - **Badges:** at most 2 small badges, picked in this priority order: Crown/Throne/relic, shipyard, warp gate, vein, academy.
-   - Fleet tokens, planned-order arrows and battle roundels with balance ring and numbers.
-   - Terrain is shown by texture alone: a void is black and starless, a nebula a soft haze, an asteroid field speckle. Never by text.
-3. **Detail** (zoomed in, or a selected region):
-   - The banner gains development pips and a fixed-order tray of building pictograms.
-   - The trait and vein are spelled out.
-   - Own fleets fan out into per-fleet tokens.
-   - Supply paths.
+**Three tiers, crossfaded.** The tier is a function of the on-screen size of a typical region, but nothing switches at
+a threshold: every representation fades in or out over a zoom range, and star, piece and slot sizes grow continuously
+with zoom (`mapmodel.ts`: `zoomW`, `starScale`, `tokR`).
 
-**Fleet token:**
-- One token per owner per region: a chevron in the owner colour, pointing along its order or up when idle.
-- It carries a **power** number (`fleetPower`) and a small ship-count subscript.
-- Several of your own fleets in one region merge into one stacked token. Clicking it fans them out.
-- Each owner has a fixed anchor slot around the planet, so tokens never overlap the banner or each other.
-- A fleet out of supply gets a dashed outline. An idle own fleet breathes softly.
+1. **Strategic** (zoomed out): who owns what, where the armies are, where the fighting is, where the objectives are.
+   - Bold owner fills and each empire's name in large spaced lettering across its territory.
+   - Stars as small glowing points; unowned space is quiet.
+   - Objectives: a Crown wears a gold ring, the Throne a larger double gold ring. No numbers.
+   - Fleets as owner-coloured chevron pips at their star or on their lane; a stack of 2+ gets a tiny count.
+   - Battles as one small crossed-swords mark.
+   - Nothing else: no garrisons, numbers, system names, pips, icons or plates.
+2. **Operational** (mid): what can I reach and attack, and where are my forces.
+   - System names written in space: letter-spaced display caps with a soft dark halo, no plates. Sized by importance
+     (Throne, Crowns, capitals, colonies); fogged names are faded. Lower-priority names hide first; a shown name keeps
+     its spot while it still fits (hysteresis), names fade in and out, and the layout never depends on the pan.
+   - Fleets as compact round counters in the owner colour with a ship arrow along the heading.
+   - Garrison numbers only for the hovered or selected star and the current drag or seize target: one small figure
+     under the name, never a badge.
+   - Your idle fleets breathe softly while you plan; out of supply is an amber dashed rim on the piece.
+3. **Detail** (close): the full tabletop.
+   - Painted miniatures on bases (at most three models; the base stays the same size), the fleet pennant.
+   - Orbiting bodies on their orbits (a belt as a rubble band), orbital structures, the planetary shield dome.
+   - A small garrison figure under every shown name.
 
-**Battle roundel:**
-- Replaces the opposing tokens in a region with a live engagement: a crossed-swords disc ringed by a two-colour balance arc, each side's power number beside it, and a small round counter.
-- It pulses, more strongly at strategic zoom.
-- On the turn the battle ends, an aftermath marker appears in the winner's colour and fades.
+**Fleet placement:** a fleet is in exactly one place.
+- In a system: parked beside its star with a short tether to it. Yours always on the left, the first rival opposite on
+  the right, the second rival up and to the right, the Warden above. The name sits under the star, so pieces never
+  cover it. Your opened stack fans out further along its side.
+- On a hyperlane waypoint: on the dot itself, pointing along the lane.
+- Strength (attack power) shows on the selected piece and in the tooltip; ship count only in the tooltip and card.
 
-**Orders on the map:**
-- Arrows in the owner colour, with a roman slot badge at the midpoint.
-- Seize arrows end in a crossed-swords head.
-- Hollow or dashed arrows mean "join".
-- In LIVE, an arrow in transit shows its ETA at the head.
+**Battles:** one marker, crossed swords in a ring, on the star (zoomed out) or just above it. The pieces stay at their
+places. Round, odds and the garrison left are in its tooltip. Up close the pieces exchange fire.
+
+**Orders and routes:** one dashed line in the owner colour with a head at the destination. A seize ends in a target
+reticle round the star it attacks. No slot badges or ETA chips on the map (the strip lists the orders; the tooltip
+gives the ETA).
+
+**Hyperlanes:** a faint thread at rest; waypoint dots appear only where a lane is lit (hovered or selected star, your
+selected fleet's reach this turn, routes) or faintly up close.
+
+**Map tooltip** (hover on desktop, tap on touch), in plain words:
+- Star: name, kind and owner, what an objective is worth, "Defenders N: the garrison you must beat to take it",
+  buildings, development, trait and vein, siege, contested or cut-off state.
+- Fleet: whose, "Strength N (k ships): its attack power in battle", where it is, where it is going and when, idle,
+  out of supply, posture.
+- Battle: round, each side's strength, odds, garrison left.
+- Route / reticle: "Attack target: X", arrival in turns. Waypoint: one jump of travel.
 
 **Lenses** (key 1–4, or the ◐ button). A lens desaturates everything else:
 1. Political (the default).
 2. Supply: supply paths and cut-off regions.
 3. Economy: veins, traits and development tint.
-4. Military: fortification, shipyards, batteries and enemy power heat.
+4. Military: enemy power heat.
 
-**Hold Space** (long-press on empty space on phone) to peek at detail-tier banners everywhere.
+**Hold Space** (long-press on empty space on phone) to peek: every garrison figure and your supply network.
 
-**Never on the map:** sentences, the old "⛨20 dev 1 ⛏ ✦" lines, per-building icons outside detail tier or a lens, or several icons per region.
+**Camera:** `MapRenderer.zoomAt(x, y, factor)` glides the zoom about a point (~240 ms, eased, retargeted by further
+wheel notches, instant with reduced motion); pinch stays direct. The cached layer holds only what scales with the
+world (background, fills, borders, lanes) and crossfades when it is rebuilt after a zoom; stars, names and pieces are
+drawn every frame, so nothing pops while panning.
+
+**Never on the map:** plates, badges, sentences, slot or ETA chips, number boxes on pieces, citizen pips, dot chains,
+icons that need a legend.
 
 ## 3. Orders: the target picks the verb
 **Drag a fleet token onto a region.**
