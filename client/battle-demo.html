@@ -2,12 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Battle Replay Demo</title>
+  <meta name="theme-color" content="#0d0e12" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800;900&family=Orbitron:wght@500;600;700&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 24V10l6 6 6-10 6 10 6-6v14z' fill='%23ffd86b'/></svg>" />
+  <!-- the game's type scale and UI scale (style.css), so the viewer looks here exactly as it does in game -->
+  <link rel="stylesheet" href="/src/style.css" />
   <style>
-    html, body { margin: 0; height: 100%; background: #07030f; color: #cbbcff; font: 13px system-ui, sans-serif; }
-    body { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
-    button { background: transparent; color: #e4dbff; border: 1px solid #6b4fc0; padding: 8px 14px; letter-spacing: .2em; text-transform: uppercase; cursor: pointer; }
+    body { display: flex; align-items: center; justify-content: center; gap: 0.75rem; flex-wrap: wrap; background: #07030f; }
+    button { min-height: 2.75rem; padding: 0.5rem 1rem; letter-spacing: 0.2em; text-transform: uppercase; font-size: var(--fs-sm); }
   </style>
 </head>
 <body>

@@ -1,0 +1,174 @@
+/* Lobby (main.ts), its notices and join dialog, the dialogs it opens (ui/dom.ts overlay(), the Tweaks rules editor in
+   ui/tweaks.ts, Game created). Loaded after theme.css, so it refines style.css / theme.css for these screens only. */
+
+/* ------------------------------------------------------------ page */
+.lobby-inner { max-width: 72rem; min-height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 2.25rem 1.5rem 3rem; }
+.lobby .title { margin-bottom: 1.75rem; }
+.lobby .title p { font-size: var(--fs-md); }
+.lobby .card { padding: 1.25rem 1.375rem; border-radius: 0.875rem; }
+.lobby .card h2 { margin: 0 0 0.875rem; letter-spacing: 0.08em; }
+.lobby .card h3 { margin: 1.25rem 0 0; color: var(--dim); letter-spacing: 0.08em; }
+/* one column on phones; from tablet portrait up: Play vs AI and Fiddle on the left, Online (the tallest) on the right */
+.lobby .cards { grid-template-columns: 1fr; gap: 1.125rem; align-items: start; }
+@media (min-width: 720px) {
+  .lobby .cards { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'play online' 'fiddle online'; grid-template-rows: auto 1fr; }
+  .lobby .lb-play { grid-area: play; }
+  .lobby .lb-online { grid-area: online; align-self: stretch; }
+  .lobby .lb-fiddle { grid-area: fiddle; align-self: stretch; }
+}
+.lobby .form { grid-template-columns: 6.25rem minmax(0, 1fr); gap: 0.5rem 0.75rem; font-size: var(--fs-sm); }
+.lobby .form > label { color: var(--text); }
+.lobby .form input, .lobby .form select { width: 100%; min-height: 2.375rem; padding: 0.3125rem 0.625rem; font-size: var(--fs-sm); text-overflow: ellipsis; }
+.lobby .form input::placeholder { color: #8f8778; }
+.lb-hint { grid-column: 2; margin: -0.125rem 0 0.25rem; font-size: var(--fs-xs); line-height: 1.35; color: var(--dim); min-height: 1.35em; }
+.lb-hint b { color: var(--text); font-weight: 600; }
+.lb-hint .lb-warn { color: #ffb36b; }
+.lb-lead { margin: 0 0 0.875rem; font-size: var(--fs-sm); line-height: 1.45; color: var(--dim); }
+.lb-dev { margin: 1rem 0 0; font-size: var(--fs-xs); line-height: 1.45; color: var(--dim); }
+.lb-dev code, .lb-empty code, .lb-notice code { font-size: 1em; color: var(--text); overflow-wrap: anywhere; }
+.lb-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 1rem; }
+.lb-actions button, .lb-btn { min-height: 2.5rem; padding: 0.375rem 0.875rem; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; gap: 0.375rem; }
+.lb-actions .ic { width: 1.1em; height: 1.1em; }
+.lb-start { min-width: 6.5rem; font-size: var(--fs-md); }
+.lb-count { font-size: var(--fs-xs); color: var(--brass-hi); background: rgba(0, 0, 0, 0.35); border-radius: 0.375rem; padding: 0 0.375rem; }
+button.primary .lb-count { color: #20160a; background: rgba(255, 255, 255, 0.3); }
+/* a link that does a button's job looks like one */
+.lb-btn {
+  font-family: inherit; font-size: var(--fs-sm); text-decoration: none; color: var(--text); border-radius: 0.5rem;
+  background: var(--plate); border: 1px solid var(--rim); box-shadow: var(--bevel), 0 0.125rem 0.375rem rgba(0, 0, 0, 0.35);
+}
+.lb-btn:hover { background: var(--plate-hi); border-color: var(--rim-hi); color: #fff; }
+.lb-btn.primary { background: linear-gradient(170deg, #f6dc98 0%, #d4a24c 45%, #8e6122 100%); color: #20160a; border-color: #fff0c0; font-weight: 700; text-shadow: 0 1px 0 rgba(255, 245, 210, 0.55); }
+.lb-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.lobby a:not(.lb-btn) { color: var(--gold); }
+
+/* ------------------------------------------------------------ games on this server */
+.lobby .gamelist { gap: 0.5rem; margin-top: 0.625rem; }
+.lobby .gamerow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.375rem 0.75rem; align-items: center; padding: 0.625rem 0.75rem; background: rgba(0, 0, 0, 0.28); border-color: rgba(214, 173, 98, 0.25); }
+.lb-ghead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.125rem 0.625rem; min-width: 0; }
+.lb-ghead .lb-gname { color: #f6ead0; overflow-wrap: anywhere; }
+.lb-meta { font-size: var(--fs-xs); color: var(--dim); }
+.lobby .gamerow .seatline { grid-column: 1; margin: 0; gap: 0.25rem 0.75rem; }
+.lobby .gamerow .lb-btn { grid-column: 2; grid-row: 1 / span 2; min-width: 5.5rem; }
+.lb-tag { display: inline-flex; align-items: center; gap: 0.3125rem; font-size: var(--fs-xs); color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.lb-tag small { font-size: var(--fs-xs); color: var(--dim); }
+.lb-tag .ic { color: var(--good); width: 1em; height: 1em; flex: none; }
+.lb-dot { flex: none; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--pc, var(--dim)); opacity: 0.55; }
+.lb-tag.online .lb-dot { opacity: 1; box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.5), 0 0 0.375rem var(--pc); }
+.lb-empty { margin: 0.25rem 0 0; font-size: var(--fs-sm); color: var(--dim); line-height: 1.45; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+
+/* ------------------------------------------------------------ notices (connecting, errors) and the join dialog */
+.lb-center { justify-content: center; align-items: center; }
+.lobby .lb-notice, .lobby .lb-join { width: 100%; max-width: 34rem; }
+.lb-notice { text-align: center; }
+.lb-notice h2 { margin-top: 0.5rem !important; }
+.lb-notice p { margin: 0; color: var(--dim); line-height: 1.45; overflow-wrap: anywhere; }
+.lb-notice p b { color: var(--text); }
+.lb-notice .lb-actions { justify-content: center; }
+.lb-noticon { display: inline-flex; color: var(--bad); }
+.lb-noticon .ic { width: 2rem; height: 2rem; }
+.lb-spin { display: inline-block; flex: none; width: 1.75rem; height: 1.75rem; border-radius: 50%; border: 0.1875rem solid rgba(214, 173, 98, 0.25); border-top-color: var(--brass-hi); animation: lb-spin 0.9s linear infinite; }
+.lb-empty .lb-spin { width: 1rem; height: 1rem; border-width: 0.125rem; }
+@keyframes lb-spin { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) { .lb-spin { animation-duration: 3s; } }
+.lb-kicker { font-size: var(--fs-xs); letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
+.lobby .lb-join h2.lb-gname { margin: 0.25rem 0 1rem; overflow-wrap: anywhere; line-height: 1.3; }
+.lb-field { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0.75rem; font-size: var(--fs-sm); }
+.lb-field input { min-height: 2.5rem; padding: 0.3125rem 0.625rem; width: 100%; }
+.lb-seats { display: flex; flex-direction: column; gap: 0.375rem; margin-top: 1rem; }
+.lb-seat { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 0.625rem; padding: 0.4375rem 0.625rem; min-height: 3.25rem;
+  border: 1px solid rgba(214, 173, 98, 0.18); border-left: 0.1875rem solid var(--pc); border-radius: 0.5rem; background: rgba(0, 0, 0, 0.25); font-size: var(--fs-sm); }
+.lb-seat .lb-dot { opacity: 1; }
+.lb-seat.open { border-color: rgba(214, 173, 98, 0.45); border-left-color: var(--pc); }
+.lb-sname { overflow-wrap: anywhere; color: #f6ead0; }
+.lb-sstate { font-size: var(--fs-xs); color: var(--dim); white-space: nowrap; }
+.lb-seat:not(.open) .lb-sstate { grid-column: 3 / span 2; justify-self: end; }
+.lb-seat button { min-height: 2.5rem; padding: 0.25rem 0.875rem; white-space: nowrap; }
+
+/* ------------------------------------------------------------ dialogs opened from the lobby */
+.lb-created { max-width: 34rem; }
+.lb-created h2 { display: flex; align-items: center; gap: 0.5rem; margin-top: 0; padding-right: 2.5rem; }
+.lb-created h2 .ic { color: var(--good); }
+.lb-link { width: 100%; min-height: 2.5rem; padding: 0.375rem 0.625rem; font-family: ui-monospace, monospace; font-size: var(--fs-sm); }
+.lb-note { font-size: var(--fs-xs); color: var(--dim); }
+.lb-created .lb-actions button { min-height: 2.75rem; }
+
+/* every overlay() dialog: the close button clears the dialog's own header and is thumb-sized on touch screens */
+.overlay > .dialog > .closex { display: inline-flex; align-items: center; justify-content: center; }
+.overlay > .dialog > .closex .ic { width: 1rem; height: 1rem; }
+@media (pointer: coarse) {
+  .overlay > .dialog > .closex { width: 2.75rem; height: 2.75rem; top: 0.375rem; right: 0.375rem; }
+  .lb-actions button, .lb-btn, .lb-seat button, .lobby .form input, .lobby .form select, .lb-field input, .lb-link { min-height: 2.75rem; }
+}
+
+/* ------------------------------------------------------------ Tweaks: a fixed header and footer, only the rules scroll */
+.overlay > .dialog.tw-dlg { display: flex; flex-direction: column; max-width: 68rem; height: min(52rem, calc(100dvh - 2rem)); max-height: none; padding: 1.125rem 1.25rem 0.875rem; overflow: hidden; }
+.tw-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; padding-right: 2.75rem; }
+.tw-head h2 { margin: 0; flex: 1 1 auto; white-space: nowrap; }
+.tw-head h2 small { font-family: var(--font); font-size: var(--fs-xs); text-transform: none; letter-spacing: 0.02em; color: var(--dim); margin-left: 0.375rem; }
+.tw-find { flex: 1 1 14rem; max-width: 22rem; min-height: 2.375rem; padding: 0.25rem 0.625rem; font-size: var(--fs-sm); }
+.tw-changed { font-size: var(--fs-xs); color: var(--brass-hi); white-space: nowrap; }
+.tw-note { margin: 0.625rem 0 0.5rem; font-size: var(--fs-xs); line-height: 1.4; color: var(--dim); }
+.tw-dlg .tweaks { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; columns: 3 17rem; column-gap: 1.75rem; font-size: var(--fs-xs);
+  padding: 0.25rem 0.5rem 0.5rem 0; border-top: 1px solid rgba(214, 173, 98, 0.2); border-bottom: 1px solid rgba(214, 173, 98, 0.2); scrollbar-width: thin; }
+.tw-dlg .tweaks .grp { break-inside: avoid; margin: 0 0 0.75rem; padding-top: 0.25rem; }
+.tw-dlg .tweaks .grp[hidden], .tw-dlg .tw-row[hidden] { display: none; }
+.tw-dlg .tweaks h3 { margin: 0.5rem 0 0.25rem; color: var(--brass); letter-spacing: 0.1em; text-transform: uppercase; }
+.tw-dlg .tw-row { display: grid; grid-template-columns: minmax(0, 1fr) 6.5rem; align-items: center; gap: 0.5rem; padding: 0.125rem 0; min-height: 2rem; }
+.tw-dlg .tw-row.wide { grid-template-columns: minmax(0, 1fr); gap: 0.125rem; padding: 0.25rem 0; }
+.tw-name { min-width: 0; overflow-wrap: anywhere; line-height: 1.2; color: var(--text); }
+.tw-def { display: none; font-size: var(--fs-xs); color: var(--dim); }
+.tw-dlg .tw-row.changed .tw-name { color: var(--gold); }
+.tw-dlg .tw-row.changed .tw-def { display: block; }
+.tw-dlg .tw-row input { width: 100%; min-height: 1.875rem; padding: 0.125rem 0.375rem; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.tw-dlg .tw-row input[type=checkbox] { justify-self: start; width: 1.25rem; height: 1.25rem; min-height: 0; margin: 0; box-shadow: none; }
+.tw-none { font-size: var(--fs-sm); color: var(--dim); }
+.tw-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding-top: 0.75rem; }
+.tw-foot button { min-height: 2.5rem; padding: 0.25rem 0.875rem; white-space: nowrap; }
+.tw-foot button:disabled { opacity: 0.5; }
+@media (pointer: coarse) {
+  .tw-dlg .tw-row { min-height: 2.75rem; }
+  .tw-dlg .tw-row input { min-height: 2.75rem; font-size: var(--fs-sm); }
+  .tw-dlg .tw-row input[type=checkbox] { width: 1.5rem; height: 1.5rem; min-height: 0; }
+  .tw-find, .tw-foot button { min-height: 2.75rem; }
+  .tw-dlg .tw-row:has(input[type=checkbox]) { cursor: pointer; }
+}
+
+/* ------------------------------------------------------------ phones */
+@media (max-width: 700px) {
+  .lobby-inner { justify-content: flex-start; padding: calc(1.25rem + env(safe-area-inset-top)) 1rem calc(2.5rem + env(safe-area-inset-bottom)); }
+  .lobby .card { padding: 1rem; }
+  .lobby .form { grid-template-columns: 5.5rem minmax(0, 1fr); }
+  .lb-actions > button { flex: 1 1 auto; }
+  .lb-seat { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .lb-seat .lb-sstate { display: none; }
+  .lb-seat:not(.open) .lb-sstate { display: block; grid-column: 3; }
+  .overlay > .dialog.tw-dlg { height: calc(100dvh - 1rem); padding: 0.875rem 0.875rem 0.625rem; }
+  .overlay:has(.tw-dlg) { padding: 0.5rem; }
+  .tw-head h2 small { display: none; }
+  .tw-find { max-width: none; }
+  .tw-dlg .tweaks { columns: 1; }
+  .tw-dlg .tw-row { grid-template-columns: minmax(0, 1fr) 7rem; }
+  .tw-foot button { flex: 1 1 auto; }
+  .tw-foot .grow { display: none; }
+}
+/* a short landscape phone: the header gets out of the rules' way */
+@media (max-height: 500px) {
+  .tw-note { display: none; }
+  .overlay > .dialog.tw-dlg { height: calc(100dvh - 1rem); }
+  .overlay:has(.tw-dlg) { padding: 0.5rem; }
+}
+@media (max-height: 500px) {
+  .lobby-inner { justify-content: flex-start; padding-top: max(1rem, env(safe-area-inset-top)); padding-left: max(1rem, env(safe-area-inset-left)); padding-right: max(1rem, env(safe-area-inset-right)); }
+  .lobby .title { margin-bottom: 1rem; }
+  .lobby .title h1 { font-size: 2rem; }
+  .lobby .title p { margin-top: 0.375rem; font-size: var(--fs-sm); }
+}
+/* the Tweaks dialog is a flex column: its close button stays pinned top right (style.css makes it sticky on phones) */
+.overlay > .dialog.tw-dlg > .closex { position: absolute; top: 0.5rem; right: 0.5rem; float: none; }
+/* toasts (ui/dom.ts): a long message wraps inside the screen instead of running off it */
+.toast { max-width: min(40rem, calc(100vw - 2rem)); text-align: center; overflow-wrap: anywhere; }
+/* seat tags: the name may wrap, the "AI" / "open" marker and the sealed tick never break */
+.lb-tag > small, .lb-tag > .ic { flex: none; white-space: nowrap; }
+/* button rows fill their card when they wrap (no lone button stranded on a second line) */
+.lb-play .lb-actions > button, .lb-fiddle .lb-actions > button { flex: 1 1 auto; }

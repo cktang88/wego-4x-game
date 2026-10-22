@@ -77,10 +77,12 @@ interface SideInfo {
   color: string;
   name: string;
   units: Unit[];
-  label: { x: number; y: number; align: CanvasTextAlign };
+  label: { x: number; y: number; align: CanvasTextAlign; text: string };
 }
 
 // ------------------------------------------------------------------ helpers
+interface Box { l: number; r: number; t: number; b: number }
+const hit = (a: Box, b: Box) => a.l < b.r && a.r > b.l && a.t < b.b && a.b > b.t;
 const clamp = (v: number, a = 0, b = 1) => (v < a ? a : v > b ? b : v);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 function mulberry(seed: number) {
@@ -140,10 +142,11 @@ const CSS = `
 .bv-head{display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.75rem 0.5rem 1rem;border-bottom:1px solid rgba(214,178,110,.35);box-shadow:inset 0 1px 0 rgba(255,240,210,.08);
   background:linear-gradient(90deg,rgba(70,74,90,.5),rgba(20,22,30,0) 70%)}
 .bv-title{flex:1;min-width:0}
-.bv-title b{display:block;font-size:var(--fs-md);font-weight:600;letter-spacing:.22em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+.bv-title b{display:block;font-size:var(--fs-md);font-weight:600;letter-spacing:.22em;text-transform:uppercase;overflow-wrap:anywhere;line-height:1.25;
   text-shadow:0 0 0.75rem rgba(230,190,110,.6)}
-.bv-title span{display:block;font-size:var(--fs-xs);letter-spacing:.24em;text-transform:uppercase;color:#a89a80;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bv-x{background:none;border:1px solid rgba(214,178,110,.3);color:#e6d6b0;width:2rem;height:2rem;border-radius:0.25rem;font-size:1.25rem;line-height:1;cursor:pointer;flex:none}
+.bv-title span{display:block;font-size:var(--fs-xs);letter-spacing:.24em;text-transform:uppercase;color:#b3a58a;overflow-wrap:anywhere;line-height:1.3}
+.bv-x{background:none;border:1px solid rgba(214,178,110,.3);color:#e6d6b0;width:2.25rem;height:2.25rem;border-radius:0.25rem;font-size:1.25rem;line-height:1;cursor:pointer;flex:none;display:inline-flex;align-items:center;justify-content:center;padding:0}
+.bv-btn:focus-visible,.bv-x:focus-visible{outline:2px solid #ffd86b;outline-offset:2px}
 .bv-x:hover{color:#fff;border-color:#e6c37a;box-shadow:0 0 0.75rem rgba(230,180,90,.5)}
 .bv-stage{position:relative;flex:1;min-height:0;overflow:hidden;background:#05060a}
 .bv-stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
@@ -153,6 +156,8 @@ const CSS = `
 .bv-btn:hover{border-color:#e6c37a;box-shadow:0 0 0.625rem rgba(230,180,90,.45);color:#fff}
 .bv-btn.bv-on{background:rgba(214,170,90,.28);border-color:#f0d79a;color:#fff;box-shadow:0 0 0.625rem rgba(230,180,90,.4)}
 .bv-speed{display:flex;gap:0}
+.bv-break{display:none}
+.bv-skip{display:inline-flex;align-items:center;gap:0.375rem}
 .bv-speed .bv-btn{border-radius:0;margin-left:-1px}
 .bv-speed .bv-btn:first-child{border-radius:0.1875rem 0 0 0.1875rem}.bv-speed .bv-btn:last-child{border-radius:0 0.1875rem 0.1875rem 0}
 .bv-round{font-size:var(--fs-xs);letter-spacing:.24em;text-transform:uppercase;color:#d8c9a4;min-width:6rem;text-align:center}
@@ -162,6 +167,8 @@ const CSS = `
 .bv-bar s{position:absolute;top:0.3125rem;width:1px;height:0.5rem;background:rgba(230,200,140,.45)}
 .bv-card{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:1rem;overflow:auto;
   background:radial-gradient(ellipse at center,rgba(14,14,20,.84),rgba(4,4,8,.95));z-index:3}
+.bv-card.bv-end{background:radial-gradient(ellipse at center,rgba(14,14,20,.95),rgba(4,4,8,.98))}
+.bv-btn.bv-done{opacity:.4;cursor:default;box-shadow:none}
 .bv-card-in{max-width:55rem;width:100%;text-align:center;margin:auto}
 .bv-kicker{font-size:var(--fs-xs);letter-spacing:.42em;text-transform:uppercase;color:#a89a80}
 .bv-big{font-size:clamp(1.375rem,4.6vw,2.5rem);font-weight:600;letter-spacing:.16em;text-transform:uppercase;margin:0.375rem 0 0.25rem;
@@ -177,12 +184,12 @@ const CSS = `
 .bv-side small{display:block;font-size:var(--fs-xs);letter-spacing:.2em;text-transform:uppercase;color:#a89a80;margin-top:0.375rem}
 .bv-vs{align-self:center;font-size:var(--fs-xs);letter-spacing:.3em;color:#a89a80}
 .bv-hint{margin-top:0.875rem;font-size:var(--fs-xs);letter-spacing:.3em;color:#a89a80;text-transform:uppercase}
-.bv-caption{position:absolute;left:50%;bottom:0.875rem;transform:translate(-50%,0.375rem);max-width:min(47.5rem,calc(100% - 1.5rem));z-index:2;
+.bv-caption{position:absolute;left:0.75rem;right:0.75rem;margin:0 auto;width:fit-content;bottom:0.875rem;transform:translateY(0.375rem);max-width:47.5rem;z-index:2;
   padding:0.5rem 1.125rem;text-align:center;font-size:clamp(var(--fs-sm),1.7vw,1rem);letter-spacing:.08em;color:#f6efdc;pointer-events:none;
   background:linear-gradient(90deg,transparent,rgba(10,10,14,.9) 15%,rgba(10,10,14,.9) 85%,transparent);
   border-top:1px solid rgba(230,196,120,.25);border-bottom:1px solid rgba(230,196,120,.25);
   opacity:0;transition:opacity .35s,transform .35s;text-shadow:0 0 0.5rem rgba(230,190,110,.6)}
-.bv-caption.bv-show{opacity:1;transform:translate(-50%,0)}
+.bv-caption.bv-show{opacity:1;transform:none}
 .bv-end table{margin:0.625rem auto 0;border-collapse:collapse;font-size:var(--fs-xs);letter-spacing:.1em}
 .bv-end th{font-weight:500;font-size:var(--fs-xs);letter-spacing:.24em;text-transform:uppercase;color:#a89a80;padding:0.25rem 0.625rem;border-bottom:1px solid rgba(214,178,110,.2)}
 .bv-end td{padding:0.3125rem 0.625rem;text-align:center;border-bottom:1px solid rgba(255,255,255,.05)}
@@ -195,12 +202,40 @@ const CSS = `
 .bv-hl li{font-size:var(--fs-xs);letter-spacing:.04em;color:#ddd4bc;padding:0.25rem 0 0.25rem 1rem;position:relative;border-bottom:1px solid rgba(255,255,255,.04)}
 .bv-hl li:before{content:'';position:absolute;left:0.125rem;top:0.625rem;width:0.3125rem;height:0.3125rem;transform:rotate(45deg);background:#d4a650;box-shadow:0 0 0.375rem #d4a650}
 .bv-endbtns{margin-top:1rem;display:flex;gap:0.625rem;justify-content:center}
+/* touch screens: every control a thumb-sized target */
+@media (pointer:coarse){
+  .bv-btn{min-width:2.75rem;min-height:2.75rem}
+  .bv-x{width:2.75rem;height:2.75rem}
+  .bv-endbtns .bv-btn{padding:0.5rem 1.25rem}
+}
+/* a phone held sideways: the whole screen for the stage, a one-line header, no gutters but the notch's */
+@media (max-height:500px){
+  .bv-panel{width:100vw;height:100dvh;border-radius:0;border:none}
+  .bv-head{padding:0.25rem max(0.5rem,env(safe-area-inset-right)) 0.25rem max(0.75rem,env(safe-area-inset-left));gap:0.5rem}
+  .bv-title{display:flex;align-items:baseline;gap:0 0.75rem;flex-wrap:wrap}
+  .bv-title b{font-size:var(--fs-sm);letter-spacing:.14em}
+  .bv-title span{letter-spacing:.14em}
+  .bv-ctrl{padding:0.25rem max(0.5rem,env(safe-area-inset-right)) max(0.25rem,env(safe-area-inset-bottom)) max(0.5rem,env(safe-area-inset-left));gap:0.375rem}
+  .bv-btn{padding:0.375rem 0.5rem;letter-spacing:.1em}
+  .bv-card{padding:0.625rem 1rem}
+  .bv-big{margin:0.125rem 0}
+  .bv-rule{margin:0.5rem auto}
+  .bv-hint{margin-top:0.5rem}
+}
 @media (max-width:640px){
   .bv-panel{width:100vw;height:100dvh;border-radius:0;border:none}
+  .bv-head{padding-top:max(0.5rem,env(safe-area-inset-top))}
+  .bv-title b{letter-spacing:.12em}
+  .bv-title span{letter-spacing:.12em}
+  .bv-ctrl{padding-bottom:max(0.375rem,env(safe-area-inset-bottom))}
   .bv-ctrl{gap:0.375rem;padding:0.375rem 0.5rem}
   .bv-btn{padding:0.4375rem 0.5rem;letter-spacing:.1em}
-  .bv-bar{order:10;flex-basis:100%}
-  .bv-round{min-width:0;flex:1}
+  .bv-break{display:block;order:8;flex-basis:100%;height:0}
+  .bv-round{order:9;min-width:0;flex:none;text-align:left;letter-spacing:.14em}
+  .bv-bar{order:10;flex:1 1 6rem}
+  .bv-skip{margin-left:auto}
+  .bv-skip .bv-lbl{display:none}
+  .bv-caption{font-size:var(--fs-sm);letter-spacing:.04em;padding:0.375rem 0.75rem;bottom:0.5rem}
   .bv-sides{gap:0.5rem}.bv-side{flex-basis:8.75rem;padding:0.5rem}
   .bv-vs{display:none}
   /* the end table fits a phone: tighter cells and tracking (it overflowed, clipping the Garrison column) */
@@ -289,7 +324,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   report.sides.forEach((sd, si) => {
     const color = ctx.playerColor(sd.owner);
     const name = ctx.playerName(sd.owner) + (ctx.you !== null && sd.owner === ctx.you ? ' (You)' : '');
-    const info: SideInfo = { owner: sd.owner, color, name, units: [], label: { x: 0, y: 0, align: 'center' } };
+    const info: SideInfo = { owner: sd.owner, color, name, units: [], label: { x: 0, y: 0, align: 'center', text: name.toUpperCase() } };
     const mk = (u: Partial<Unit> & Pick<Unit, 'id' | 'name' | 'cls' | 'maxHp' | 'startHp' | 'garrison'>): Unit => {
       const def = R.ships[u.cls];
       const rnd = mulberry(u.id * 7919 + 13 + seedN++)();
@@ -443,24 +478,26 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   const title = el('div', 'bv-title',
     `<b>${esc(report.name)}</b><span>${esc(ctx.regionName(report.region))} · ${when} · ${report.sides.length} sides</span>`);
   const xBtn = el('button', 'bv-x', '×');
-  xBtn.title = 'Close (Esc)';
+  xBtn.title = 'Close (Esc)'; xBtn.setAttribute('aria-label', 'Close');
   head.append(title, xBtn);
   const stage = el('div', 'bv-stage');
   const canvas = el('canvas');
   const caption = el('div', 'bv-caption');
   stage.append(canvas, caption);
   const ctrl = el('div', 'bv-ctrl');
-  const bRestart = el('button', 'bv-btn', '⟲'); bRestart.title = 'Restart';
-  const bPlay = el('button', 'bv-btn', '❚❚'); bPlay.title = 'Play / pause (Space)';
-  const bNext = el('button', 'bv-btn', ic('skip')); bNext.title = 'Next round (→)';
+  const bRestart = el('button', 'bv-btn', '⟲'); bRestart.title = 'Restart'; bRestart.setAttribute('aria-label', 'Restart');
+  const bPlay = el('button', 'bv-btn', '❚❚'); bPlay.title = 'Play / pause (Space)'; bPlay.setAttribute('aria-label', 'Play or pause');
+  const bNext = el('button', 'bv-btn', ic('skip')); bNext.title = 'Next round (→)'; bNext.setAttribute('aria-label', 'Next round');
   const speedBox = el('div', 'bv-speed');
-  const speedBtns = [1, 2, 4].map(v => { const b = el('button', 'bv-btn', `${v}×`); b.dataset.v = String(v); speedBox.appendChild(b); return b; });
+  const speedBtns = [1, 2, 4].map(v => { const b = el('button', 'bv-btn', `${v}×`); b.dataset.v = String(v); b.title = `Speed ${v}×`; b.setAttribute('aria-label', `Speed ${v} times`); speedBox.appendChild(b); return b; });
   const roundLbl = el('div', 'bv-round');
   const bar = el('div', 'bv-bar', '<i></i><em></em>');
   const barFill = bar.querySelector('em') as HTMLElement;
   for (const rs of roundStart) { const tick = el('s'); tick.style.left = `${(rs / END) * 100}%`; bar.appendChild(tick); }
-  const bSkip = el('button', 'bv-btn', 'Skip ⏭'); bSkip.title = 'Skip to the result';
-  ctrl.append(bRestart, bPlay, bNext, speedBox, roundLbl, bar, bSkip);
+  const bSkip = el('button', 'bv-btn bv-skip', '<span class="bv-lbl">Skip</span> ⏭'); bSkip.title = 'Skip to the result'; bSkip.setAttribute('aria-label', 'Skip to the result');
+  // on phones the round counter and the scrubber get a row of their own under the buttons
+  const brk = el('i', 'bv-break');
+  ctrl.append(bRestart, bPlay, bNext, speedBox, roundLbl, bar, bSkip, brk);
   panel.append(head, stage, ctrl);
 
   // opening card
@@ -555,7 +592,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     farDist = Math.max(W, H) * 0.9;
     const n = sides.length;
     const portrait = H > W * 1.15;
-    const mTop = 46 * U, mBot = 84 * U, mSide = 22 * U;
+    // a narrow stage's captions wrap to two or three lines: keep more of the bottom free for them
+    const mTop = 46 * U, mBot = (W < 560 ? 112 : 84) * U, mSide = 22 * U;
     const cx = W / 2, cy = mTop + (H - mTop - mBot) / 2;
     const minD = Math.min(W - 2 * mSide, H - mTop - mBot);
     // per side: direction from centre (u), perpendicular (p)
@@ -635,30 +673,47 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       if (gu) {
         const gd = res.cols.length ? Math.min(d + planetR * 1.25, reach(u) - planetR * 0.6) : Math.max(fd + planetR * 1.4, Math.min(reach(u) * 0.6, fd + planetR * 2.5));
         [gu.hx, gu.hy] = at(gd, 0); gu.fx = fx; gu.fy = fy; gu.s = planetR;
+        // its "GARRISON n" line sits under the world: keep it above the caption strip (a short landscape stage pushed it under)
+        const over = gu.hy + gu.s * 1.55 + 12 + 16 * U - (H - mBot + 22);
+        if (over > 0) gu.hy -= Math.min(over, gu.s * 1.5);
       }
-      // label above the side's bounding box
+      // label above the side's bounding box: long names are cut to fit (the roster and the intro card show them in full)
+      sd.label.text = fitLabel(sd.name.toUpperCase(), W * (n >= 3 ? 0.4 : 0.56));
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       for (const x of sd.units) { minX = Math.min(minX, x.hx - x.s); maxX = Math.max(maxX, x.hx + x.s); minY = Math.min(minY, x.hy - x.s); maxY = Math.max(maxY, x.hy + x.s); }
       if (!sd.units.length) { minX = maxX = cx + u[0] * gapHalf * 2; minY = maxY = cy + u[1] * gapHalf * 2; }
       if (u[1] > 0.5) {
         // bottom side: label beside the formation, clear of the caption bar
-        g.font = F(600, 13); setLs(g, '0.24em');
-        const tw = g.measureText(sd.name.toUpperCase()).width + 8;
-        setLs(g, '0px');
-        if (maxX + 16 + tw < W) sd.label = { x: maxX + 16, y: (minY + maxY) / 2, align: 'left' };
-        else if (minX - 16 - tw > 0) sd.label = { x: minX - 16, y: (minY + maxY) / 2, align: 'right' };
+        const tw = labelW(sd.label.text) + 8, text = sd.label.text;
+        if (maxX + 16 + tw < W) sd.label = { x: maxX + 16, y: (minY + maxY) / 2, align: 'left', text };
+        else if (minX - 16 - tw > 0) sd.label = { x: minX - 16, y: (minY + maxY) / 2, align: 'right', text };
         // no room beside it: below the formation (above it, the label collides with damage / crit callouts)
         else {
           // a garrison close to the bottom edge: lift it so its "GARRISON n" line and the side's name both fit
           const shipsBottom = Math.max(-Infinity, ...sd.units.filter(x => !x.garrison).map(x => x.hy + x.s));
           const lift = gu ? Math.min(gu.hy + gu.s * 1.55 + 46 * U - (H - mBot + 12), gu.hy - gu.s * 1.2 - shipsBottom) : 0;
           if (gu && lift > 0) { gu.hy -= lift; maxY = Math.max(...sd.units.map(x => x.hy + x.s)); }
-          sd.label = { x: clamp((minX + maxX) / 2, tw / 2 + 4, W - tw / 2 - 4), y: Math.min(H - mBot + 12, Math.max(maxY + 26, gu ? gu.hy + gu.s * 1.55 + 46 * U : 0)), align: 'center' };
+          sd.label = { x: clamp((minX + maxX) / 2, tw / 2 + 4, W - tw / 2 - 4), y: Math.min(H - mBot + 12, Math.max(maxY + 26, gu ? gu.hy + gu.s * 1.55 + 46 * U : 0)), align: 'center', text };
         }
       } else {
-        sd.label = { x: clamp((minX + maxX) / 2, 90, W - 90), y: clamp(minY - 18, mTop + 4, H), align: 'center' };
+        const tw = labelW(sd.label.text);
+        sd.label = { x: clamp((minX + maxX) / 2, tw / 2 + 6, W - tw / 2 - 6), y: clamp(minY - 18, mTop + 4, H), align: 'center', text: sd.label.text };
       }
     });
+    // the side labels never sit under the roster (top left) or on each other: slide right of the roster, else step down
+    const ros = rosterBox();
+    const placedL: Box[] = [ros];
+    for (const sd of sides) {
+      let b = labelBox(sd);
+      for (let k = 0; k < 6 && placedL.some(o => hit(b, o)); k++) {
+        const o = placedL.find(o => hit(b, o))!;
+        const w = b.r - b.l;
+        if (sd.label.align === 'center' && o.r + 8 + w <= W - 6 && o === ros) sd.label.x = o.r + 8 + w / 2;
+        else sd.label.y = o.b + (b.b - b.t) / 2 + 4;
+        b = labelBox(sd);
+      }
+      placedL.push(b);
+    }
     buildBg();
   }
 
@@ -822,7 +877,9 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         // names of ships packed side by side would run into each other: the first one drawn wins the spot
         const nm = u.name.toUpperCase(), tw = g.measureText(nm).width;
         const box = { l: ps.x - tw / 2 - 3, r: ps.x + tw / 2 + 3, t: by + 4, b: by + 20 };
-        if (!nameBoxes.some(o => box.l < o.r && box.r > o.l && box.t < o.b && box.b > o.t)) { nameBoxes.push(box); g.fillText(nm, ps.x, by + 5); }
+        // not while it is still warping in, and never half off the stage
+        const onStage = box.l * camK + camX > 2 && box.r * camK + camX < W - 2 && box.b * camK + camY < H - 2;
+        if (ps.warp < 0.15 && onStage && !nameBoxes.some(o => hit(box, o))) { nameBoxes.push(box); g.fillText(nm, ps.x, by + 5); }
         setLs(g, '0px');
         g.globalAlpha = 1;
       }
@@ -880,7 +937,9 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     g.font = F(600, 13); g.textAlign = 'center'; g.textBaseline = 'top';
     g.fillStyle = dead ? 'rgba(255,120,120,.85)' : rgba(color, 0.95);
     setLs(g, '0.22em');
-    g.fillText(dead ? 'GARRISON FALLEN' : `GARRISON ${Math.max(0, hpNow)}`, x, by + 6);
+    const gl = dead ? 'GARRISON FALLEN' : `GARRISON ${Math.max(0, hpNow)}`, gw = g.measureText(gl).width;
+    g.fillText(gl, x, by + 6);
+    nameBoxes.push({ l: x - gw / 2 - 3, r: x + gw / 2 + 3, t: by + 4, b: by + 8 + 15 * U });
     setLs(g, '0px');
   }
 
@@ -895,6 +954,29 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
 
   function setLs(c: CanvasRenderingContext2D, v: string) {
     (c as unknown as { letterSpacing?: string }).letterSpacing = v;
+  }
+  /** Width of a side label (600 13px, 0.24em tracking) in CSS px. */
+  function labelW(text: string): number {
+    g.save(); g.font = F(600, 13); setLs(g, '0.24em');
+    const w = g.measureText(text).width;
+    g.restore();
+    return w;
+  }
+  /** Cut a label with an ellipsis until it fits `max` CSS px. */
+  function fitLabel(text: string, max: number): string {
+    if (labelW(text) <= max) return text;
+    let t = text;
+    while (t.length > 4 && labelW(t + '…') > max) t = t.slice(0, -1);
+    return t.trimEnd() + '…';
+  }
+  function labelBox(sd: SideInfo): Box {
+    const w = labelW(sd.label.text), h = 16 * U, { x, y, align } = sd.label;
+    const l = align === 'left' ? x : align === 'right' ? x - w : x - w / 2;
+    return { l: l - 4, r: l + w + 4, t: y - h / 2, b: y + h / 2 };
+  }
+  /** The strength roster in the top-left corner (drawHud). */
+  function rosterBox(): Box {
+    return { l: 0, t: 0, r: 20 * U + Math.min(230 * U, W * 0.44) + 8 * U, b: 16 * U + (sides.length - 1) * 27 * U + 16 * U };
   }
 
   /** Weapon fire in each house's style: Azure lances (instant beams), Crimson broadsides (shell salvos from the
@@ -1074,15 +1156,18 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     g.textAlign = 'center'; g.textBaseline = 'middle';
     // status callouts (DESTROYED / WEAPONS OFFLINE / SHIELDS DOWN...) never overprint: each takes the first free
     // row above its ship, stepping up until it clears the ones already placed this frame
-    const placed: { l: number; r: number; t: number; b: number }[] = [];
-    const slot = (x: number, y: number, w: number, h: number): number => {
-      for (let i = 0; i < 6; i++) {
-        const yy = y - i * (h + 3);
+    // (ship names and the HUD's labels are taken already)
+    const placed: Box[] = nameBoxes.slice();
+    const slot = (x: number, y: number, w: number, h: number, optional = false): number => {
+      for (const i of [0, 1, 2, 3, 4, 5, 6, 7, -1, -2, -3, -4]) {
+        const yy = clamp(y - i * (h + 3), (h / 2 + 4 - camY) / camK, (H - h / 2 - 4 - camY) / camK);
         const box = { l: x - w / 2 - 4, r: x + w / 2 + 4, t: yy - h / 2, b: yy + h / 2 };
-        if (!placed.some(p => box.l < p.r && box.r > p.l && box.t < p.b && box.b > p.t)) { placed.push(box); return yy; }
+        if (!placed.some(p => hit(box, p))) { placed.push(box); return yy; }
       }
-      return y;
+      return optional ? NaN : y;
     };
+    /** a callout's x: centred on its ship, but never past the stage's edge */
+    const cx = (x: number, w: number) => clamp(x, (w / 2 + 6 - camX) / camK, (W - w / 2 - 6 - camX) / camK);
     for (const sh of shots) {
       if (sh.rec.miss || tt < sh.t1 || tt > sh.t1 + 1.8) continue;
       const e = tt - sh.t1;
@@ -1093,10 +1178,14 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         g.globalAlpha = 1 - k * k;
         g.font = F(700, 14 + Math.min(6, sh.rec.dmg * 0.6));
         g.lineWidth = 3; g.strokeStyle = 'rgba(8,2,20,.85)';
-        const x = tp.x + sh.off * 10, y = top - k * 22;
-        g.strokeText(`-${sh.rec.dmg}`, x, y);
-        g.fillStyle = sh.rec.kill ? '#ff6b6b' : '#fff';
-        g.fillText(`-${sh.rec.dmg}`, x, y);
+        const dw = g.measureText(`-${sh.rec.dmg}`).width;
+        // a damage number with no free spot is dropped (the hp bar shows the hit); a status callout always shows
+        const x = cx(tp.x + sh.off * 10, dw), y = slot(x, top - k * 22, dw, (14 + Math.min(6, sh.rec.dmg * 0.6)) * U, true);
+        if (!Number.isNaN(y)) {
+          g.strokeText(`-${sh.rec.dmg}`, x, y);
+          g.fillStyle = sh.rec.kill ? '#ff6b6b' : '#fff';
+          g.fillText(`-${sh.rec.dmg}`, x, y);
+        }
       }
       if (sh.rec.crit || sh.rec.kill) {
         const k = e / 1.8;
@@ -1105,12 +1194,13 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         const txt = sh.rec.kill ? 'DESTROYED' : CRIT_TEXT[sh.rec.crit!] ?? 'CRITICAL';
         g.font = `700 ${(Math.max(13, 13 * pop) * U).toFixed(2)}px ${FONT}`;
         setLs(g, '0.2em');
-        const y = slot(tp.x, top - 18 - k * 14, g.measureText(txt).width, 14);
+        const tw = g.measureText(txt).width, x = cx(tp.x, tw);
+        const y = slot(x, top - 18 - k * 14, tw, 15 * pop * U);
         g.lineWidth = 3; g.strokeStyle = 'rgba(8,2,20,.9)';
-        g.strokeText(txt, tp.x, y);
+        g.strokeText(txt, x, y);
         g.shadowColor = sh.rec.kill ? '#ff3355' : '#ff9f1a'; g.shadowBlur = 10;
         g.fillStyle = sh.rec.kill ? '#ff8095' : '#ffc061';
-        g.fillText(txt, tp.x, y);
+        g.fillText(txt, x, y);
         g.shadowBlur = 0;
         setLs(g, '0px');
       }
@@ -1132,10 +1222,11 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         const txt = sh.rec.first ? 'FIRST STRIKE' : 'TWIST OF FATE';
         g.globalAlpha = 1 - clamp((e - 1.1) / 0.5);
         g.font = F(700, 13); setLs(g, '0.22em');
-        const y = slot(tp.x, tp.y - Math.max(u.s, 8) - 30 * U - e * 8, g.measureText(txt).width, 16 * U);
-        g.lineWidth = 3; g.strokeStyle = 'rgba(8,2,20,.9)'; g.strokeText(txt, tp.x, y);
+        const tw = g.measureText(txt).width, x = cx(tp.x, tw);
+        const y = slot(x, tp.y - Math.max(u.s, 8) - 30 * U - e * 8, tw, 16 * U);
+        g.lineWidth = 3; g.strokeStyle = 'rgba(8,2,20,.9)'; g.strokeText(txt, x, y);
         g.shadowColor = sh.rec.first ? '#ffb340' : '#b070ff'; g.shadowBlur = 10;
-        g.fillStyle = sh.rec.first ? '#ffe08a' : '#dcc0ff'; g.fillText(txt, tp.x, y);
+        g.fillStyle = sh.rec.first ? '#ffe08a' : '#dcc0ff'; g.fillText(txt, x, y);
         g.shadowBlur = 0; setLs(g, '0px');
       }
       g.globalAlpha = 1;
@@ -1148,7 +1239,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       g.globalAlpha = 1 - clamp((e - 1.6) / 0.6);
       g.font = F(700, 15); setLs(g, '0.3em');
       g.fillStyle = '#ff8095'; g.shadowColor = '#ff3355'; g.shadowBlur = 12;
-      g.fillText('GARRISON FALLS', u.hx, slot(u.hx, u.hy - u.s * 1.7 - 8, g.measureText('GARRISON FALLS').width, 18 * U));
+      { const tw = g.measureText('GARRISON FALLS').width, x = cx(u.hx, tw); g.fillText('GARRISON FALLS', x, slot(x, u.hy - u.s * 1.7 - 8, tw, 18 * U)); }
       g.shadowBlur = 0; setLs(g, '0px');
     }
     // retreat callouts
@@ -1162,7 +1253,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       g.font = F(700, 13.5); setLs(g, '0.28em');
       g.fillStyle = '#e8e0ff'; g.shadowColor = sd.color; g.shadowBlur = 10;
       const fn = (fleetName.get(r.fleet)?.name ?? 'Fleet').toUpperCase();
-      { const rx = clamp(fu.hx, 90, W - 90); g.fillText(`${fn} RETREATS`, rx, slot(rx, clamp(fu.hy - 40, 60, H - 60), g.measureText(`${fn} RETREATS`).width, 17 * U)); }
+      { const txt = `${fn} RETREATS`, tw = g.measureText(txt).width, rx = cx(fu.hx, tw); g.fillText(txt, rx, slot(rx, clamp(fu.hy - 40, 60, H - 60), tw, 17 * U)); }
       g.shadowBlur = 0; setLs(g, '0px');
     }
     g.restore();
@@ -1178,9 +1269,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         g.save();
         g.globalAlpha = a;
         g.textAlign = 'center'; g.textBaseline = 'middle';
-        // narrow stages: keep the banner below the strength readout in the top-left corner
-        const y = W < 700 ? Math.max(Math.min(H * 0.18, 70 * U), (16 + sides.length * 27 + 18) * U) : Math.min(H * 0.18, 70 * U);
-        g.font = `600 ${clamp(W * 0.03, 15 * U, 24 * U)}px ${FONT}`;
+        const y = bannerY();
+        g.font = bannerFont();
         setLs(g, '0.5em');
         g.fillStyle = '#f4ead2'; g.shadowColor = 'rgba(214,166,80,0.9)'; g.shadowBlur = 14;
         g.fillText(`ROUND ${ri + 1}`, W / 2 + 6, y);
@@ -1199,7 +1289,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       g.fillStyle = sd.color; g.shadowColor = sd.color; g.shadowBlur = 8;
       g.globalAlpha = clamp((tt - 0.4) / 0.6) * 0.95;
       g.textAlign = sd.label.align;
-      g.fillText(sd.name.toUpperCase(), sd.label.x, sd.label.y);
+      g.fillText(sd.label.text, sd.label.x, sd.label.y);
       g.shadowBlur = 0;
     }
     setLs(g, '0px');
@@ -1234,6 +1324,37 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       y += 27 * U;
     }
     g.restore();
+  }
+
+  const bannerFont = () => `600 ${clamp(W * 0.03, 15 * U, 24 * U)}px ${FONT}`;
+  /** The round banner's box at height y (text plus its rule lines). */
+  function bannerBox(y: number): Box {
+    g.save(); g.font = bannerFont(); setLs(g, '0.5em');
+    const w = g.measureText('ROUND 8').width; g.restore();
+    const h = clamp(W * 0.03, 15 * U, 24 * U);
+    return { l: W / 2 - w / 2 - 4, r: W / 2 + w / 2 + 12, t: y - h * 0.6, b: y + h * 0.6 };
+  }
+  /** Where the round banner goes: high on the stage, clear of the roster and the side labels. */
+  let bannerAt = -1, bannerKey = '';
+  function bannerY(): number {
+    const key = `${W}x${H}x${U}`;
+    if (key === bannerKey) return bannerAt;
+    bannerKey = key;
+    const taken = [rosterBox(), ...sides.map(labelBox)];
+    const y0 = Math.min(H * 0.18, 70 * U), h = clamp(W * 0.03, 15 * U, 24 * U) * 1.3;
+    bannerAt = y0;
+    for (const y of [y0, 22 * U, ...Array.from({ length: 10 }, (_, i) => y0 + (i + 1) * h)]) {
+      if (y < h / 2 || y > H * 0.6) continue;
+      if (!taken.some(b => hit(bannerBox(y), b))) { bannerAt = y; break; }
+    }
+    return bannerAt;
+  }
+  /** Text the HUD draws over the stage this frame (screen space). */
+  function hudBoxes(tt: number): Box[] {
+    const out = [rosterBox(), ...sides.map(labelBox)];
+    const ri = currentRound(tt);
+    if (ri >= 0 && tt - roundStart[ri] < 1.2) out.push(bannerBox(bannerY()));
+    return out;
   }
 
   function drawHover(tt: number) {
@@ -1333,9 +1454,11 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     g.save();
     g.translate(sx, sy);
     g.translate(camX, camY); g.scale(camK, camK);
+    // the HUD's text (side labels, roster, round banner) in the camera's space: ship names and callouts keep off it
+    nameBoxes.length = 0;
+    for (const b of hudBoxes(tt)) nameBoxes.push({ l: (b.l - sx - camX) / camK, r: (b.r - sx - camX) / camK, t: (b.t - sy - camY) / camK, b: (b.b - sy - camY) / camK });
     drawWrecks(tt);
     for (const sd of sides) for (const u of sd.units) if (u.garrison) drawGarrison(u, tt, sd.color);
-    nameBoxes.length = 0;
     const order = shipUnits.slice().sort((a, b) => a.hy - b.hy);
     for (const u of order) drawShip(u, tt, sides[u.side].color);
     drawShots(tt);
@@ -1361,13 +1484,21 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     // only on change: replacing the icon every frame swallowed real clicks (the press landed on a node that was gone)
     if (playIcon !== playing) { playIcon = playing; bPlay.innerHTML = playing ? ic('pause', { title: 'Pause (Space)' }) : ic('play', { title: 'Play (Space)' }); bPlay.dataset.state = playing ? 'playing' : 'paused'; }
     barFill.style.width = `${(T / END) * 100}%`;
-    speedBtns.forEach(b => b.classList.toggle('bv-on', Number(b.dataset.v) === speed));
+    speedBtns.forEach(b => { const on = Number(b.dataset.v) === speed; b.classList.toggle('bv-on', on); b.setAttribute('aria-pressed', String(on)); });
     // intro card
     if (T < INTRO) {
       intro.style.display = '';
       intro.style.opacity = String(1 - clamp((T - (INTRO - 0.35)) / 0.35));
     } else intro.style.display = 'none';
-    outro.style.display = T >= END - 1e-6 ? '' : 'none';
+    const atEnd = T >= END - 1e-6;
+    outro.style.display = atEnd ? '' : 'none';
+    // at the result, Skip and Next have nothing left to do: say so instead of silently doing nothing
+    // (dimmed, not disabled: the button keeps focus and a click is a harmless no-op)
+    if (bSkip.classList.contains('bv-done') !== atEnd) {
+      for (const b of [bSkip, bNext]) b.classList.toggle('bv-done', atEnd);
+      bSkip.title = atEnd ? 'Skip: already at the result (Restart to watch again)' : 'Skip to the result';
+      bNext.title = atEnd ? 'Next round: none left' : 'Next round (→)';
+    }
     // captions
     let ci = -1;
     for (let i = 0; i < caps.length; i++) if (T >= caps[i].t && T < caps[i].t + CAPTION_DUR && T < END) ci = i;

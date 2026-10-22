@@ -49,6 +49,13 @@
   .audio-row input[type=range] { height: 2.25rem; }   /* a thumb-sized hit area */
 }
 
+/* touch screens: a thumb-sized toggle and slider rows (44px) */
+@media (pointer: coarse) {
+  .audio-mute { min-height: 2.75rem; }
+  .audio-row input[type=range] { height: 2.75rem; }
+  .audio-row input[type=range]::-webkit-slider-thumb { width: 1.5rem; height: 1.5rem; margin-top: -0.625rem; }
+}
+
 /* Help modal footer: Sound settings beside Restart tips */
 .help-foot { gap: 0.75rem; flex-wrap: wrap; }
 /* menu: the Sound row reads as a toggle */
