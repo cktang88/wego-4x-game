@@ -12,6 +12,7 @@ import { cardAction, splitIds, openWorldTab } from './card.ts';
 import { offerCharge } from './signature.ts';
 import { shortWhy, safeInsets } from './util.ts';
 import { glyphHtml, ic } from '../art/icons.ts';
+import { haptic } from '../fx/haptics.ts';
 
 interface Press { id: number; x: number; y: number; touch: boolean; fleet: number | null; moved: boolean; pan: { cx: number; cy: number } | null; lp: number; longed: boolean }
 interface Drag { src: DragSrc; id: number; touch: boolean; x: number; y: number; rid: number | null; over: number | null; key: string; intent: Intent | null; ship: boolean }
@@ -294,7 +295,7 @@ export class Gestures {
     const rid = g.map.regionAt(g.st, p.x, p.y);
     if (rid === null && !g.tokenHit(p.x, p.y)) { this.peekHold = true; g.peek = true; return; }
     this.openRingAt(p.x, p.y, p.id);
-    if (navigator.vibrate) try { navigator.vibrate(10); } catch { /* */ }
+    haptic('lift');
   }
 
   // ------------------------------------------------------------------ drags

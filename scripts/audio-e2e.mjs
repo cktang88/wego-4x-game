@@ -123,7 +123,8 @@ check((await since(m)).includes('game_order'), 'order placed (F, fortify): order
 // a card button that does something (the region card's Scan, or any enabled fleet button)
 await ev(id => { const s = window.tc.screen; s.select({ kind: 'region', id: s.fleet(id).region }); }, f0);
 await wait(300);
-const en = await page.$('.hud .card button[data-a]:not([aria-disabled=true])');
+// (a peek button only shows its slip: it has no click of its own)
+const en = await page.$('.hud .card button[data-a]:not([aria-disabled=true]):not([data-a=peek])');
 if (en) {
   m = await mark();
   await en.click();
@@ -147,8 +148,11 @@ await endReplay();
 await wait(300);
 const fz = await ev(() => {
   const s = window.tc.screen;
+  // Fate lives in the fleet card's Gambit (Story tab): open it, then look for a spendable Fate
   for (const f of s.st.fleets.filter(x => x.owner === s.you && x.ships.length)) {
     s.select({ kind: 'fleet', id: f.id });
+    document.querySelector('.hud .card [data-a=ftab][data-t=story]')?.click();
+    if (!document.querySelector('.hud .card .gopen')) document.querySelector('.hud .card [data-a=gambit]')?.click();
     const b = document.querySelector('.hud .card [data-a=fate]:not([aria-disabled=true])');
     if (b) return f.id;
   }

@@ -290,9 +290,12 @@ export function bindCard(g: GameScreen, el: HTMLElement) {
     g.renderAll();
   });
   el.addEventListener('keydown', e => {
-    e.stopPropagation();
     // Enter / Esc leave the name field: re-renders put the focus back into it, so the board's shortcuts stayed dead
     const t = e.target as HTMLElement;
+    // the card keeps only what is its own: typing in a field, Space / Enter on a focused control, and Esc.
+    // Every other key (F, M, S, Tab, the lenses...) reaches the board's shortcuts even with a card button focused.
+    const typingHere = t.matches('input, textarea, select, [contenteditable]');
+    if (typingHere || e.key === 'Escape' || ((e.key === ' ' || e.key === 'Enter') && t.matches('button, [role=button], a'))) e.stopPropagation();
     if ((e.key === 'Enter' || e.key === 'Escape') && t.matches('input')) (t as HTMLInputElement).blur();
     else if (e.key === 'Escape') { hidePeek(); g.deselect(); }
   });
