@@ -39,7 +39,7 @@ export interface Intent {
 }
 
 export const VERB_COLOR: Record<Verb, string> = {
-  move: '#6dffb0', overdrive: '#ffb84d', seize: '#ff5d7a', join: '#ff9db0', merge: '#8fd3ff', split: '#8fd3ff', invalid: '#8a83a8',
+  move: '#86c08f', overdrive: '#e4ab4a', seize: '#e2725d', join: '#e8a08e', merge: '#9bbbd9', split: '#9bbbd9', invalid: '#a9abb3',
 };
 
 /** Movement adjacency: hyperlane links (when the map has them) plus your warp gates. */

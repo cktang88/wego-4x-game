@@ -20,6 +20,10 @@ import { ic, icFor } from '../art/icons.ts';
 import { audio } from '../audio/audio.ts';
 import { openSoundSettings, soundIcon } from '../audio/hooks.ts';
 import { canVibrate, haptic, hapticsOn, setHaptics } from '../fx/haptics.ts';
+import { openGraphicsSettings } from '../ui/graphics.ts';
+import { bannerSvg } from '../art/sigils.ts';
+import { enamel } from '../art/bible.ts';
+import { signetOf } from '../fx/stage.ts';
 
 type ModalName = 'empire' | 'score' | 'chronicle' | 'help';
 interface ModalsModule {
@@ -102,7 +106,7 @@ export class Hud {
     g.root.classList.toggle('live', g.live);
     g.root.classList.toggle('replaying', !!g.blockingReplay);
     g.root.classList.toggle('sel-open', !!g.sel);
-    { const seat = g.you ?? g.mySeat(); g.root.style.setProperty('--you', seat !== null ? g.color(seat) : '#b78bff'); }
+    { const seat = g.you ?? g.mySeat(); g.root.style.setProperty('--you', seat !== null ? g.color(seat) : '#d9b26a'); }
     this.renderTurn();
     this.renderRes();
     this.renderCrests();
@@ -177,6 +181,9 @@ export class Hud {
     const g = this.g, st = g.st, meta = g.src.meta;
     const leader = currentLeader(st);
     const target = st.rules.victory.vpTarget;
+    // a League game remembers (DELIGHT #82): the house that took the most from you in this League wears a mark
+    const me = g.you ?? g.mySeat();
+    const nemesis = new Set((st.league?.nemesis ?? []).filter(n => n.seat === me).map(n => n.of));
     const html = st.players.map(p => {
       const s = meta.seats[p.id];
       const rt = g.replay && !g.replay.preview && g.replay.result.turn === st.turn - 1 ? g.replay.result.turn : null;
@@ -185,8 +192,11 @@ export class Hud {
       const frac = Math.max(0, Math.min(1, vp / Math.max(1, target)));
       const sealed = !g.live && s?.submitted && st.winner === null;
       const oath = (p.oathbreaker ?? []).length;
-      return `<div class="pcrest ${p.id === g.you ? 'you' : ''} ${p.eliminated ? 'out' : ''} ${oath ? 'oath' : ''}" style="--pc:${esc(p.color)}" data-crest="${p.id}"${tip(`${p.name}: ${p.vp} of ${target} victory points (♛)${leader === p.id ? ' · in the lead' : ''}${sealed ? ' · orders sealed' : ''}${oath ? ' · Oathbreaker' : ''}`)}>
-        <span class="cb"><b class="vp" data-vp="${p.id}">${vp}</b>${oath ? '<i class="crack" aria-label="Oathbreaker"></i>' : ''}</span>${leader === p.id ? '<i class="lead" aria-label="In the lead">♛</i>' : ''}${sealed ? '<i class="sealed wax" aria-label="Orders sealed"></i>' : ''}
+      const nem = nemesis.has(p.id);
+      // an enamel heater shield with the house signet in a metal rim (gold for the leader); the VP on a cartouche
+      const shield = bannerSvg(signetOf(p.id), enamel(p.color).base, 64, { rim: leader === p.id ? 'gold' : 'silver', broken: !!oath, cls: 'cb-shield' });
+      return `<div class="pcrest ${p.id === g.you ? 'you' : ''} ${p.eliminated ? 'out' : ''} ${oath ? 'oath' : ''} ${nem ? 'nemesis' : ''}" style="--pc:${esc(p.color)}" data-crest="${p.id}"${tip(`${p.name}: ${p.vp} of ${target} victory points (♛)${leader === p.id ? ' · in the lead' : ''}${sealed ? ' · orders sealed' : ''}${oath ? ' · Oathbreaker' : ''}${nem ? ' · your nemesis in this League' : ''}`)}>
+        <span class="cb">${shield}<b class="vp" data-vp="${p.id}">${vp}</b>${oath ? '<i class="crack" aria-label="Oathbreaker"></i>' : ''}${sealed ? '<i class="sealed wax" aria-label="Orders sealed"></i>' : ''}${nem ? `<i class="nem" aria-label="Your nemesis">${ic('blade')}</i>` : ''}</span>${leader === p.id ? '<i class="lead" aria-label="In the lead">♛</i>' : ''}
         <span class="nm">${s?.online && g.src.kind === 'remote' ? '<i class="on"></i>' : ''}${esc(shortName(p.name, 1))}</span><i class="vpbar"><i style="width:${(frac * 100).toFixed(1)}%"></i></i></div>`;
     }).join('');
     g.setHtml(this.h.crests, `<button class="crests" aria-label="Score: victory points of each player">${html}</button>`);
@@ -270,6 +280,7 @@ export class Hud {
         ${item('signals', '◎', `Signals ${g.showSignals ? 'on' : 'off'}`)}
         ${(() => { const m = audio.getSettings().muted; return item('sound', soundIcon(m), `Sound ${m ? 'off' : 'on'}`, `${m ? ' class="off"' : ''} aria-pressed="${!m}"${tip('Mute or unmute · Shift+M')}`); })()}
         ${item('soundset', soundIcon(false), 'Sound settings')}
+        ${item('gfx', ic('star'), 'Graphics')}
         ${canVibrate() && g.root.classList.contains('touch') ? item('haptics', ic('bolt'), `Haptics ${hapticsOn() ? 'on' : 'off'}`, `${hapticsOn() ? '' : ' class="off"'} aria-pressed="${hapticsOn()}"`) : ''}
         ${g.phone ? item('legend', '?', 'Map key') : ''}
         ${item('help', ic('help'), 'Help')}
@@ -314,6 +325,7 @@ export class Hud {
         break;
       }
       case 'soundset': openSoundSettings(); break;
+      case 'gfx': openGraphicsSettings(); break;
       case 'legend': this.showPop('legend', this.h.tools.querySelector('[data-act=menu]')); break;
       case 'teach': g.restartTeach(); break;
       case 'save': g.exportSave(); break;
@@ -378,23 +390,23 @@ export { orderMs };
 /** Small drawings of the map's marks, in the map's own manner (render/map.ts): territory wash, crown rings, fleet
  *  counters, lanes, battles, plans, rims, hatching. 32x22 each. */
 const K = {
-  gold: '#e9c46a', you: 'var(--you, #6fc3ff)', foe: '#e0566f', line: 'rgba(214, 186, 130, 0.55)', amber: '#ffb347',
+  gold: '#f1d488', you: 'var(--you, #7fb3dc)', foe: '#dc6a66', line: 'rgba(214, 186, 130, 0.55)', amber: '#e4ab4a', contested: '#e8a08e', ink: '#f3ead6',
 };
 const svg = (body: string) => `<svg class="kg" viewBox="0 0 32 22" width="32" height="22" aria-hidden="true">${body}</svg>`;
 const star = (x = 16, y = 11, r = 2.6) => `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff4cf"/><circle cx="${x}" cy="${y}" r="${r + 2.2}" fill="rgba(255,220,140,0.25)"/>`;
 const LEGEND: [string, string][] = [
-  [svg(`<path d="M3 4 Q12 1 22 4 L29 12 Q20 21 8 19 Z" fill="rgba(111,195,255,0.28)" stroke="${K.you}" stroke-width="1.6"/>`), 'Coloured territory: who holds it.'],
+  [svg(`<path d="M3 4 Q12 1 22 4 L29 12 Q20 21 8 19 Z" fill="rgba(127,179,220,0.28)" stroke="${K.you}" stroke-width="1.6"/>`), 'Coloured territory: who holds it.'],
   [svg(`${star()}<circle cx="16" cy="11" r="7" fill="none" stroke="${K.gold}" stroke-width="1.8"/>`), 'Gold ring: a Crown, worth victory points every turn.'],
   [svg(`${star()}<circle cx="16" cy="11" r="6.5" fill="none" stroke="${K.gold}" stroke-width="1.5"/><circle cx="16" cy="11" r="9.5" fill="none" stroke="${K.gold}" stroke-width="1.2"/>`), 'Double gold ring: the Throne.'],
-  [svg(`${star(20)}<circle cx="9" cy="10" r="5" fill="${K.you}" stroke="#fff" stroke-width="1"/><text x="9" y="21.5" font-size="6.5" text-anchor="middle" fill="#fff" font-family="sans-serif">2</text>`), 'Round counter or chevron beside a star: a fleet in that system. Yours always sit on the left; a small number under it: fleets in the stack.'],
-  [svg(`<line x1="2" y1="16" x2="30" y2="6" stroke="${K.line}" stroke-width="1.4"/><path d="M13 13.5 l6 -5 l1.5 4 Z" fill="${K.foe}" stroke="#fff" stroke-width="0.8"/>`), 'Piece on a lane: a fleet travelling between systems.'],
-  [svg(`<path d="M9 4 L23 18 M23 4 L9 18" stroke="#ffd2c4" stroke-width="2.2" stroke-linecap="round"/><path d="M7 16 l4 4 M25 16 l-4 4" stroke="#ffd2c4" stroke-width="2.2" stroke-linecap="round"/>`), 'Crossed swords: a battle.'],
+  [svg(`${star(20)}<circle cx="9" cy="10" r="5" fill="${K.you}" stroke="#c8964a" stroke-width="1"/><text x="9" y="21.5" font-size="6.5" text-anchor="middle" fill="${K.ink}" font-family="Alegreya Sans, sans-serif" font-weight="700">2</text>`), 'Round counter or chevron beside a star: a fleet in that system. Yours always sit on the left; a small number under it: fleets in the stack.'],
+  [svg(`<line x1="2" y1="16" x2="30" y2="6" stroke="${K.line}" stroke-width="1.4"/><path d="M13 13.5 l6 -5 l1.5 4 Z" fill="${K.foe}" stroke="#c8964a" stroke-width="0.8"/>`), 'Piece on a lane: a fleet travelling between systems.'],
+  [svg(`<path d="M9 4 L23 18 M23 4 L9 18" stroke="#efd59a" stroke-width="2.2" stroke-linecap="round"/><path d="M7 16 l4 4 M25 16 l-4 4" stroke="#efd59a" stroke-width="2.2" stroke-linecap="round"/>`), 'Crossed swords: a battle.'],
   [svg(`<path d="M3 17 L24 6" stroke="${K.you}" stroke-width="1.8" stroke-dasharray="3 2.4"/><path d="M29 3.5 L22 4.5 L25.5 10 Z" fill="${K.you}"/>`), 'Dashed line with arrowhead: a planned move.'],
   [svg(`${star()}<circle cx="16" cy="11" r="7" fill="none" stroke="${K.foe}" stroke-width="1.4"/><path d="M16 1v5 M16 16v5 M6 11h5 M21 11h5" stroke="${K.foe}" stroke-width="1.4"/>`), 'Reticle round a star: a planned attack.'],
-  [svg(`<circle cx="16" cy="11" r="5.5" fill="${K.you}"/><circle cx="16" cy="11" r="8.5" fill="none" stroke="#fff" stroke-opacity="0.75" stroke-width="1.6"/>`), 'Breathing rim: your fleet has no orders.'],
+  [svg(`<circle cx="16" cy="11" r="5.5" fill="${K.you}"/><circle cx="16" cy="11" r="8.5" fill="none" stroke="${K.ink}" stroke-opacity="0.75" stroke-width="1.6"/>`), 'Breathing rim: your fleet has no orders.'],
   [svg(`<circle cx="16" cy="11" r="5.5" fill="${K.you}"/><circle cx="16" cy="11" r="8.5" fill="none" stroke="${K.amber}" stroke-width="1.6" stroke-dasharray="2.6 2"/>`), 'Amber dashed rim: out of supply.'],
   [svg(`<defs><pattern id="kh" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="4" stroke="${K.you}" stroke-width="1.4"/></pattern></defs><path d="M3 4 Q12 1 22 4 L29 12 Q20 21 8 19 Z" fill="url(#kh)" stroke="${K.you}" stroke-width="1.2"/>`), 'Hatching: cut off from your capital.'],
-  [svg(`${star()}<circle cx="16" cy="11" r="7.5" fill="none" stroke="#ff9b7a" stroke-width="1.5" stroke-dasharray="2.4 2.2"/>`), 'Dashed ring round a star: a contested system.'],
+  [svg(`${star()}<circle cx="16" cy="11" r="7.5" fill="none" stroke="${K.contested}" stroke-width="1.5" stroke-dasharray="2.4 2.2"/>`), 'Dashed ring round a star: a contested system.'],
 ];
 function legendHtml(): string {
   return `<div class="legend" role="list"><div class="lg-h">Map key</div>${LEGEND.map(([i, t]) => `<div class="lg" role="listitem">${i}<span>${esc(t)}</span></div>`).join('')}<div class="lg-f">Hover or tap anything for details.</div></div>`;

@@ -9,7 +9,7 @@
    ============================================================================ */
 :root {
   --card-w: 23rem;
-  --gambit: #d7b4ff;            /* violet: the colour of secret bets (gold stays VP / Fate) */
+  --gambit: #bfaee0;            /* violet: the colour of secret bets (gold stays VP / Fate) */
   --gambit-lo: #2a1f33;
   --wc-ink: var(--k-ivory, #ece3cf);
   --wc-dim: var(--k-parchment, #c4b89c);
@@ -66,7 +66,7 @@
 .card.wc .wc-art .gem { position: absolute; right: 8%; bottom: 8%; width: 1rem; height: 1rem; display: grid; place-items: center; border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #fff, #4a3a6a 60%, #1b1424); box-shadow: 0 0 0 1px var(--k-brass-500, #a87a35), 0 1px 2px #000; }
 .card.wc .wc-art .gem .ic { width: 0.65rem; height: 0.65rem; color: #f3ecff; }
-.card.wc .wc-art .gem.v-antimatter { background: radial-gradient(circle at 35% 30%, #ffd6f4, #9a3a7c 60%, #2a0c22); }
+.card.wc .wc-art .gem.v-antimatter { background: radial-gradient(circle at 35% 30%, #f0d0e4, #9a3a7c 60%, #2a0c22); }
 .card.wc .wc-art .gem.v-crystal { background: radial-gradient(circle at 35% 30%, #e6fbff, #3a7c8a 60%, #0c2228); }
 /* the garrison on the art's right shoulder */
 .card.wc .garr { position: absolute; z-index: 3; right: 3.25rem; top: 0.5rem; display: flex; align-items: center; gap: 0.125rem; height: 2rem;
@@ -93,7 +93,7 @@
   font: 700 var(--fs-xs)/1.25 var(--font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   clip-path: polygon(0.5rem 0, 100% 0, 100% 100%, 0.5rem 100%, 0 50%); box-shadow: inset 0 1px 0 rgba(255, 238, 205, 0.2); }
 .card.wc .ribbon .ic { width: 1rem; height: 1rem; }
-.card.wc .ribbon.war { background: linear-gradient(90deg, #7a2420, #3e0e10); color: #ffd6cc; }
+.card.wc .ribbon.war { background: linear-gradient(90deg, #7a2420, #3e0e10); color: #f3d9cc; }
 .card.wc .ribbon.gold { background: linear-gradient(90deg, #6b4a1c, #3a2810); color: var(--k-fate, #f1d488); }
 .card.wc .ribbon.dim { background: linear-gradient(90deg, #2a2c34, #17181d); color: var(--wc-dim); }
 .card.wc .ribbon.cut { background: linear-gradient(90deg, #5a4618, #2a2010); color: #f2d798; }
@@ -311,10 +311,10 @@
   background: var(--k-grain) 0 0 / 160px, linear-gradient(160deg, #2c2133, #17121b);
   background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel), 0 1px 0 rgba(0, 0, 0, 0.55); color: var(--wc-ink); }
 .card.wc .gchip > .ic { width: 1.25rem; height: 1.25rem; color: var(--gambit); }
-.card.wc .gchip b { font: 700 var(--fs-sm)/1 var(--k-display, var(--display)); letter-spacing: 0.12em; text-transform: uppercase; color: #ead9ff; flex: none; }
+.card.wc .gchip b { font: 700 var(--fs-sm)/1 var(--k-display, var(--display)); letter-spacing: 0.12em; text-transform: uppercase; color: #d6cbe9; flex: none; }
 .card.wc .gchip > span:not(.coins) { min-width: 0; color: var(--wc-dim); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card.wc .gchip.set { background: var(--k-grain) 0 0 / 160px, linear-gradient(160deg, #3d2a4b, #1d1424); background-blend-mode: soft-light, normal; }
-.card.wc .gchip.set > span:not(.coins) { color: #ead9ff; }
+.card.wc .gchip.set > span:not(.coins) { color: #d6cbe9; }
 .card.wc .gchip:hover { filter: brightness(1.12); background-blend-mode: soft-light, normal; }
 .card.wc .coins { margin-left: auto; display: inline-flex; gap: 0.0625rem; flex: none; }
 .card.wc .coins i { display: grid; place-items: center; color: rgba(255, 255, 255, 0.2); }
@@ -326,10 +326,10 @@
 .card.wc .bets.n4 { grid-template-columns: repeat(4, 1fr); }
 .card.wc .bet { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.125rem; min-height: 3.75rem; padding: 0.375rem 0.125rem;
   background: var(--k-grain) 0 0 / 160px, linear-gradient(160deg, #2a2430, #17141b); background-blend-mode: soft-light, normal; }
-.card.wc .bet > .ic { width: 1.375rem; height: 1.375rem; color: #e2c8ff; }
+.card.wc .bet > .ic { width: 1.375rem; height: 1.375rem; color: #d6cbe9; }
 .card.wc .bet b { font: 700 var(--fs-xs)/1.1 var(--font); }
 .card.wc .bet small { font-size: var(--fs-xs); color: var(--wc-dim); text-align: center; line-height: 1.15; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 0.125rem; }
-.card.wc .bet.on { background: var(--k-grain) 0 0 / 160px, linear-gradient(160deg, #4a3260, #241a30); background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel), 0 0 0.75rem rgba(200, 150, 255, 0.22); }
+.card.wc .bet.on { background: var(--k-grain) 0 0 / 160px, linear-gradient(160deg, #4a3260, #241a30); background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel), 0 0 0.75rem rgba(171, 149, 216, 0.22); }
 .card.wc .bet.fate { background: var(--k-grain) 0 0 / 160px, linear-gradient(160deg, #2e2818, #17140c); background-blend-mode: soft-light, normal; }
 .card.wc .bet.fate > .ic { color: var(--k-fate, #f1d488); }
 .card.wc .bet.fate.on, .card.wc .bet.fate.armed { background: var(--k-grain) 0 0 / 160px, linear-gradient(160deg, #4a3c18, #241c0c); background-blend-mode: soft-light, normal; }
@@ -537,11 +537,11 @@
 .card.wc .go.why, .card.wc .ib[aria-disabled=true] { box-shadow: inset 0 0 0 1px rgba(214, 173, 98, 0.2); }
 .card.wc .go.max { box-shadow: none; }
 .card.wc .bet { box-shadow: inset 0 0 0 1px rgba(190, 140, 220, 0.45), var(--k-bevel); }
-.card.wc .bet.on { box-shadow: inset 0 0 0 1px #e2c8ff, var(--k-bevel), 0 0 0.75rem rgba(200, 150, 255, 0.22); }
+.card.wc .bet.on { box-shadow: inset 0 0 0 1px #d6cbe9, var(--k-bevel), 0 0 0.75rem rgba(171, 149, 216, 0.22); }
 .card.wc .bet.fate { box-shadow: inset 0 0 0 1px rgba(241, 212, 136, 0.6), var(--k-bevel); }
 .card.wc .bet.fate.on, .card.wc .bet.fate.armed, .card.wc .pick.on { box-shadow: inset 0 0 0 1px #efd59a, var(--k-bevel), 0 0 0.7rem rgba(255, 210, 120, 0.25); }
 .card.wc .pick.gated { box-shadow: inset 0 0 0 1px rgba(214, 173, 98, 0.18); }
-.card.wc .gchip { box-shadow: inset 0 0 0 1px rgba(215, 180, 255, 0.55), var(--k-bevel), 0 1px 0 rgba(0, 0, 0, 0.55); }
+.card.wc .gchip { box-shadow: inset 0 0 0 1px rgba(171, 149, 216, 0.55), var(--k-bevel), 0 1px 0 rgba(0, 0, 0, 0.55); }
 .card.wc .gchip.set { box-shadow: inset 0 0 0 1px var(--gambit), var(--k-bevel); }
 .card.wc .sc.up { box-shadow: inset 0 0 0 1px #efd59a, var(--k-bevel), var(--k-cast-lift); }
 .card.wc .odds.good { box-shadow: inset 0 0 0 1px rgba(226, 114, 93, 0.65), var(--k-bevel); }

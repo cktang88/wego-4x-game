@@ -113,16 +113,16 @@
 @keyframes dl-roll-up { from { transform: translateY(85%); opacity: 0.1; } }
 @keyframes dl-roll-down { from { transform: translateY(-85%); opacity: 0.1; } }
 .pcrest.dl-hit .cb { animation: dl-crest-hit 0.38s ease-out; }
-@keyframes dl-crest-hit { 0% { transform: scale(1.16); filter: brightness(1.7) drop-shadow(0 0 0.375rem #ffd86b); } 100% { transform: scale(1); } }
+@keyframes dl-crest-hit { 0% { transform: scale(1.16); filter: brightness(1.5) drop-shadow(0 0 0.3rem #f1d488); } 100% { transform: scale(1); } }
 .pcrest .sealed.wax {
-  top: -0.25rem; right: 0.125rem; width: 0.9375rem; height: 0.9375rem; line-height: 0; font-size: 0; color: transparent;
+  top: 40%; right: -0.375rem; width: 0.9375rem; height: 0.9375rem; line-height: 0; font-size: 0; color: transparent;
   border-radius: 48% 52% 45% 55% / 54% 46% 56% 44%;
   background: radial-gradient(circle at 50% 52%, #7a1717 0 32%, transparent 34%), radial-gradient(circle at 33% 28%, #e2705e, #8e1f1f 55%, #4a0d0e);
   box-shadow: 0 1px 1px rgba(0, 0, 0, 0.8), inset -1px -1px 1px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(20, 6, 4, 0.55);
   animation: dl-wax-set 0.35s var(--k-ease-strike) both;
 }
 @keyframes dl-wax-set { from { transform: scale(1.8); opacity: 0; } }
-.phone .pcrest .sealed.wax { right: -0.1875rem; width: 0.8125rem; height: 0.8125rem; }
+.phone .pcrest .sealed.wax { right: -0.0625rem; top: auto; bottom: 0.1875rem; width: 0.6875rem; height: 0.6875rem; }
 
 /* ------------------------------------------------------------ VP coins */
 .dl-coin {
@@ -198,13 +198,15 @@
   display: flex; flex-direction: column; align-items: center; gap: 0.375rem; min-height: 13rem; padding: 1.125rem 0.5rem 2.5rem; text-align: center;
   background: linear-gradient(90deg, rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0) 16%, rgba(255, 255, 255, 0.06) 40%, rgba(0, 0, 0, 0) 64%, rgba(0, 0, 0, 0.36)),
     var(--k-grain), linear-gradient(172deg, color-mix(in srgb, var(--ph) 45%, var(--pc)) 0%, var(--pc) 42%, var(--pl) 100%);
+  background-color: var(--pc);   /* the enamel under its gradients: what the text is read against when an image fails */
   clip-path: polygon(0 0, 100% 0, 100% 86%, 50% 100%, 0 86%);
 }
 .cr-sig { display: block; margin-top: 0.25rem; filter: drop-shadow(0 0.125rem 0.125rem rgba(0, 0, 0, 0.55)); }
 .cr-name { font-family: var(--k-display); font-size: 1rem; font-weight: 700; color: #fbedc8; text-shadow: 0 1px 0 #000; line-height: 1.15; overflow-wrap: break-word; hyphens: auto; }
 .cr-vp { font-family: var(--font); font-size: 1.625rem; font-weight: 800; color: #fff4d6; font-variant-numeric: tabular-nums; text-shadow: 0 1px 0 #000; line-height: 1; }
-.cr-vp small { font-size: 0.875rem; font-weight: 700; color: #f2e3bd; }
-.cr-you { font-style: normal; font-size: 0.875rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: #fbedc8; text-shadow: 0 1px 0 #000; }
+.cr-vp small { font-size: 0.875rem; font-weight: 700; color: #fff8ea; }
+.cr-you { font-style: normal; font-size: 0.875rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: #fff8ea; text-shadow: 0 1px 0 #000; }
+.cr-seat.light .cr-cloth { background-color: #c79a2c; }
 .cr-seat.light .cr-name, .cr-seat.light .cr-vp, .cr-seat.light .cr-vp small, .cr-seat.light .cr-you { color: #2a1d10; text-shadow: 0 1px 0 rgba(255, 244, 210, 0.6); }
 .cr-seat.win .cr-banner { transform: scaleY(0.1); }
 .crowning.banners .cr-seat.win .cr-banner { transform: none; transition: transform 0.8s var(--k-ease-strike); }
@@ -212,27 +214,30 @@
 .crowning.banners .cr-seat.lose .cr-banner { transform: translateY(2.25rem) rotate(0.6deg); filter: brightness(0.62) saturate(0.65); }
 .crowning.banners .cr-seat.lose.you .cr-banner { transition-duration: 3.4s; }
 .cr-crown { position: absolute; top: -3.5rem; font-size: 2.25rem; color: #f1d488; opacity: 0; transform: translateY(-1.25rem) scale(1.5) rotate(-10deg);
-  transition: opacity 0.5s ease-out 0.35s, transform 0.65s var(--k-ease-strike) 0.35s; filter: drop-shadow(0 0 0.625rem rgba(255, 216, 107, 0.75)) drop-shadow(0 0.125rem 0 #000); }
+  transition: opacity 0.5s ease-out 0.35s, transform 0.65s var(--k-ease-strike) 0.35s; filter: drop-shadow(0 0 0.625rem rgba(241, 212, 136, 0.75)) drop-shadow(0 0.125rem 0 #000); }
 .crowning.banners .cr-crown { opacity: 1; transform: none; }
 .cr-cards { display: flex; flex-direction: column; gap: 0.375rem; width: min(12.5rem, 100%); min-height: 7.5rem; margin-top: 0.75rem; perspective: 40rem; }
 .crowning.banners .cr-seat.lose .cr-cards { transform: translateY(2.25rem); transition: transform 2.6s cubic-bezier(0.45, 0, 0.3, 1); }
 .cr-card {
   display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 0.4375rem; align-items: center; padding: 0.375rem 0.5rem 0.4375rem; border-radius: 7px;
   color: #2a1d10; text-align: left; border-left: 0.25rem solid var(--pc);
-  background: linear-gradient(180deg, rgba(244, 233, 204, 0.86), rgba(226, 209, 170, 0.9)), var(--k-paper) center / 18rem auto, #e3d3ad;
+  background: linear-gradient(180deg, rgba(244, 233, 204, 0.86), rgba(226, 209, 170, 0.9)), var(--k-paper) center / 18rem auto, #e4d3ab;
+  background-color: #e4d3ab;
   box-shadow: var(--k-cast-lift), inset 0 0 0 1px rgba(107, 86, 56, 0.35); transform-style: preserve-3d; backface-visibility: hidden;
 }
 .cr-card .cr-cic { grid-row: span 2; font-size: 1.375rem; color: #6b4a1c; }
 .cr-card b { font-family: var(--k-display); font-size: 0.875rem; font-weight: 800; line-height: 1.2; }
 .cr-card span { font-family: var(--k-prose); font-style: italic; font-size: 0.875rem; color: #45321c; line-height: 1.25; }
-.cr-card.fade { animation: dl-fade 0.4s ease-out both; }
+.cr-card.fade { animation: cr-card-set 0.4s var(--k-ease-heavy) both; }
+@keyframes cr-card-set { from { transform: translateY(0.375rem) scale(0.96); } }
 .cr-deck { position: fixed; left: 50%; bottom: 1.5rem; width: 2.75rem; height: 3.75rem; margin-left: -1.375rem; border-radius: 7px; opacity: 0; transition: opacity 0.4s;
   background: linear-gradient(180deg, rgba(244, 233, 204, 0.86), rgba(226, 209, 170, 0.9)), var(--k-paper) center / 10rem auto, #e3d3ad; box-shadow: 0.125rem 0.125rem 0 #c9b48a, 0.25rem 0.25rem 0 #9c845a, var(--k-cast); }
 .crowning.titled .cr-deck { opacity: 1; }
 .crowning.dealt .cr-deck, .crowning.skip .cr-deck { opacity: 0; }
 .cr-short { display: none; }
-.cr-btns { justify-content: center; margin-top: 2.75rem; opacity: 0; transition: opacity 0.5s ease-out; }
-.crowning.dealt .cr-btns, .crowning.skip .cr-btns { opacity: 1; }
+/* the buttons arrive by moving, not fading: never read half-transparent */
+.cr-btns { justify-content: center; margin-top: 2.75rem; visibility: hidden; transform: translateY(0.5rem); transition: transform 0.4s var(--k-ease-heavy); }
+.crowning.dealt .cr-btns, .crowning.skip .cr-btns { visibility: visible; transform: none; }
 .crowning.dealt [data-saga] { animation: cr-saga 2.6s ease-in-out 0.6s infinite; }
 @keyframes cr-saga { 50% { box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.55), 0 0 1.25rem rgba(255, 210, 120, 0.55); } }
 /* skipped: everything at its final place at once */
@@ -275,8 +280,8 @@
 
 /* the crest's VP: ivory figures on a small dark cartouche in a brass rim, legible on every enamel */
 .hud .pcrest .cb .vp {
-  display: inline-block; min-width: 1.125rem; padding: 0 0.1875rem; margin-top: -0.3125rem; border-radius: 3px; line-height: 1.2; text-align: center;
+  display: block; min-width: 1.25rem; padding: 0.0625rem 0.25rem 0; border-radius: 3px; line-height: 1.1; text-align: center;
   color: #f8efdc; background-color: #15110c; background-image: linear-gradient(180deg, #2a221a, #0f0c09);
-  box-shadow: 0 0 0 1px rgba(200, 150, 74, 0.75), inset 0 1px 0 rgba(255, 238, 205, 0.12); text-shadow: 0 1px 0 #000; font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 1px #a87a35, 0 0 0 2px rgba(7, 8, 12, 0.6), inset 0 1px 0 rgba(255, 238, 205, 0.12), 0.06rem 0.12rem 0.15rem rgba(0, 0, 0, 0.6); text-shadow: 0 1px 0 #000; font-variant-numeric: lining-nums tabular-nums;
 }
-.phone .hud .pcrest .cb .vp { min-width: 1rem; padding: 0 0.125rem; }
+.phone .hud .pcrest .cb .vp { min-width: 1rem; padding: 0 0.125rem; bottom: -0.375rem; }

@@ -23,6 +23,9 @@ import { LIVE_SPEEDS } from '../../shared/sim/live.ts';
 import { PLAYER_COLORS, NEUTRAL_COLOR } from '../../shared/config/content.ts';
 import './lobby.css';
 
+/** Re-bind this browser's seats to its turn notifications (push/push.ts; a no-op while they are off). */
+const syncPush = () => void import('./push/push.ts').then(m => m.syncPush()).catch(() => { /* offline: next time */ });
+
 const app = document.getElementById('app')!;
 
 // Audio: nothing is created or fetched until the first gesture (iOS unlock); the lobby theme waits for it.
@@ -118,7 +121,7 @@ async function openRemote(id: string, tokenFromUrl?: string) {
     if (gen !== routeGen) return;
     // a stale or mistyped link must not replace a working seat (or lock this browser out of the join dialog)
     if (seat === -1) toast('That seat link is not valid for this game.');
-    else tokens.set(id, { token: tokenFromUrl, seat: seat ?? -1 });
+    else { tokens.set(id, { token: tokenFromUrl, seat: seat ?? -1 }); syncPush(); }
     history.replaceState(null, '', `#/g/${encodeURIComponent(id)}`);
   }
   const tk = tokens.get(id);
@@ -229,6 +232,7 @@ function joinDialog(meta: GameMeta) {
     try {
       const r = await api.join(meta.id, Number(b.dataset.seat), name);
       tokens.set(meta.id, r);
+      syncPush();
       route();
     } catch (e: any) {
       toast(`Could not take the seat: ${e.message ?? e}`);
@@ -265,6 +269,8 @@ const tweaksLabel = () => { const n = countOverrides(); return `${ic('industry')
 function lobby() {
   audio.me = null;
   audio.scene('lobby');
+  // seats joined on other devices, or before notifications were turned on
+  syncPush();
   let saveTurn = 0;
   const saved = store.get('tc.local.autosave');
   if (saved) { try { const sv = JSON.parse(saved) as LocalSave; saveTurn = sv.state.winner === null ? Math.max(1, Number(sv.state.turn) || 1) : -1; } catch { saveTurn = 0; } }
@@ -293,13 +299,14 @@ function lobby() {
           <label for="o-mode">Mode</label><select id="o-mode" data-o="mode">${modeOpts('wego')}</select>
           <p class="lb-hint" data-o="hint" aria-live="polite"></p>
           <label for="o-deadline">Deadline</label><select id="o-deadline" data-o="deadline"><option value="0">None: wait for all</option><option value="1">1 hour a turn</option><option value="8">8 hours a turn</option><option value="24">24 hours a turn</option><option value="48">48 hours a turn</option></select>
+          <div class="lb-league" data-o="league"></div>
         </div>
         <div class="lb-actions"><button class="primary" data-o="create">Create &amp; take seat 1</button></div>
         <h3>Games on this server</h3><div class="gamelist" data-o="list" aria-live="polite"><p class="lb-empty"><span class="lb-spin" aria-hidden="true"></span>Looking for games…</p></div>
       </section>
       <section class="card lb-fiddle"><h2>Fiddle</h2>
         <p class="lb-lead">Everything is a knob. Change any rule (orders per turn, ship stats, VP values, combat odds…) and start a new game to try it.</p>
-        <div class="lb-actions"><button data-l="tweaks">${tweaksLabel()}</button><button data-l="help">${ic('help')} How to play</button><button data-l="sound">${soundIcon()} Sound</button><button data-l="gfx">${ic('star')} Graphics</button></div>
+        <div class="lb-actions"><button data-l="tweaks">${tweaksLabel()}</button><button data-l="help">${ic('help')} How to play</button><button data-l="sound">${soundIcon()} Sound</button><button data-l="gfx">${ic('star')} Graphics</button><button data-l="notify">${ic('dispatch')} Notifications</button><button data-l="league">${ic('crown')} League</button></div>
         <p class="lb-dev">Dev tips: <code>npm run sim -- --games 50</code> runs headless AI-vs-AI balance tests. The <i>Menu</i> in a local game can reveal the whole map. All rules: <code>shared/config/rules.ts</code>.</p>
       </section>
     </div></div></div>`;
@@ -381,6 +388,17 @@ function lobby() {
     openSoundSettings().addEventListener('fx-removed', off);
   });
   q('[data-l="gfx"]').addEventListener('click', () => openGraphicsSettings());
+  q('[data-l="league"]').addEventListener('click', () => void import('./league/panel.ts').then(m => m.mountLeaguePanel()));
+  q('[data-l="notify"]').addEventListener('click', async () => {
+    const m = await import('./push/push.ts');
+    const o = overlay(`<div class="dialog lb-notify" role="dialog" aria-label="Notifications"><h2>Notifications</h2><div data-push></div><div class="row"><button class="primary" data-close>Done</button></div></div>`);
+    m.mountPushSettings(o.querySelector<HTMLElement>('[data-push]')!);
+    o.querySelector('[data-close]')!.addEventListener('click', () => o.remove());
+  });
+  // which League a new online game counts for (renders nothing until this browser sits in one)
+  let leagueChoice: import('../../shared/protocol.ts').CreateGameReq['league'];
+  const lgen = routeGen;
+  void import('./league/panel.ts').then(m => { const host = app.querySelector<HTMLElement>('[data-o="league"]'); if (host && lgen === routeGen) m.mountLeaguePicker(host, v => { leagueChoice = v; }); });
   q('[data-l="help"]').addEventListener('click', async () => {
     const { helpHtml } = await import('./ui/help.ts');
     const { createGame } = await import('../../shared/sim/setup.ts');
@@ -399,9 +417,11 @@ function lobby() {
         seats: [{ kind: 'human', name: nm }, seat(q('[data-o="s1"]').value), seat(q('[data-o="s2"]').value)],
         rules: loadOverrides(), deadlineHours: Number(q('[data-o="deadline"]').value),
         ...(q('[data-o="mode"]').value.startsWith('live') ? { mode: 'live' as const, liveSpeed: q('[data-o="mode"]').value.slice(5) } : {}),
+        ...(leagueChoice ? { league: leagueChoice } : {}),
       });
       const j = await api.join(r.id, 0, nm);
       tokens.set(r.id, j);
+      syncPush();
       const link = `${location.origin}${location.pathname}#/g/${r.id}`;
       const o = overlay(`<div class="dialog lb-created" role="dialog" aria-label="Game created"><h2>${ic('check')} Game created</h2><p>Send this link to your rivals:</p>
         <input class="lb-link" value="${esc(link)}" readonly aria-label="Game link">

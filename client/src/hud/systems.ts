@@ -286,7 +286,7 @@ export function storyBodies(g: GameScreen, r: Region): string {
   const thumb = (it: ArtItem | undefined) => it ? `<canvas data-art="bd:${r.id}:${it.idx}:${it.kind}:${it.type}:${it.seed}:0" style="width:${it.ring ? 44 : 28}px;height:28px" aria-hidden="true"></canvas>` : '';
   // the story rows reuse the art's body specs (registered by sysArt on the face)
   for (const it of items) { const key = `bd:${r.id}:${it.idx}:${it.kind}:${it.type}:${it.seed}:0`; if (!specs.has(key)) specs.set(key, () => (cv, w, h, dpr) => paintBody(cv, w, h, dpr, { ...it, d: it.ring ? 24 : 26 }, false)); }
-  const rows = [`<div class="body"><i class="bi star" style="color:${esc(S?.color ?? '#ffd76a')}">${ic(icFor('star', r.star, S?.icon))}</i><span><b>${esc(S?.name ?? r.star)}</b></span><em>${esc((S?.desc ?? '').replace(/\.$/, '').toLowerCase())}</em></div>`];
+  const rows = [`<div class="body"><i class="bi star" style="color:${esc(S?.color ?? '#f1d488')}">${ic(icFor('star', r.star, S?.icon))}</i><span><b>${esc(S?.name ?? r.star)}</b></span><em>${esc((S?.desc ?? '').replace(/\.$/, '').toLowerCase())}</em></div>`];
   (r.bodies ?? []).forEach((b, i) => {
     const it = items.find(x => x.idx === i);
     const tag = bodyTag(g.st, r, i);

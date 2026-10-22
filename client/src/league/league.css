@@ -121,7 +121,7 @@
 /* ---------------------------------------------------------------- push prompt and settings (client/src/push) */
 .tcp-sheet { width: min(30rem, 100%); }
 .tcp-sheet .tcl-body { display: grid; gap: 0.75rem; }
-.tcp-slip { padding: 1rem 1.1rem; border-radius: 3px; }
+.tcp-slip { max-width: none; padding: 1rem 1.1rem; border-radius: 3px; }
 .tcp-slip p { margin: 0 0 0.5rem; font-family: var(--k-prose); font-size: 1.05rem; color: var(--k-ink-text); line-height: 1.45; }
 .tcp-slip p:last-child { margin-bottom: 0; }
 .tcp-slip .tcp-sample { font-style: italic; color: var(--k-ink-faded); }
@@ -154,3 +154,11 @@
   .tcl-ov, .tcl-sheet { transition: none; }
   .tcl-candle::before { animation: none; }
 }
+
+/* phone: the four ledger tabs fit across the sheet */
+@media (max-width: 700px) {
+  .tcl-tabs { padding: 0 0.5rem; }
+  .tcl-tabs .k-tab { flex: 1 1 auto; padding: 0 0.5em; letter-spacing: 0.04em; font-size: 0.8125rem; }
+}
+/* the iOS steps on the prompt's slip: bold prose, not engraved capitals */
+.tcp-slip p b { font-family: var(--k-prose, 'IM Fell English', Georgia, serif); font-size: 1em; letter-spacing: 0; text-transform: none; font-variant: normal; color: #3a2208; }

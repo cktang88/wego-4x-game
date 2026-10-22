@@ -34,8 +34,23 @@ export function orderTarget(g: GameScreen, o: Order): string {
   return ORDER_INFO_NAME(any.type);
 }
 const ORDER_INFO_NAME = (t: string) => t[0].toUpperCase() + t.slice(1);
+/** A long single word in a narrow chip breaks with a hyphen ("Mercan-tile"), never mid-word without one: a soft
+ *  hyphen after the vowel nearest its middle (browsers without a hyphenation dictionary still honour it). */
+const soft = (t: string) => t.replace(/[\p{L}]{9,}/gu, w => {
+  const V = (c: string | undefined) => !!c && /[aeiouy]/i.test(c);
+  const KEEP = /^(th|ch|sh|ph|gh|ck|qu|[bcdfgkpt][rl])$/i;
+  const mid = Math.ceil(w.length / 2);
+  const near = (ok: (i: number) => boolean) => { for (let d = 0; d < mid - 2; d++) for (const i of [mid - d, mid + d]) if (i >= 3 && i <= w.length - 3 && ok(i)) return i; return -1; };
+  // between two consonants that are not a pair ("Mercan-tile", "Dread-nought"), else after a vowel ("Bureau-cracy")
+  let at = near(i => !V(w[i - 1]) && !V(w[i]) && !KEEP.test(w.slice(i - 1, i + 1)));
+  if (at < 0) at = near(i => V(w[i - 1]) && !V(w[i]));
+  if (at < 0) at = mid;
+  return `${w.slice(0, at)}\u00ad${w.slice(at)}`;
+});
 const freeIcon = (t: string) => ic(icFor('free', t));
 const X = ic('close');
+/** The seal: a poured wax disc with the crown debossed (art/kit.css .k-seal), on the commit button. */
+const WAX = `<span class="k-seal seal-disc" aria-hidden="true">${ic('crown')}</span>`;
 
 export function renderStrip(g: GameScreen, el: HTMLElement) {
   const st = g.st;
@@ -51,7 +66,7 @@ export function renderStrip(g: GameScreen, el: HTMLElement) {
     const cap = st.rules.live.bankCap;
     const next = st.live!.nextOrderAt[g.you] ?? 0;
     const pips = Array.from({ length: cap }, (_, i) => `<i class="pip ${i < g.bank ? 'on' : ''}"></i>`).join('');
-    const q = g.queue.map((o, i) => `<div class="chip filled live" data-live="${i}" data-pop="liveq:${i}:${o.type}:${'fleet' in o ? o.fleet : ''}"><i class="oic">${ORDER_ICON[o.type]}</i><span class="t">${esc(orderTarget(g, o))}</span><button class="x" data-x="${i}" aria-label="Take back">${X}</button></div>`).join('');
+    const q = g.queue.map((o, i) => `<div class="chip filled live" data-live="${i}" data-pop="liveq:${i}:${o.type}:${'fleet' in o ? o.fleet : ''}"><i class="oic">${ORDER_ICON[o.type]}</i><span class="t">${esc(soft(orderTarget(g, o)))}</span><button class="x" data-x="${i}" aria-label="Take back">${X}</button></div>`).join('');
     html = `<div class="stabs"><div class="slabel"${tip('LIVE: orders bank up over time; spend them whenever you like')}>Orders <b>${g.bank}/${cap}</b></div>${todoTab(g)}</div><div class="bank ${g.bank >= cap ? 'full' : ''} ${g.bank > 0 ? 'has' : ''}"${tip(g.bank >= cap ? `Bank full (${cap}): spend one or the next is wasted` : `${g.bank} of ${cap} orders banked; the next one comes in the time shown`)}><span class="pips">${pips}</span><small>${g.bank >= cap ? 'full' : `+1 <b data-countdown="${next}"></b>`}</small></div>
       ${q ? `<div class="slots">${q}</div>` : ''}${g.queue.length ? `<button class="sbtn" data-act="undo"${tip('Take back last · Ctrl+Z')} aria-label="Undo">${ic('undo')}</button>` : ''}`;
   } else {
@@ -61,7 +76,7 @@ export function renderStrip(g: GameScreen, el: HTMLElement) {
       if (!o) return `<div class="chip empty ${g.targetSlot === i ? 'target' : ''}" data-slot="${i}" role="button" aria-label="Order ${i + 1}: empty"${tip(`Order ${romanN(i + 1)}: empty. Drag a fleet on the map, or use a card's buttons`)}><small>${romanN(i + 1)}</small></div>`;
       const err = g.validateAt(o, i);
       const hot = g.hoverSlot === i;
-      return `<div class="chip filled k-${o.type} ${err ? 'bad' : ''} ${rep ? 'replace' : ''} ${hot ? 'hot' : ''}" data-slot="${i}" data-pop="slots:${i}:${o.type}:${'fleet' in o ? o.fleet : ''}"${err ? tip(`⊘ ${err}`) : ''}><i class="oic">${ORDER_ICON[o.type]}</i><span class="t">${esc(orderTarget(g, o))}</span>${o.type === 'seize' && o.also?.length ? `<sup>+${o.also.length}</sup>` : ''}<button class="x" data-x="${i}" aria-label="Remove">${X}</button></div>`;
+      return `<div class="chip filled k-${o.type} ${err ? 'bad' : ''} ${rep ? 'replace' : ''} ${hot ? 'hot' : ''}" data-slot="${i}" data-pop="slots:${i}:${o.type}:${'fleet' in o ? o.fleet : ''}"${err ? tip(`⊘ ${err}`) : ''}><i class="oic">${ORDER_ICON[o.type]}</i><span class="t">${esc(soft(orderTarget(g, o)))}</span>${o.type === 'seize' && o.also?.length ? `<sup>+${o.also.length}</sup>` : ''}<button class="x" data-x="${i}" aria-label="Remove">${X}</button></div>`;
     }).join('');
     const free = g.plan.free;
     const freeChip = free.length ? `<button class="chip freec" data-act="free"${tip('Free changes: cost no order')} aria-label="${free.length} free change${free.length > 1 ? 's' : ''}">${[...new Set(free.map(f => f.type))].slice(0, 3).map(freeIcon).join('')}<small>${free.length}</small></button>` : '';
@@ -114,9 +129,9 @@ export function renderPrimary(g: GameScreen, el: HTMLElement) {
     const n = g.plan.orders.length, used = g.plan.orders.filter(Boolean).length;
     const idle = g.idleFleets();
     const full = used === n;
-    if (idle.length && !full) html = btn('idle', `data-p="idle" aria-label="${idle.length} idle fleet${idle.length > 1 ? 's' : ''}: show the next"${tip('Fleets with no orders: tap to visit the next')}`, `${ic('dormant')}<span class="pl"> Idle</span> ×${idle.length}`) + `<button class="pmini seal" data-submit${tip('Seal now · Enter')} aria-label="Seal">${ic('check')}</button>`;
-    else if (g.canResearchNow()) html = btn('research', `data-p="research" aria-label="Research ready"${tip('A technology is affordable: open Research')}`, `${ic('research')}<span class="pl"> Research</span>`) + `<button class="pmini seal" data-submit${tip('Seal now · Enter')} aria-label="Seal">${ic('check')}</button>`;
-    else html = btn(`seal ${full || !idle.length ? 'ready' : ''}`, 'data-submit', `SEAL ${ic('check')}<small>${used}/${n}</small>`);
+    if (idle.length && !full) html = btn('idle', `data-p="idle" aria-label="${idle.length} idle fleet${idle.length > 1 ? 's' : ''}: show the next"${tip('Fleets with no orders: tap to visit the next')}`, `${ic('dormant')}<span class="pl"> Idle</span> ×${idle.length}`) + `<button class="pmini seal" data-submit${tip('Seal now · Enter')} aria-label="Seal">${WAX}</button>`;
+    else if (g.canResearchNow()) html = btn('research', `data-p="research" aria-label="Research ready"${tip('A technology is affordable: open Research')}`, `${ic('research')}<span class="pl"> Research</span>`) + `<button class="pmini seal" data-submit${tip('Seal now · Enter')} aria-label="Seal">${WAX}</button>`;
+    else html = btn(`seal ${full || !idle.length ? 'ready' : ''}`, 'data-submit aria-label="Seal"', `${WAX}<span class="pl">Seal</span><small>${used}/${n}</small>`);
   }
   g.root.classList.toggle('no-prim', !html);
   g.setHtml(el, html);

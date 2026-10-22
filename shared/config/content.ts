@@ -68,9 +68,10 @@ export const LORE = [
   'The final entry: the Throne is not a place. It is a vote. It has been counting your victories since the first battle.',
 ];
 
-export const PLAYER_COLORS = ['#3fd0ff', '#ff4f7b', '#ffd23f'];
+// house enamels, lit tone (docs/ART-BIBLE.md §2.3): readable as text on dark; fills derive the enamel base from it
+export const PLAYER_COLORS = ['#7fb3dc', '#dc6a66', '#f0cf72'];
 export const PLAYER_DEFAULT_NAMES = ['Azure Compact', 'Crimson Dominion', 'Gilded Throneholders'];
-export const NEUTRAL_COLOR = '#8a8aa8';
+export const NEUTRAL_COLOR = '#a9abb3';
 
 // ============================================================================
 //  THE SOUL LAYER (docs/SOUL.md): banners, perks, vows, scars, honours,

@@ -117,7 +117,7 @@ export function crowning(o: CrowningOpts): HTMLElement {
           const d = deck.getBoundingClientRect(), r = c.getBoundingClientRect();
           const dx = d.left + d.width / 2 - (r.left + r.width / 2), dy = d.top + d.height / 2 - (r.top + r.height / 2);
           anims.push(c.animate([
-            { transform: `translate(${dx}px, ${dy}px) rotateY(180deg) rotate(${(i % 2 ? 8 : -8)}deg) scale(0.7)`, opacity: 0.4 },
+            { transform: `translate(${dx}px, ${dy}px) rotateY(180deg) rotate(${(i % 2 ? 8 : -8)}deg) scale(0.7)`, opacity: 1 },
             { transform: `translate(${dx * 0.35}px, ${dy * 0.35 - 30}px) rotateY(110deg) rotate(${(i % 2 ? 4 : -4)}deg) scale(0.95)`, opacity: 1, offset: 0.55 },
             { transform: 'translate(0, 0) rotateY(0deg) rotate(0deg) scale(1)', opacity: 1 },
           ], { duration: 520, easing: 'cubic-bezier(0.22, 0.9, 0.25, 1)' }));

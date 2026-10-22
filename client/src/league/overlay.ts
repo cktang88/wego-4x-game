@@ -17,7 +17,7 @@ export function enamel(color: string): 'azure' | 'crimson' | 'gilded' | 'warden'
   if (mx - mn < 0.08) return 'warden';
   let h = mx === r ? ((g - b) / (mx - mn)) % 6 : mx === g ? (b - r) / (mx - mn) + 2 : (r - g) / (mx - mn) + 4;
   h = (h * 60 + 360) % 360;
-  return h < 20 || h >= 330 ? 'crimson' : h < 75 ? 'gilded' : h < 260 ? 'azure' : 'warden';
+  return h < 20 || h >= 330 ? 'crimson' : h < 75 ? 'gilded' : h < 250 ? 'azure' : 'warden';
 }
 
 /** Open a tray. `cls` is added to the panel for module styling; `label` names the dialog for screen readers. */

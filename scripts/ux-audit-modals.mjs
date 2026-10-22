@@ -140,6 +140,17 @@ const DETECT = ({ roots, touch, floor }) => {
     const inlineLink = el.tagName === 'A' && getComputedStyle(el).display === 'inline';
     if (touch && onTop && !inlineLink && (r.width < 43.5 || r.height < 43.5)) add('tap', el, `touch target ${Math.round(r.width)}x${Math.round(r.height)}`);
   }
+  // an element's visible box: clipped by every scrolling / clipping ancestor (a control scrolled under a sticky bar
+  // is not visible there, so it cannot overlap it)
+  const clipR = (el, r) => {
+    let t = r.top, bt = r.bottom, l = r.left, rt = r.right;
+    for (let p = el.parentElement; p; p = p.parentElement) {
+      const cs = getComputedStyle(p);
+      if (/auto|scroll|hidden|clip/.test(cs.overflowY + cs.overflowX)) { const q = p.getBoundingClientRect(); t = Math.max(t, q.top); bt = Math.min(bt, q.bottom); l = Math.max(l, q.left); rt = Math.min(rt, q.right); }
+    }
+    return { left: l, right: rt, top: t, bottom: bt };
+  };
+  const rects = el => { const inl = getComputedStyle(el).display === 'inline'; return inl ? [...el.getClientRects()] : [clipR(el, el.getBoundingClientRect())]; };
   const pinned = el => { for (let a = el; a; a = a.parentElement) { const cs = getComputedStyle(a); if (cs.position === 'sticky' || cs.position === 'fixed' || (cs.position === 'absolute' && cs.zIndex !== 'auto')) return a; } return null; };
   for (let i = 0; i < shown.length; i++) for (let j = i + 1; j < shown.length; j++) {
     const a = shown[i], b = shown[j];
@@ -148,7 +159,7 @@ const DETECT = ({ roots, touch, floor }) => {
     if (pinned(a) !== pinned(b)) continue;
     // inline links wrap across lines: compare their line boxes, not their bounding boxes
     let hit = null;
-    for (const p of a.getClientRects()) for (const q of b.getClientRects()) {
+    for (const p of rects(a)) for (const q of rects(b)) {
       const ix = Math.min(p.right, q.right) - Math.max(p.left, q.left), iy = Math.min(p.bottom, q.bottom) - Math.max(p.top, q.top);
       if (ix > 2 && iy > 2) hit = [ix, iy];
     }

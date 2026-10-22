@@ -333,7 +333,7 @@ export class Gestures {
       d.key = key; d.rid = rid; d.over = over;
       d.intent = intentFor(g, d.src, rid, over, force);
       // dragging the arrow head back home takes the fleet's movement order back
-      if (!d.intent && rid !== null && f && rid === f.region && movementSlot(g, f.id) !== null) d.intent = { verb: 'invalid', ok: true, icon: '↶', text: 'cancel order', sub: '', color: '#ffd86b', from: f.region, to: rid, path: [], free: undefined };
+      if (!d.intent && rid !== null && f && rid === f.region && movementSlot(g, f.id) !== null) d.intent = { verb: 'invalid', ok: true, icon: '↶', text: 'cancel order', sub: '', color: '#f1d488', from: f.region, to: rid, path: [], free: undefined };
     }
     g.hoverRegion = rid;
     const ghost = g.hud.h.ghost;

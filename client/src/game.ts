@@ -237,6 +237,7 @@ export class GameScreen {
     this.stage.destroy();
     this.gest.destroy();
     this.hud.destroy();
+    this.map.dispose();
     this.tipEl?.remove();
     this.root.remove();
     audio.me = null;
@@ -419,7 +420,7 @@ export class GameScreen {
       drop.forEach(k => localStorage.removeItem(k));
     } catch { /* */ }
   }
-  color(o: number | null | undefined) { return o === null || o === undefined || o < 0 ? (o === -1 ? '#e7b6ff' : NEUTRAL_COLOR) : this.st.players[o]?.color ?? NEUTRAL_COLOR; }
+  color(o: number | null | undefined) { return o === null || o === undefined || o < 0 ? (o === -1 ? '#ab95d8' : NEUTRAL_COLOR) : this.st.players[o]?.color ?? NEUTRAL_COLOR; }
   pname(o: number | null | undefined) { return o === null || o === undefined ? 'Neutral' : o < 0 ? (this.st.wardenAwake && !this.st.wardenDefeated ? 'Neutral / Warden' : 'Neutral') : this.st.players[o]?.name ?? '?'; }
   fleet(id: number) { return this.st.fleets.find(f => f.id === id); }
   /** Your pending free actions: the WEGO plan's, or (LIVE) the ones queued for the next tick. */
@@ -961,7 +962,8 @@ export class GameScreen {
         this.renderAll();
         this.later(() => { this.sealingUntil = 0; if (!this.src.mySubmission) this.src.submit(plan); }, SEAL_MS - 60);
       } else this.src.submit(plan);
-      if (this.src.kind === 'remote' && 'Notification' in window && Notification.permission === 'default') void Notification.requestPermission();
+      // the one-time offer of turn notifications (push/push.ts), after the seal ritual has landed; never on load
+      if (this.src.kind === 'remote') void import('./push/push.ts').then(m => { if (m.shouldOfferPush()) this.later(() => m.mountPushPrompt(), 1200); });
     };
     if (used < this.plan.orders.length && !now) {
       const o = overlay(`<div class="dialog seal-ask"><div class="big">${used}<small>/${this.plan.orders.length}</small></div><h2>Seal anyway?</h2>
@@ -1744,10 +1746,18 @@ export class GameScreen {
     const cap = st.regions[w.capital]?.site ?? st.regions[0].site;
     for (const r of st.regions) if (r.owner === w.id) this.fx.push({ kind: 'capture', pos: r.site, color: w.color, t0: now + Math.hypot(r.site.x - cap.x, r.site.y - cap.y) * 0.6, dur: 1100 });
     // the crowning (fx/crowning.ts): the lamp swings to the winner's seat, the banners, the awards, then the Saga
-    crowning({
+    const ov = crowning({
       st, me: this.mySeat(), results: () => this.allResults(),
       onLook: () => {}, onSaga: st.soul ? () => this.openSaga() : null, onLobby: () => this.onExit(),
     });
+    // an online game that counted for a League: the ledger's entry, the plaque, the Ugly Trophy and "Again?"
+    if (this.src.kind === 'remote') {
+      const id = this.src.meta.id;
+      void import('./league/panel.ts').then(m => {
+        if (!ov.isConnected) return;
+        m.mountLeagueResult(ov.querySelector<HTMLElement>('.cr-stage') ?? ov, id, next => { ov.remove(); location.hash = `#/g/${encodeURIComponent(next)}`; });
+      });
+    }
   }
   /** Every turn's result this source can give (the awards read the whole game; incomplete is allowed, see awards.ts). */
   allResults(): Promise<TurnResult[]> {

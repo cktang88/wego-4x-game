@@ -240,6 +240,8 @@ export const ICON_FOR = {
     retired: 'retire', eliminated: 'skull', founded: 'banner', quiet: 'moon', calling: 'calling', deed: 'deed', fate: 'fate',
     fate_bonus: 'fate', p_called: 'check', p_caught: 'close', p_ambush: 'ambush', p_broken: 'bolt', p_exposed: 'eye',
     p_scorched: 'fire', p_levies: 'levies', tribute: 'scales', tribute_offer: 'scales', refugees: 'refugee',
+    obituary: 'grave', anniversary: 'hourglass', feud: 'blood-debt', act_claim: 'fire', act_borders: 'gates', act_blood: 'blade',
+    act_crisis: 'scales', act_throne: 'throne', act_last: 'time',
   },
   beat: {
     founded: 'banner', vow: 'vow', vow_kept: 'vow', vow_broken: 'oathbreaker', vow_lapsed: 'dot', honour: 'honour', legend: 'legend',

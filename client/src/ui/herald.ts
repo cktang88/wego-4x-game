@@ -7,7 +7,7 @@ import { headlineVisible } from '../../../shared/sim/herald.ts';
 import { soulOn, SR } from '../../../shared/sim/soul.ts';
 import { esc, toast } from './dom.ts';
 import { sigilSvg } from '../art/sigils.ts';
-import { iconizeDom, ic, icFor, glyphHtml } from '../art/icons.ts';
+import { iconizeDom, ic, icFor, glyphHtml, type IconKey } from '../art/icons.ts';
 import '../herald.css';
 import { audio } from '../audio/audio.ts';
 import { ownerHi } from '../art/bible.ts';
@@ -18,7 +18,12 @@ const KIND_ICON: Record<string, string> = {
   honour: '❖', legend: '★', retired: '⚑', eliminated: '✝', founded: '⚑', quiet: '☾', calling: '◈', deed: '◆', fate: '✪', fate_bonus: '✪',
   p_called: '✓', p_caught: '✗', p_ambush: '◉', p_broken: '⚡', p_exposed: '◌', p_scorched: '♨', p_levies: '⚑',
   tribute: '⚖', tribute_offer: '⚖', refugees: '⇢',
+  // the Herald remembers (shared/sim/herald.ts): obituaries, anniversaries of broken oaths, a League feud, the acts of the war
+  obituary: '✝', anniversary: '⏳', feud: '✠', act_claim: '♨', act_borders: '⛩', act_blood: '†', act_crisis: '⚖', act_throne: '♔', act_last: '⏱',
 };
+/** A special edition's ornament (ACT_EDITIONS[act].ornament) as an icon of the closed set. */
+const ORNAMENT: Record<string, IconKey> = { beacon: 'fire', border: 'gates', blood: 'blade', scales: 'scales', throne: 'throne', candle: 'time', feud: 'blood-debt' };
+const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
 export const headlineIcon = (k: string) => ic(icFor('herald', k, KIND_ICON[k] ?? (k.startsWith('p_') ? '◉' : '•')));
 
 const seenKey = (g: GameScreen) => `tc.herald.${g.gameKey()}.${g.you ?? 's'}`;
@@ -128,7 +133,8 @@ function render(g: GameScreen, ed: HeraldEdition) {
   const art = open?.el.querySelector<HTMLElement>('.herald');
   if (!art) return;
   const st = g.st;
-  const hs = ed.headlines.filter(h => visible(g, h)).slice(0, 6);
+  // every story the sim printed: the edition is already capped (heraldMax), plus the obituary, the act and the feud
+  const hs = ed.headlines.filter(h => visible(g, h));
   const [lead, ...rest]: Story[] = hs.length ? hs : [{ kind: 'quiet', text: 'Quiet in the Reach', players: [], drama: 0, public: true } as Headline];
   const T = g.live ? 'Cycle' : 'Turn';
   const eds = editions(g);
@@ -156,9 +162,18 @@ function render(g: GameScreen, ed: HeraldEdition) {
     : `<div class="plant"><label>✒ Plant a dispatch</label><textarea data-dispatch maxlength="${max(g)}" rows="2" placeholder="A boast, a threat, a lie…">${esc(draft)}</textarea>
        <div class="plant-row"><span class="seg2" role="group" aria-label="Sign it as"><button class="${asWho === 'house' ? 'on' : ''}" data-h="as" data-v="house">${esc(me?.name.split(' ').slice(-1)[0] ?? 'House')}</button><button class="${asWho === 'source' ? 'on' : ''}" data-h="as" data-v="source">A source</button></span><span class="dsp-count">${draft.length}/${max(g)}</span><button class="hb" data-h="file">File</button></div></div>`;
   const ink = lead.players.length && st.players[lead.players[0]] ? ownerHi(g.color(lead.players[0])) : '#2a1d10';
+  // a special edition marks an act of the war; a League game's first edition opens with the old feud
+  const sp = ed.special;
+  const orn = (k: string) => `<i class="hd-orn" aria-hidden="true">${ic(ORNAMENT[k] ?? 'dot')}</i>`;
+  const act = sp
+    ? `<div class="hd-act orn-${esc(sp.ornament)}">${orn(sp.ornament)}<span class="hd-act-n">Act ${ROMAN[sp.n] ?? sp.n}</span><b>${esc(sp.title)}</b>${orn(sp.ornament)}</div>`
+    : ed.feud ? `<div class="hd-act orn-feud">${orn('feud')}<span class="hd-act-n">The League</span><b>The Old Feud</b>${orn('feud')}</div>` : '';
+  const ear = sp ? 'Special<br>edition' : ed.feud ? 'League<br>edition' : 'Late<br>edition';
+  art.classList.toggle('special', !!sp);
   art.innerHTML = `
-    <header class="hd-mast"><div class="hd-ear">${sigilSvg('crown', 26, '#2a1d10')}<span>Late<br>edition</span></div><h1>The Herald</h1><div class="hd-ear r"><span>One<br>credit</span>${sigilSvg('raven', 26, '#2a1d10')}</div></header>
-    <div class="hd-date"><span>${T} ${ed.turn}</span><span>of the Three Crowns</span><span>${esc(st.players.filter(p => !p.eliminated).length)} houses stand</span></div>
+    <header class="hd-mast"><div class="hd-ear">${sigilSvg('crown', 26, '#2a1d10')}<span>${ear}</span></div><h1>The Herald</h1><div class="hd-ear r"><span>One<br>credit</span>${sigilSvg('raven', 26, '#2a1d10')}</div></header>
+    ${act}
+    <div class="hd-date"><span>${T} ${ed.turn}</span><span class="hd-of">of the Three Crowns</span>${ed.correspondent ? `<span class="hd-corr">${esc(ed.correspondent)}, at the front</span>` : ''}<span class="hd-stand">${esc(st.players.filter(p => !p.eliminated).length)} houses stand</span></div>
     <div class="hd-body">
       <div class="hd-main">${hl(lead, 'lead')}<div class="hd-rule" style="--ink:${esc(ink)}"></div><div class="hd-cols">${rest.map(h => hl(h, '')).join('')}</div></div>
       <aside class="hd-side"><h3>Dispatches</h3>${disp || '<p class="hd-none">No house wrote in.</p>'}${plant}</aside>

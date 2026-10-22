@@ -894,23 +894,44 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     if (ps.a > 0.2 && hpNow > 0) {
       const bw = Math.max(18, L * 0.8), by = ps.y + stand + L * 0.4 * BASE_SQUASH + 5;
       drawHpBar(ps.x - bw / 2, by, bw, 2.5, hpNow / u.maxHp, ps.a, color, lagHp(u, tt) / u.maxHp);
+      // the rail is taken: names and callouts keep off every hull's pips (BAR_H: the rail with its brass rim)
+      barBoxes.push({ l: ps.x - bw / 2 - 2, r: ps.x + bw / 2 + 2, t: by - 2, b: by + BAR_H });
       const large = u.glyph === 'dread' || u.glyph === 'long' || shipUnits.length <= 8;
-      if (large) {
-        g.globalAlpha = ps.a * 0.8;
+      if (large && ps.warp < 0.15) {
         g.font = F(600, 13);
-        g.textAlign = 'center'; g.textBaseline = 'top';
-        g.fillStyle = '#e4dcc8';
         setLs(g, '0.06em');
-        // names of ships packed side by side would run into each other: the first one drawn wins the spot
         const nm = u.name.toUpperCase(), tw = g.measureText(nm).width;
-        const box = { l: ps.x - tw / 2 - 3, r: ps.x + tw / 2 + 3, t: by + 4, b: by + 20 };
-        // not while it is still warping in, and never half off the stage
-        const onStage = box.l * camK + camX > 2 && box.r * camK + camX < W - 2 && box.b * camK + camY < H - 2;
-        if (ps.warp < 0.15 && onStage && !nameBoxes.some(o => hit(box, o))) { nameBoxes.push(box); g.fillText(nm, ps.x, by + 5); }
         setLs(g, '0px');
-        g.globalAlpha = 1;
+        // under its own rail, with a clear gap; drawn after every hull (drawNames), so a packed neighbour's pips
+        // or sprite never lie over it
+        const ny = by + BAR_H + 2;
+        pendingNames.push({ nm, x: ps.x, y: ny, a: ps.a, box: { l: ps.x - tw / 2 - 3, r: ps.x + tw / 2 + 3, t: ny - 1, b: ny + 15 * U } });
       }
     }
+  }
+  /** Ship names, after every hull is down: the first one placed wins its spot; none sits on a rail, a label or
+   *  another name, or half off the stage. */
+  function drawNames() {
+    for (const b of barBoxes) nameBoxes.push(b);
+    g.save();
+    g.font = F(600, 13);
+    g.textAlign = 'center'; g.textBaseline = 'top';
+    setLs(g, '0.06em');
+    g.lineJoin = 'round'; g.lineWidth = 3; g.strokeStyle = 'rgba(6,5,4,.8)';
+    for (const n of pendingNames) {
+      const box = n.box;
+      const onStage = box.l * camK + camX > 2 && box.r * camK + camX < W - 2 && box.b * camK + camY < H - 2;
+      if (!onStage || nameBoxes.some(o => hit(box, o))) continue;
+      nameBoxes.push(box);
+      g.globalAlpha = n.a * 0.85;
+      g.strokeText(n.nm, n.x, n.y);
+      g.fillStyle = '#e4dcc8';
+      g.fillText(n.nm, n.x, n.y);
+    }
+    setLs(g, '0px');
+    g.restore();
+    pendingNames.length = 0;
+    barBoxes.length = 0;
   }
   function drawShip3(u: Unit, x: number, y: number, L: number, ang: number, color: string, o: ShipOpts) {
     drawShipArt(g, x, y, L, L * dpr, u.cls, u.owner, color, ang, o);
@@ -985,10 +1006,11 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     g.font = F(600, 13); g.textAlign = 'center'; g.textBaseline = 'top';
     setLs(g, '0.14em');
     const gl = dead ? 'GARRISON FALLEN' : `GARRISON ${Math.max(0, hpNow)}`, gw = g.measureText(gl).width;
-    g.lineWidth = 3; g.strokeStyle = 'rgba(6,5,4,.85)'; g.lineJoin = 'round'; g.strokeText(gl, x, by + 6);
+    const ly = by + (dead ? 4 : BAR_H + 3);
+    g.lineWidth = 3; g.strokeStyle = 'rgba(6,5,4,.85)'; g.lineJoin = 'round'; g.strokeText(gl, x, ly);
     g.fillStyle = dead ? SEMANTIC.bad : color;
-    g.fillText(gl, x, by + 6);
-    nameBoxes.push({ l: x - gw / 2 - 3, r: x + gw / 2 + 3, t: by + 4, b: by + 8 + 15 * U });
+    g.fillText(gl, x, ly);
+    nameBoxes.push({ l: x - gw / 2 - 3, r: x + gw / 2 + 3, t: by - 2, b: ly + 2 + 15 * U });
     setLs(g, '0px');
   }
 
@@ -1207,7 +1229,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     // row above its ship, stepping up until it clears the ones already placed this frame
     // (ship names and the HUD's labels are taken already)
     const toWorld = (b: Box): Box => ({ l: (b.l - camX) / camK, r: (b.r - camX) / camK, t: (b.t - camY) / camK, b: (b.b - camY) / camK });
-    const placed: Box[] = [...nameBoxes, toWorld(rosterBox()), ...sides.map(sd => toWorld(labelBox(sd)))];
+    const hudW = hudBoxes(tt).map(toWorld);
+    const placed: Box[] = [...nameBoxes, ...hudW];
     const slot = (x: number, y: number, w: number, h: number, optional = false): number => {
       sx = x;
       // first straight up (or down) from the ship; on a short stage, then sideways as well
@@ -1219,7 +1242,11 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
           if (!placed.some(p => hit(box, p))) { placed.push(box); sx = xx; return yy; }
         }
       }
-      return optional ? NaN : y;
+      if (optional) return NaN;
+      // a status callout with no free row still shows, but never under the HUD's own text (the round banner, the
+      // roster, the side labels): it waits there until the banner has faded
+      const fb = { l: x - w / 2 - 4, r: x + w / 2 + 4, t: y - h / 2, b: y + h / 2 };
+      return hudW.some(p => hit(fb, p)) ? NaN : y;
     };
     /** the x the last slot() chose (a status callout may step sideways to stay clear) */
     let sx = 0;
@@ -1541,7 +1568,9 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     drawWrecks(tt);
     for (const sd of sides) for (const u of sd.units) if (u.garrison) drawGarrison(u, tt, sd.color);
     const order = shipUnits.slice().sort((a, b) => a.hy - b.hy);
+    pendingNames.length = 0; barBoxes.length = 0;
     for (const u of order) drawShip(u, tt, sides[u.side].color);
+    drawNames();
     drawShots(tt);
     drawExplosions(tt);
     drawTexts(tt);
@@ -1563,6 +1592,11 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   let capShown = -1;
   /** ship name labels drawn this frame (screen boxes), so neighbours' names don't overprint */
   const nameBoxes: { l: number; r: number; t: number; b: number }[] = [];
+  /** This frame's hull rails, and the ship names waiting for drawNames(). */
+  const barBoxes: { l: number; r: number; t: number; b: number }[] = [];
+  const pendingNames: { nm: string; x: number; y: number; a: number; box: { l: number; r: number; t: number; b: number } }[] = [];
+  /** The hull rail's height under a ship (drawHpBar with h 2.5: pips, brass rim and its shadow). */
+  const BAR_H = 7;
   let playIcon: boolean | null = null;
   function sync() {
     const ri = currentRound(T);
