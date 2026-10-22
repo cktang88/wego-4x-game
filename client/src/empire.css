@@ -116,6 +116,7 @@
 .bp { display: grid; grid-template-columns: 1fr auto; grid-template-areas: 'c m' 'b m'; gap: 0 0.375rem; align-items: center; font-size: var(--fs-xs); padding: 0.1875rem 0; border-bottom: 1px dashed rgba(200, 168, 110, 0.12); }
 .bp .bpc { grid-area: c; color: var(--text); }
 .bp .bpc .g { display: inline-block; width: 1rem; color: var(--accent); }
+.bp .bpc img.g.mini { width: 2.125rem; height: 1.25rem; vertical-align: middle; margin-right: 0.3125rem; object-fit: contain; }
 .bp .bpm { grid-area: b; font-size: var(--fs-xs); color: var(--dim); padding-left: 1rem; }
 .bp .mods { grid-area: m; display: flex; gap: 0.1875rem; }
 .bp .mod { width: 1.875rem; height: 1.75rem; padding: 0; font-size: var(--fs-sm); letter-spacing: 0; }
@@ -166,3 +167,238 @@ span.click:hover { color: var(--text); }
 .phone .fork .or { display: none; }
 /* read-only (spectating, sealed): nothing pulses as if it could be clicked */
 .tree.ro .tn.avail { animation: none; }
+
+/* ============================================================================
+   Empire modal: Ships (the armoury). Painted miniatures on display bases, lit
+   from above on a dark shelf; name, role, cost pills, labelled stats, and a
+   module selector that always fits (4-up when wide, 2x2 when narrow).
+   ============================================================================ */
+.mdl-root .arm { --arm-gap: 1rem; max-width: 84rem; margin: 0 auto; }
+.mdl-root .arm-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--arm-gap); }
+.mdl-root .arm-card {
+  container-type: inline-size; position: relative; display: flex; flex-direction: column; min-width: 0; border-radius: 0.875rem; overflow: hidden;
+  border: 1px solid var(--m-line2);
+  background: linear-gradient(180deg, #1c1d23, #141519 60%);
+  box-shadow: inset 0 1px 0 rgba(255, 238, 205, 0.07), 0 0.5rem 1.5rem rgba(0, 0, 0, 0.35);
+}
+.mdl-root .arm-card.pending { border-color: rgba(255, 216, 107, 0.55); }
+/* the shelf: a warm lamp from above, a dark back wall, the shelf top and its brass lip */
+.mdl-root .arm-art {
+  position: relative; height: 8.5rem;
+  background:
+    radial-gradient(55% 75% at 50% 0%, rgba(255, 196, 120, 0.26), rgba(255, 170, 90, 0.07) 55%, transparent 80%),
+    linear-gradient(180deg, #23201c 0%, #17161a 62%, #2b261f 62.5%, #1d1a16 86%, #0f0e10 100%);
+  border-bottom: 1px solid rgba(214, 173, 98, 0.45);
+  box-shadow: inset 0 -0.1875rem 0 rgba(0, 0, 0, 0.35);
+}
+.mdl-root .arm-art::after { content: ''; position: absolute; left: 0; right: 0; bottom: 14%; height: 1px; background: linear-gradient(90deg, transparent, rgba(244, 220, 156, 0.35), transparent); }
+.mdl-root .arm-art canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: 1; }
+.mdl-root .arm-card.locked .arm-art canvas { filter: grayscale(0.92) brightness(0.55) contrast(0.9); }
+.mdl-root .arm-card.locked .arm-art { background: radial-gradient(55% 75% at 50% 0%, rgba(200, 190, 170, 0.1), transparent 75%), linear-gradient(180deg, #1c1b1d 0%, #141416 62%, #222020 62.5%, #18171a 86%, #0e0e10 100%); }
+.mdl-root .arm-lock {
+  position: absolute; z-index: 2; top: 0.625rem; right: 0.625rem; display: grid; place-items: center; width: 2.25rem; height: 2.25rem; border-radius: 50%;
+  background: rgba(10, 10, 14, 0.75); border: 1px solid var(--m-line2); color: var(--m-dim); font-size: 1.0625rem;
+}
+.mdl-root .arm-body { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.875rem 1rem 1rem; flex: 1; }
+.mdl-root .arm-h { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem 0.75rem; flex-wrap: wrap; }
+.mdl-root .arm-tt { min-width: 0; }
+.mdl-root .arm-nm { margin: 0; font-family: var(--display); font-weight: 700; font-size: 1.1875rem; letter-spacing: 0.1em; text-transform: uppercase; color: #f6ead0; line-height: 1.15; text-shadow: 0 1px 0 #000; }
+.mdl-root .arm-role { display: block; margin-top: 0.125rem; font-size: var(--fs-sm); color: var(--m-dim); letter-spacing: 0.02em; }
+.mdl-root .arm-cost { display: flex; gap: 0.375rem; flex-wrap: wrap; justify-content: flex-end; }
+.mdl-root .arm-pill { display: inline-flex; align-items: center; gap: 0.3125rem; height: 1.875rem; padding: 0 0.625rem 0 0.5rem; border-radius: 0.9375rem; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--m-line); font-size: var(--fs-md); color: var(--m-text); }
+.mdl-root .arm-pill b { font-weight: 700; }
+.mdl-root .arm-pill .ic { font-size: 1.0625rem; }
+.mdl-root .arm-pill.r-industry .ic { color: #e7c089; }
+.mdl-root .arm-pill.r-credits .ic { color: #f2d36b; }
+.mdl-root .arm-pill.r-influence .ic { color: #c8b4ff; }
+.mdl-root .arm-st { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.375rem; }
+.mdl-root .arm-stat {
+  display: grid; grid-template-columns: auto auto; justify-content: center; align-items: center; column-gap: 0.3125rem; padding: 0.375rem 0.25rem 0.3125rem;
+  border-radius: 0.5rem; background: rgba(0, 0, 0, 0.32); border: 1px solid rgba(255, 255, 255, 0.04); cursor: help;
+}
+.mdl-root .arm-stat .ic { color: var(--brass-hi, #f4dc9c); font-size: 1rem; }
+.mdl-root .arm-stat b { font-size: 1.1875rem; color: #fff; line-height: 1.1; white-space: nowrap; }
+.mdl-root .arm-stat b small { font-size: var(--fs-xs); color: var(--m-dim); font-weight: 600; margin-left: 1px; }
+.mdl-root .arm-stat > small { grid-column: 1 / -1; text-align: center; font-size: var(--fs-xs); color: var(--m-dim); line-height: 1.1; margin-top: 0.125rem; }
+.mdl-root .arm-card.locked .arm-stat b { color: var(--m-text); }
+/* module selector: one recessed track, brass when chosen */
+.mdl-root .arm-mods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.25rem; padding: 0.25rem; border-radius: 0.75rem; background: rgba(0, 0, 0, 0.4); border: 1px solid var(--m-line); box-shadow: inset 0 1px 0.25rem rgba(0, 0, 0, 0.5); }
+@container (min-width: 23rem) { .mdl-root .arm-mods { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.mdl-root .arm .mod {
+  --bb: transparent; --bd: transparent; --br: 0.5rem; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.1875rem;
+  min-height: 3.125rem; min-width: 0; padding: 0.3125rem 0.25rem !important; text-align: center; color: var(--m-text); font-size: var(--fs-sm); font-weight: 600; letter-spacing: 0.01em; box-shadow: none; grid-template-columns: none;
+}
+.mdl-root .arm .mod i { font-style: normal; font-size: 1.1875rem; line-height: 1; color: var(--m-dim); }
+.mdl-root .arm .mod span { white-space: nowrap; max-width: 100%; }
+.mdl-root .arm .mod[data-a=bp]:hover { --bb: rgba(255, 255, 255, 0.06); --bd: var(--m-line2); }
+.mdl-root .arm .mod.on {
+  --bb: linear-gradient(180deg, rgba(255, 216, 107, 0.26), rgba(200, 150, 74, 0.14)); --bd: rgba(255, 216, 107, 0.85); color: #fff3cf; cursor: default;
+  --bsh: inset 0 1px 0 rgba(255, 245, 210, 0.25), 0 0 0.75rem rgba(255, 216, 107, 0.18);
+}
+.mdl-root .arm .mod.on i { color: var(--m-gold); }
+.mdl-root .arm .mod.on.pend { --bd: var(--m-gold); border-style: dashed; }
+.mdl-root .arm .mod.lock { color: var(--m-faint); cursor: help; opacity: 1 !important; }
+.mdl-root .arm .mod.lock i { color: #6e685d; }
+.mdl-root .arm .mod.lock:hover { --bb: rgba(255, 255, 255, 0.04); color: var(--m-dim); }
+.mdl-root .arm .mod-lk { position: absolute; top: 0.25rem; right: 0.3125rem; font-style: normal; font-size: 0.75rem; line-height: 1; color: var(--m-faint); }
+.mdl-root .arm-card:not(:has([data-a=bp])) .mod:not(.lock) { cursor: default; }
+.mdl-root .arm-note { display: flex; align-items: center; gap: 0.5rem; min-height: 2.25rem; margin-top: -0.25rem; padding: 0 0.25rem 0 0.625rem; border-radius: 0.5rem; font-size: var(--fs-sm); line-height: 1.25; }
+.mdl-root .arm-note > span { flex: 1; min-width: 0; }
+.mdl-root .arm-note.pendn { background: rgba(255, 216, 107, 0.08); border: 1px dashed rgba(255, 216, 107, 0.45); color: var(--m-gold); }
+.mdl-root .arm-note.pendn b { color: #fff3cf; }
+.mdl-root .arm-note.lockn { background: rgba(0, 0, 0, 0.3); border: 1px solid var(--m-line); color: var(--m-dim); }
+.mdl-root .arm-undo { --bb: transparent; --bd: rgba(255, 216, 107, 0.4); display: inline-flex; align-items: center; gap: 0.3125rem; min-height: 1.875rem; padding: 0 0.625rem !important; font-size: var(--fs-sm); font-weight: 700; color: var(--m-gold); }
+.mdl-root .arm-undo:hover { --bb: rgba(255, 216, 107, 0.12); }
+/* requirement line (locked class) and tech links */
+.mdl-root .arm-req { display: flex; align-items: center; gap: 0.5rem; min-height: 2.75rem; padding: 0.375rem 0.75rem; border-radius: 0.625rem; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--m-line); color: var(--m-dim); font-size: var(--fs-sm); line-height: 1.35; }
+.mdl-root .arm-req .arm-lk { flex: none; color: var(--m-faint); font-size: 1rem; }
+.mdl-root .arm-vein { display: inline-flex; align-items: center; gap: 0.25rem; color: var(--m-text); font-weight: 600; white-space: nowrap; }
+.mdl-root .arm-vein i { font-style: normal; }
+.mdl-root .arm-link, .mdl-root .lw-link { --bb: transparent; --bd: transparent; display: inline; padding: 0 !important; color: var(--m-gold); font-weight: 700; text-decoration: underline; text-decoration-color: rgba(255, 216, 107, 0.45); text-underline-offset: 0.2em; }
+.mdl-root .arm-link:hover, .mdl-root .lw-link:hover { color: #fff3cf; text-decoration-color: currentColor; }
+/* footer */
+.mdl-root .arm-foot { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 0.5rem 0.75rem; margin: 1.25rem auto 0; padding: 0.625rem 1rem; max-width: 52rem; border-radius: 0.75rem; border: 1px solid var(--m-line); background: rgba(0, 0, 0, 0.22); color: var(--m-dim); font-size: var(--fs-sm); text-align: center; }
+.mdl-root .arm-foot b { color: var(--m-text); }
+.mdl-root .arm-fic { color: var(--brass-hi, #f4dc9c); font-size: 1.125rem; }
+.mdl-root .arm-old { display: inline-flex; align-items: center; height: 1.75rem; padding: 0 0.625rem; border-radius: 0.875rem; border: 1px solid rgba(255, 216, 107, 0.5); color: var(--m-gold); font-weight: 700; }
+.mdl-root .arm-ro { color: var(--m-faint); }
+/* tech-card unlock chips: painted minis */
+.mdl-root .chipx .mini-img { width: 2.75rem; height: auto; margin: 0 -0.125rem 0 -0.25rem; }
+
+@media (max-width: 1100px) {
+  .mdl-root .arm-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .mdl-root .arm-grid { grid-template-columns: 1fr; gap: 0.75rem; }
+  /* compact card: the mini beside its name, the rest full width */
+  .mdl-root .arm-card { display: grid; grid-template-columns: 8.75rem minmax(0, 1fr); column-gap: 0.75rem; row-gap: 0.625rem; padding-bottom: 0.75rem; }
+  .mdl-root .arm-body { display: contents; }
+  .mdl-root .arm-art { grid-column: 1; grid-row: 1; height: 6.25rem; border-bottom: 0; border-right: 1px solid rgba(214, 173, 98, 0.45); border-radius: 0 0 0.625rem 0; }
+  .mdl-root .arm-lock { top: 0.375rem; right: 0.375rem; width: 2rem; height: 2rem; font-size: 0.9375rem; }
+  .mdl-root .arm-h { grid-column: 2; grid-row: 1; align-self: center; flex-direction: column; gap: 0.375rem; padding: 0.5rem 0.75rem 0 0; }
+  .mdl-root .arm-cost { justify-content: flex-start; }
+  .mdl-root .arm-st, .mdl-root .arm-mods, .mdl-root .arm-note, .mdl-root .arm-req { grid-column: 1 / -1; margin-left: 0.75rem; margin-right: 0.75rem; }
+  .mdl-root .arm-note { margin-top: -0.125rem; }
+  .mdl-root .arm-foot { margin-top: 1rem; }
+}
+/* touch: every control at least 44px */
+@media (pointer: coarse) {
+  .mdl-root .arm .mod { min-height: 3.25rem; }
+  .mdl-root .arm-undo, .mdl-root .arm-link, .mdl-root .lw-link { min-height: 2.75rem; }
+  .mdl-root .arm-link, .mdl-root .lw-link { display: inline-flex; align-items: center; }
+  .mdl-root .arm-note { min-height: 2.75rem; }
+}
+
+/* ============================================================================
+   Empire modal: Laws. Each opposed pair is one compact row (option · or ·
+   option) and every option ends in an obvious button: Enact / Switch with its
+   cost, In force + Revoke, or a disabled button with the reason under it.
+   ============================================================================ */
+.mdl-root .lw { max-width: 84rem; margin: 0 auto; }
+.mdl-root .lw-top { display: flex; flex-direction: column; align-items: center; gap: 0.3125rem; margin: -0.25rem 0 1rem; text-align: center; }
+.mdl-root .lw-slots { display: flex; align-items: center; justify-content: center; gap: 0.625rem; margin: 0; font-size: var(--fs-md); }
+.mdl-root .lw-slots .lbl { font-family: var(--display); font-size: var(--fs-sm); letter-spacing: 0.14em; text-transform: uppercase; color: var(--m-text); margin: 0; }
+.mdl-root .lw-bars { display: flex; gap: 0.3125rem; }
+.mdl-root .lw-slots i { width: 1.375rem; height: 0.75rem; border-radius: 0.1875rem; border: 1px solid var(--m-line2); transform: skewX(-18deg); }
+.mdl-root .lw-slots i.on { background: var(--m-gold); border-color: var(--m-gold); box-shadow: 0 0 0.5rem rgba(255, 216, 107, 0.6); }
+.mdl-root .lw-slots i.q { background: repeating-linear-gradient(90deg, var(--m-gold) 0 0.1875rem, transparent 0.1875rem 0.375rem); border-color: var(--m-gold); }
+.mdl-root .lw-slots b { margin: 0; font-size: 1.0625rem; }
+.mdl-root .lw-slots .gold { font-size: var(--fs-sm); }
+.mdl-root .lw-more, .mdl-root .lw-rule { font-size: var(--fs-sm); color: var(--m-dim); line-height: 1.4; max-width: 46rem; }
+.mdl-root .lw-rule b { color: var(--m-text); }
+.mdl-root .lw-gen { color: var(--m-bad); font-weight: 700; }
+.mdl-root .lw-cd { font-weight: 700; color: var(--m-text); font-variant-numeric: tabular-nums; }
+.mdl-root .lw-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.875rem 1rem; }
+.mdl-root .lw-pairc { min-width: 0; padding: 0.625rem 0.625rem 0.6875rem; border-radius: 1rem; border: 1px solid var(--m-line); background: rgba(0, 0, 0, 0.22); }
+.mdl-root .lw-pair { display: flex; align-items: baseline; gap: 0.625rem; margin: 0 0 0.5rem 0.25rem; font-family: var(--display); font-size: var(--fs-sm); font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--m-text); text-align: left; }
+.mdl-root .lw-pair small { font-family: var(--font, 'Rajdhani', sans-serif); font-size: var(--fs-xs); letter-spacing: 0.04em; text-transform: none; color: var(--m-dim); font-weight: 500; }
+.mdl-root .lw-opts { display: grid; grid-template-columns: minmax(0, 1fr) 2rem minmax(0, 1fr); align-items: stretch; }
+.mdl-root .lw-or { position: relative; display: grid; place-items: center; }
+.mdl-root .lw-or i { display: grid; place-items: center; width: 1.75rem; height: 1.75rem; border-radius: 50%; border: 1px solid var(--m-line2); background: #15161b; font-style: normal; font-family: var(--display); font-size: var(--fs-xs); letter-spacing: 0.02em; text-transform: lowercase; color: var(--m-text); }
+.mdl-root .lw-card {
+  position: relative; z-index: 0; display: flex; flex-direction: column; align-items: stretch; gap: 0.5rem; min-width: 0; min-height: 0; padding: 0.625rem 0.75rem 0.6875rem; border-radius: 0.75rem;
+  border: 1px solid var(--m-line); background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01));
+}
+.mdl-root .lw-hd { display: flex; align-items: flex-start; gap: 0.625rem; }
+.mdl-root .lw-ic { flex: none; display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: 0.625rem; font-size: 1.3125rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--m-line); color: var(--m-dim); }
+.mdl-root .lw-tx { min-width: 0; }
+.mdl-root .lw-tx b { display: block; font-size: 1.0625rem; line-height: 1.15; }
+.mdl-root .lw-tx span { display: block; margin-top: 0.125rem; color: var(--m-dim); font-size: var(--fs-sm); line-height: 1.3; }
+.mdl-root .lw-foot { display: flex; align-items: center; gap: 0.375rem 0.5rem; flex-wrap: wrap; min-height: 0; margin-top: auto; }
+.mdl-root .lw .lw-foot .lw-btn { min-height: 2.375rem; padding: 0 0.875rem !important; display: inline-flex; align-items: center; justify-content: center; gap: 0.375rem; font-weight: 700; white-space: nowrap; }
+.mdl-root .lw .lw-foot .lw-go, .mdl-root .lw .lw-foot .lw-off { flex: 1 1 auto; }
+.mdl-root .lw .lw-foot .lw-off { --bb: rgba(255, 255, 255, 0.03); --bd: var(--m-line); color: var(--m-dim); cursor: not-allowed; }
+.mdl-root .lw-off .cost { opacity: 1; }
+.mdl-root .lw-why { flex: 1 1 100%; font-size: var(--fs-sm); line-height: 1.3; color: #ff9a8c; }
+.mdl-root .lw-sub { flex: 1 1 100%; font-size: var(--fs-xs); color: var(--m-dim); }
+.mdl-root .lw-cost { font-weight: 700; color: var(--m-dim); }
+.mdl-root .lw-tag { display: inline-flex; align-items: center; gap: 0.3125rem; height: 2.375rem; padding: 0 0.75rem; border-radius: 1.1875rem; font-weight: 700; font-size: var(--fs-sm); letter-spacing: 0.02em; border: 1px solid currentColor; }
+.mdl-root .lw-tag.on { color: var(--m-good); }
+.mdl-root .lw-card.s-on, .mdl-root .lw-card.s-pending {
+  border-color: rgba(255, 216, 107, 0.8); background: linear-gradient(160deg, rgba(255, 216, 107, 0.16), rgba(200, 150, 74, 0.06));
+  box-shadow: 0 0 1.25rem rgba(255, 216, 107, 0.12), inset 0 1px 0 rgba(255, 245, 210, 0.12);
+}
+.mdl-root .lw-card.s-pending { border-style: dashed; }
+.mdl-root .lw-card.s-on .lw-ic, .mdl-root .lw-card.s-pending .lw-ic { color: var(--m-gold); border-color: rgba(255, 216, 107, 0.6); background: rgba(255, 216, 107, 0.1); }
+.mdl-root .lw-card.s-on .lw-tx span, .mdl-root .lw-card.s-pending .lw-tx span { color: var(--m-text); }
+.mdl-root .lw-card.s-revoking { opacity: 1; border-style: dashed; }
+.mdl-root .lw-card.s-revoking .lw-tx b { text-decoration: line-through; text-decoration-color: var(--m-bad); }
+.mdl-root .lw-card.fx-on { animation: law-seal 0.9s var(--ease-out, ease-out); }
+.mdl-root .lw-riv { display: flex; flex-wrap: wrap; gap: 0.25rem 0.625rem; font-size: var(--fs-xs); color: var(--m-dim); }
+.mdl-root .lw-riv span { display: inline-flex; align-items: center; gap: 0.3125rem; min-width: 0; overflow-wrap: anywhere; }
+.mdl-root .lw-riv i { flex: none; width: 0.5625rem; height: 0.5625rem; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); }
+.mdl-root .lw-riv::before { content: 'Rivals:'; }
+
+@media (max-width: 1100px) {
+  .mdl-root .lw-grid { grid-template-columns: 1fr; max-width: 46rem; margin: 0 auto; }
+}
+@media (max-width: 700px) {
+  .mdl-root .lw-top { margin: 0 0 0.75rem; }
+  .mdl-root .lw-grid { gap: 0.625rem; }
+  .mdl-root .lw-pairc { padding: 0.5rem 0.4375rem 0.5rem; }
+  .mdl-root .lw-opts { grid-template-columns: minmax(0, 1fr) 1.25rem minmax(0, 1fr); }
+  .mdl-root .lw-card { padding: 0.5rem 0.5rem 0.5625rem; }
+  .mdl-root .lw-hd { gap: 0.5rem; }
+  .mdl-root .lw-or { margin: 0 -0.25rem; position: relative; z-index: 1; }
+  .mdl-root .lw-ic { width: 2.25rem; height: 2.25rem; font-size: 1.1875rem; }
+  .mdl-root .lw-tx b { font-size: 1rem; }
+  .mdl-root .lw .lw-foot .lw-btn { width: 100%; padding: 0 0.375rem !important; }
+  .mdl-root .lw-tag { width: 100%; justify-content: center; }
+}
+@media (pointer: coarse) {
+  .mdl-root .lw .lw-foot .lw-btn, .mdl-root .lw-tag { min-height: 2.75rem; }
+}
+
+/* ============================================================================
+   Empire modal: Research. Four branch columns on wide screens, a 2x2 grid on
+   tablets and narrow windows, one column on phones (no sideways scrolling);
+   locked / unaffordable nodes stay readable (dimmed paint, not faded text).
+   ============================================================================ */
+.mdl-root[data-modal=empire] .rx-tree { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; overflow: visible; }
+.mdl-root[data-modal=empire] .rb { min-width: 0; }
+.mdl-root[data-modal=empire] .rn { width: min(8rem, 48%); }
+.mdl-root[data-modal=empire] .rb-row:not(.rb-fork) .rn { width: 8.5rem; }
+.mdl-root[data-modal=empire] .rn-nm { white-space: normal; max-width: 100%; text-wrap: balance; }
+.mdl-root[data-modal=empire] .rn-sub { flex-wrap: wrap; justify-content: center; }
+.mdl-root[data-modal=empire] .rn.s-locked, .mdl-root[data-modal=empire] .rn.s-busy, .mdl-root[data-modal=empire] .rn.s-open { opacity: 1; }
+.mdl-root[data-modal=empire] .rn.s-locked .rn-disc { filter: saturate(0.3) brightness(0.75); }
+.mdl-root[data-modal=empire] .rn.s-locked .rn-nm, .mdl-root[data-modal=empire] .rn.s-busy .rn-nm { color: var(--m-dim); }
+.mdl-root[data-modal=empire] .rn.s-locked .rn-sub { color: var(--m-dim); }
+.mdl-root[data-modal=empire] .rn.s-other { opacity: 0.62; }
+.mdl-root[data-modal=empire] .rn-tier { color: var(--m-text); }
+.mdl-root[data-modal=empire] .rn-dots { pointer-events: none; }
+.mdl-root[data-modal=empire] .rb-tree { row-gap: 1.75rem; }
+.mdl-root[data-modal=empire] .rx-status .st-chip { min-height: 2.25rem; }
+
+@media (max-width: 1100px) {
+  .mdl-root[data-modal=empire] .rx-tree { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.875rem; overflow: visible; margin: 0; padding: 0; scroll-snap-type: none; max-width: 52rem; margin-inline: auto; }
+  .mdl-root[data-modal=empire] .rb { padding-left: 0.625rem; padding-right: 0.625rem; }
+}
+@media (max-width: 700px) {
+  .mdl-root[data-modal=empire] .rx-tree { grid-template-columns: 1fr; gap: 0.75rem; }
+  .mdl-root[data-modal=empire] .rb { padding: 0.625rem 0.625rem 0.875rem; }
+  .mdl-root[data-modal=empire] .rb-h { margin-bottom: 0.625rem; }
+  .mdl-root[data-modal=empire] .rb-tree { row-gap: 1.375rem; }
+  .mdl-root[data-modal=empire] .rn, .mdl-root[data-modal=empire] .rb-row:not(.rb-fork) .rn { width: min(8rem, 46%); }
+  .mdl-root[data-modal=empire] .rn-nm { max-width: 100%; }
+}

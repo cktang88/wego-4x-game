@@ -11,7 +11,7 @@ import { creditRate } from '../../../shared/sim/resolve.ts';
 import { distance } from '../../../shared/sim/graph.ts';
 import { esc, roman, toast } from './dom.ts';
 import { ic, icFor } from '../art/icons.ts';
-import { shipSvg } from '../hud/util.ts';
+import { miniUrl } from './ship-plinth.ts';
 const TI = (t: { id: string; icon: string }) => ic(icFor('tech', t.id, t.icon));
 const LI = (l: { id: string; icon: string }) => ic(icFor('law', l.id, l.icon));
 
@@ -246,7 +246,7 @@ function designsHtml(g: GameScreen, pid: number, editable: boolean): string {
       const t1 = `${x.icon} ${x.name}: ${x.desc}${ok ? '' : `\nNeeds ${TECH[x.tech!]?.name ?? x.tech} (research).`}`;
       return `<button class="mod ${x.id === c ? 'on' : ''}" data-bp="${k}:${x.id}" ${ok ? '' : 'disabled'}${tip(t1)} aria-label="${esc(`${x.name} for ${d.name}`)}">${ic(icFor('module', x.id, x.icon))}</button>`;
     }).join('') : '';
-    return `<div class="bp"><span class="bpc"><span class="g">${shipSvg(k, 'currentColor', 26)}</span>${esc(d.name)}</span><span class="bpm"${tip(`${m?.name}: ${m?.desc}`)}>${m ? ic(icFor('module', m.id, m.icon)) : ''} ${esc(m?.name ?? c)}${pend ? ' <span class="gold">⏳</span>' : ''}</span><span class="mods">${chips}</span></div>`;
+    return `<div class="bp"><span class="bpc"><img class="g mini" src="${miniUrl(k, pid, g.color(pid), 34, 20)}" width="34" height="20" alt="" draggable="false">${esc(d.name)}</span><span class="bpm"${tip(`${m?.name}: ${m?.desc}`)}>${m ? ic(icFor('module', m.id, m.icon)) : ''} ${esc(m?.name ?? c)}${pend ? ' <span class="gold">⏳</span>' : ''}</span><span class="mods">${chips}</span></div>`;
   }).join('');
   const old = st.fleets.filter(f => f.owner === pid).reduce((a, f) => a + f.ships.filter(s => s.mod !== blueprintFor(st, pid, s.cls)).length, 0);
   const body = `<div class="bps">${rows}</div><div class="orderhelp">Each ship class carries one module. New ships get it. Older ships keep theirs until you <b>Refit</b> their fleet at one of your shipyards (an order, ${R.empire.refitIndustryPerShip}⚙ per ship; it also repairs).${known.length < MODULES.length ? ` Research ${MODULES.filter(m => m.tech && !pl.techs?.includes(m.tech)).map(m => TECH[m.tech!]?.name).join(', ')} for more modules.` : ''}</div>`;
