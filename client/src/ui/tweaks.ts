@@ -2,6 +2,7 @@
 // becomes an input. Overrides are stored in localStorage and passed to new games.
 import { defaultRules, isObj } from '../../../shared/config/rules.ts';
 import { esc, overlay, toast } from './dom.ts';
+import { graphicsPanel } from './graphics.ts';
 
 const KEY = 'tc.rules.overrides';
 
@@ -75,9 +76,12 @@ export function openTweaks(onClose?: () => void) {
   const o = overlay(`<div class="dialog wide tw-dlg" role="dialog" aria-label="Tweaks">
     <div class="tw-head"><h2>Tweaks <small>rules for new games</small></h2>
       <input type="search" class="tw-find" placeholder="Find a rule…" aria-label="Find a rule" spellcheck="false"><span class="tw-changed" aria-live="polite"></span></div>
+    <div class="tw-gfx" data-tw-gfx><span class="k-engraved">Graphics</span></div>
     <p class="tw-note">Every balance number in the game. Changes apply to <b>new</b> games, local or online; each game keeps the rules it started with. Gold rules are changed. Ship stats are under <i>Ships</i>.</p>
     <div class="tweaks">${groups.join('')}<p class="tw-none" hidden>No rule matches.</p></div>
     <div class="tw-foot"><button data-x="reset" class="danger">Reset all</button><button data-x="export">Copy JSON</button><button data-x="import">Paste JSON</button><span class="grow"></span><button class="primary" data-x="close">Done</button></div></div>`);
+  // the table's light lives beside the rules (it is saved per browser, not per game)
+  o.querySelector('[data-tw-gfx]')!.appendChild(graphicsPanel());
   const bReset = o.querySelector<HTMLButtonElement>('[data-x="reset"]')!;
   const changed = o.querySelector<HTMLElement>('.tw-changed')!;
   const recount = () => {

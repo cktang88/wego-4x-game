@@ -14,7 +14,12 @@ import { fbm2, rand as artRand, mix as artMix, css as artCss, rgb as artRgb } fr
 import { drawStructure } from '../art/structures.ts';
 import { uiScale } from '../ui/dom.ts';
 import { iconizeDom, iconizeHtml, ic, drawIcon, fillIconText } from '../art/icons.ts';
+import { tableFor, releaseTable, Pacer } from '../art/gl/table.ts';
+import { enamel, retint, SEMANTIC } from '../art/bible.ts';
+// the art bible's tokens and kit (battle-demo.html loads the viewer without the app's stylesheets)
+import '../art/kit.css';
 import { audio } from '../audio/audio.ts';
+import { decisiveVolley } from '../fx/battlefacts.ts';
 // the viewer's DOM uses icons (ic()): size them even where the app's stylesheet isn't loaded (battle-demo.html)
 import '../icons.css';
 
@@ -36,7 +41,9 @@ const RETREAT_DUR = 1.4;
 const TAIL = 1.7;           // settle time after the last round
 const CAPTION_DUR = 2.9;
 
-const FONT = `"Rajdhani","Orbitron","Eurostile","Bahnschrift","Segoe UI",system-ui,sans-serif`;
+/** Canvas and chrome type (ART-BIBLE §7): Cinzel caps for labels, Alegreya Sans for figures and UI text. */
+const FONT = `"Cinzel","Trajan Pro",Georgia,serif`;
+const UIFONT = `"Alegreya Sans","Gill Sans","Segoe UI",system-ui,sans-serif`;
 const GLYPH_SIZE: Record<string, number> = { dart: 0.62, arrow: 0.78, wedge: 1, block: 1.08, long: 1.4, dread: 2.05 };
 const CRIT_TEXT: Record<string, string> = { engines: 'ENGINES DOWN', weapons: 'WEAPONS OFFLINE', shields: 'SHIELDS DOWN' };
 
@@ -122,85 +129,96 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, html?: 
 // cost ~45 ms/frame at 1440x900 (60 fps -> 15 fps); a more opaque scrim reads the same
 const CSS = `
 .bv-overlay,.bv-closing{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;
-  background:radial-gradient(ellipse at center,rgba(26,20,14,.72),rgba(3,3,6,.94));
-  font-family:${FONT};color:#ece4d2;animation:bv-fade .25s ease-out}
+  background:radial-gradient(120% 100% at 42% 34%,rgba(7,8,12,.62),rgba(4,3,2,.94));
+  font-family:${UIFONT};color:#ece3cf;animation:bv-fade .25s ease-out;font-variant-numeric:lining-nums tabular-nums}
 @keyframes bv-fade{from{opacity:0}to{opacity:1}}
 .bv-closing{pointer-events:none;animation:bv-out .18s ease-in forwards}
 .bv-closing .bv-panel{animation:bv-shrink .18s ease-in forwards}
 @keyframes bv-out{to{opacity:0}}
 @keyframes bv-shrink{to{transform:scale(.97)}}
 .bv-overlay .bv-panel{animation:bv-pop .34s cubic-bezier(.2,1.25,.4,1) both}
-@keyframes bv-pop{from{opacity:0;transform:scale(.94) translateY(0.625rem)}}
+@keyframes bv-pop{from{opacity:0;transform:translate(0.25rem,0.75rem) scale(.985)}}
 .bv-btn{transition:border-color .12s,box-shadow .15s,color .12s,background .12s,transform .06s}
 .bv-btn:active{transform:scale(.95)}
 .bv-card .bv-big{animation:bv-big .7s cubic-bezier(.2,.8,.2,1) both}
-@keyframes bv-big{from{opacity:0;letter-spacing:.5em;filter:blur(0.25rem)}}
+@keyframes bv-big{from{opacity:0;transform:translateY(-0.4rem) scale(1.06)}}
 @media (prefers-reduced-motion:reduce){.bv-overlay,.bv-overlay .bv-panel,.bv-card .bv-big,.bv-side,.bv-closing,.bv-closing .bv-panel{animation:none!important}}
 .bv-panel{position:relative;display:flex;flex-direction:column;width:min(73.75rem,calc(100vw - 2rem));height:min(48.75rem,calc(100dvh - 2rem));
-  background:#07080c;border:1px solid rgba(214,178,110,.28);border-radius:0.375rem;overflow:hidden;
-  box-shadow:0 0 0 1px rgba(0,0,0,.6),0 0 3rem rgba(0,0,0,.6),inset 0 0 3.75rem rgba(214,178,110,.06)}
-.bv-head{display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.75rem 0.5rem 1rem;border-bottom:1px solid rgba(214,178,110,.35);box-shadow:inset 0 1px 0 rgba(255,240,210,.08);
-  background:linear-gradient(90deg,rgba(70,74,90,.5),rgba(20,22,30,0) 70%)}
+  border: 1px solid; border-color: #dcb46c #6b4a1c #3a2810 #a87a35;border-radius:7px;overflow:hidden;
+  background:var(--k-grain) 0 0/160px,linear-gradient(180deg,#1f1915,#0e0a08) padding-box #140f0c;background-blend-mode:soft-light,normal,normal;
+  box-shadow:var(--k-bevel),0 0 0 1px rgba(0,0,0,.6),0.5rem 1.5rem 4rem rgba(0,0,0,.75)}
+.bv-head{display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.75rem 0.5rem 1rem;
+  background:linear-gradient(180deg,#1f1915,#17120e) #17120e;box-shadow:inset 0 -2px 0 rgba(0,0,0,.7),inset 0 -1px 0 rgba(220,180,108,.45),inset 0 1px 0 rgba(255,238,205,.05)}
 .bv-title{flex:1;min-width:0}
-.bv-title b{display:block;font-size:var(--fs-md);font-weight:600;letter-spacing:.22em;text-transform:uppercase;overflow-wrap:anywhere;line-height:1.25;
-  text-shadow:0 0 0.75rem rgba(230,190,110,.6)}
-.bv-title span{display:block;font-size:var(--fs-xs);letter-spacing:.24em;text-transform:uppercase;color:#b3a58a;overflow-wrap:anywhere;line-height:1.3}
-.bv-x{background:none;border:1px solid rgba(214,178,110,.3);color:#e6d6b0;width:2.25rem;height:2.25rem;border-radius:0.25rem;font-size:1.25rem;line-height:1;cursor:pointer;flex:none;display:inline-flex;align-items:center;justify-content:center;padding:0}
-.bv-btn:focus-visible,.bv-x:focus-visible{outline:2px solid #ffd86b;outline-offset:2px}
-.bv-x:hover{color:#fff;border-color:#e6c37a;box-shadow:0 0 0.75rem rgba(230,180,90,.5)}
-.bv-stage{position:relative;flex:1;min-height:0;overflow:hidden;background:#05060a}
+.bv-title b{display:block;font-family:${FONT};font-size:var(--fs-md);font-weight:700;letter-spacing:.14em;text-transform:uppercase;overflow-wrap:anywhere;line-height:1.25;color:#f3ead6;
+  text-shadow:0 -1px 0 #000}
+.bv-title span{display:block;font-family:${FONT};font-weight:700;font-size:var(--fs-xs);letter-spacing:.16em;text-transform:uppercase;color:#d9b26a;overflow-wrap:anywhere;line-height:1.3}
+.bv-x{border: 1px solid; border-color: #dcb46c #6b4a1c #3a2810 #a87a35;color:#efd59a;width:2.25rem;height:2.25rem;border-radius:50%;font-size:1.25rem;line-height:1;cursor:pointer;flex:none;display:inline-flex;align-items:center;justify-content:center;padding:0;
+  background:var(--k-grain) 0 0/160px,var(--k-steel-face) padding-box #262932;background-blend-mode:soft-light,normal,normal;box-shadow:var(--k-bevel),var(--k-cast)}
+.bv-btn:focus-visible,.bv-x:focus-visible{outline:2px solid #efd59a;outline-offset:2px}
+.bv-x:hover{color:#fbedc8;filter:brightness(1.12)}
+.bv-stage{position:relative;flex:1;min-height:0;overflow:hidden;background:#07080c}
 .bv-stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
-.bv-ctrl{display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.75rem;border-top:1px solid rgba(214,178,110,.18);background:rgba(14,15,20,.95);flex-wrap:wrap}
-.bv-btn{background:linear-gradient(#2c2f3a,#16171e);box-shadow:inset 0 1px 0 rgba(255,240,210,.12);border:1px solid rgba(214,178,110,.32);color:#ece2c8;font:600 var(--fs-xs) ${FONT};letter-spacing:.18em;text-transform:uppercase;
-  padding:0.4375rem 0.625rem;border-radius:0.1875rem;cursor:pointer;min-width:2.125rem;white-space:nowrap}
-.bv-btn:hover{border-color:#e6c37a;box-shadow:0 0 0.625rem rgba(230,180,90,.45);color:#fff}
-.bv-btn.bv-on{background:rgba(214,170,90,.28);border-color:#f0d79a;color:#fff;box-shadow:0 0 0.625rem rgba(230,180,90,.4)}
+.bv-ctrl{display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.75rem;flex-wrap:wrap;
+  background:linear-gradient(180deg,#1b1511,#0d0907) #140f0c;box-shadow:inset 0 1px 0 rgba(220,180,108,.4)}
+.bv-btn{border:1px solid;border-color:#dcb46c #6b4a1c #3a2810 #a87a35;background-color:#262932;color:#efd59a;font:700 var(--fs-xs) ${FONT};letter-spacing:.1em;text-transform:uppercase;
+  background:var(--k-grain) 0 0/160px,var(--k-steel-face) padding-box #262932;background-blend-mode:soft-light,normal,normal;box-shadow:var(--k-bevel),var(--k-cast);text-shadow:0 -1px 0 rgba(0,0,0,.8);
+  padding:0.4375rem 0.625rem;border-radius:3px;cursor:pointer;min-width:2.125rem;white-space:nowrap}
+.bv-btn:hover{background:var(--k-grain) 0 0/160px,var(--k-steel-face-hi) padding-box #2b2e37;background-blend-mode:soft-light,normal,normal;color:#fbedc8; border-color: #dcb46c #6b4a1c #3a2810 #a87a35; }
+.bv-btn:active{transform:translate(1px,2px);box-shadow:var(--k-press)}
+.bv-btn.bv-on{color:#2a1a06;text-shadow:0 1px 0 rgba(255,245,210,.5);background:var(--k-grain) 0 0/160px,var(--k-brass-face) padding-box #c8964a;background-blend-mode:soft-light,normal,normal;box-shadow:var(--k-bevel-brass); border-color: #fff3c8 #8a5f22 #3a2810 #c8964a; }
 .bv-speed{display:flex;gap:0}
 .bv-break{display:none}
 .bv-skip{display:inline-flex;align-items:center;gap:0.375rem}
-.bv-speed .bv-btn{border-radius:0;margin-left:-1px}
-.bv-speed .bv-btn:first-child{border-radius:0.1875rem 0 0 0.1875rem}.bv-speed .bv-btn:last-child{border-radius:0 0.1875rem 0.1875rem 0}
-.bv-round{font-size:var(--fs-xs);letter-spacing:.24em;text-transform:uppercase;color:#d8c9a4;min-width:6rem;text-align:center}
+.bv-speed .bv-btn{border-radius:0;margin-left:0}
+.bv-speed .bv-btn:first-child{border-radius:3px 0 0 3px}.bv-speed .bv-btn:last-child{border-radius:0 3px 3px 0}
+.bv-round{font-family:${FONT};font-weight:700;font-size:var(--fs-xs);letter-spacing:.14em;text-transform:uppercase;color:#d9b26a;min-width:6rem;text-align:center}
 .bv-bar{flex:1;min-width:7.5rem;height:1.125rem;position:relative;cursor:pointer}
-.bv-bar i{position:absolute;left:0;right:0;top:0.5rem;height:0.125rem;background:rgba(214,178,110,.18)}
-.bv-bar em{position:absolute;left:0;top:0.5rem;height:0.125rem;background:linear-gradient(90deg,#9a7430,#ffe2a0);box-shadow:0 0 0.5rem #d4a650}
-.bv-bar s{position:absolute;top:0.3125rem;width:1px;height:0.5rem;background:rgba(230,200,140,.45)}
+/* the scrubber: a sunken groove with a brass inlay; round marks are engraved notches */
+.bv-bar i{position:absolute;left:0;right:0;top:0.375rem;height:0.375rem;border-radius:3px;background:linear-gradient(180deg,#050506,#22242a);box-shadow:inset 1px 1px 2px rgba(0,0,0,.9),0 1px 0 rgba(255,230,170,.12)}
+.bv-bar em{position:absolute;left:0;top:0.4375rem;height:0.25rem;border-radius:2px;background:linear-gradient(180deg,#f4dc9c,#a87a35)}
+.bv-bar s{position:absolute;top:0.25rem;width:1px;height:0.625rem;background:rgba(0,0,0,.75);box-shadow:1px 0 0 rgba(220,180,108,.4)}
 .bv-card{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:1rem;overflow:auto;
-  background:radial-gradient(ellipse at center,rgba(14,14,20,.84),rgba(4,4,8,.95));z-index:3}
-.bv-card.bv-end{background:radial-gradient(ellipse at center,rgba(14,14,20,.95),rgba(4,4,8,.98))}
-.bv-btn.bv-done{opacity:.4;cursor:default;box-shadow:none}
+  background:radial-gradient(120% 100% at 42% 34%,rgba(18,14,10,.8),rgba(5,4,3,.95));z-index:3}
+.bv-card.bv-end{background:radial-gradient(120% 100% at 42% 34%,rgba(18,14,10,.94),rgba(5,4,3,.98))}
+.bv-btn.bv-done{filter:saturate(.3) brightness(.7);cursor:default}
 .bv-card-in{max-width:55rem;width:100%;text-align:center;margin:auto}
-.bv-kicker{font-size:var(--fs-xs);letter-spacing:.42em;text-transform:uppercase;color:#a89a80}
-.bv-big{font-size:clamp(1.375rem,4.6vw,2.5rem);font-weight:600;letter-spacing:.16em;text-transform:uppercase;margin:0.375rem 0 0.25rem;
-  text-shadow:0 0 1.125rem rgba(230,190,110,.7),0 0 0.125rem #fff}
-.bv-sub{font-size:var(--fs-xs);letter-spacing:.3em;text-transform:uppercase;color:#b4a684}
-.bv-rule{height:1px;margin:0.875rem auto;width:60%;background:linear-gradient(90deg,transparent,rgba(230,196,120,.6),transparent)}
+.bv-kicker{font-family:${FONT};font-weight:700;font-size:var(--fs-xs);letter-spacing:.24em;text-transform:uppercase;color:#d9b26a}
+.bv-big{font-family:${FONT};font-size:clamp(1.375rem,4.6vw,2.5rem);font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin:0.375rem 0 0.25rem;
+  text-shadow:0 -1px 0 #000,0.05em 0.08em 0.12em rgba(0,0,0,.7)}
+.bv-sub{font-family:${FONT};font-weight:700;font-size:var(--fs-xs);letter-spacing:.16em;text-transform:uppercase;color:#c4b89c}
+.bv-rule{height:2px;margin:0.875rem auto;width:60%;background:linear-gradient(90deg,transparent,rgba(0,0,0,.7),transparent) 0 0/100% 1px no-repeat,linear-gradient(90deg,transparent,rgba(220,180,108,.55),transparent) 0 1px/100% 1px no-repeat}
 .bv-sides{display:flex;flex-wrap:wrap;justify-content:center;gap:0.75rem;margin-top:0.375rem}
-.bv-side{flex:1 1 12.5rem;max-width:17.5rem;text-align:left;padding:0.625rem 0.75rem;border:1px solid rgba(255,255,255,.08);border-left:0.125rem solid var(--c);
-  background:linear-gradient(90deg,color-mix(in srgb,var(--c) 14%,transparent),transparent);animation:bv-slide .45s ease-out both}
-@keyframes bv-slide{from{opacity:0;transform:translateY(0.5rem)}to{opacity:1;transform:none}}
-.bv-side h3{margin:0 0 0.375rem;font-size:var(--fs-xs);font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--c);text-shadow:0 0 0.625rem var(--c)}
-.bv-side p{margin:0.125rem 0;font-size:var(--fs-xs);letter-spacing:.06em;color:#ddd4bc}
-.bv-side small{display:block;font-size:var(--fs-xs);letter-spacing:.2em;text-transform:uppercase;color:#a89a80;margin-top:0.375rem}
-.bv-vs{align-self:center;font-size:var(--fs-xs);letter-spacing:.3em;color:#a89a80}
-.bv-hint{margin-top:0.875rem;font-size:var(--fs-xs);letter-spacing:.3em;color:#a89a80;text-transform:uppercase}
+/* each side is a steel plate on the table, its house an enamel edge (never a tinted glass card) */
+.bv-side{position:relative;flex:1 1 12.5rem;max-width:17.5rem;text-align:left;padding:0.625rem 0.75rem 0.625rem 1rem;border: 1px solid; border-color: #8a909c #353945 #1d1f25 #5b6170;border-radius:7px;
+  background:var(--k-grain) 0 0/160px,radial-gradient(120% 90% at 20% 0%,#2e313b 0%,#1d1f25 50%,#131418 100%) padding-box;background-blend-mode:soft-light,normal,normal;
+  box-shadow:var(--k-bevel),var(--k-cast-lift),inset 0.25rem 0 0 color-mix(in srgb,var(--c) 70%,#000);animation:bv-slide var(--k-t-settle,.26s) var(--k-ease-heavy,ease-out) both}
+@keyframes bv-slide{from{opacity:0;transform:translate(0.25rem,0.5rem)}to{opacity:1;transform:none}}
+.bv-side h3{margin:0 0 0.375rem;font-family:${FONT};font-size:var(--fs-xs);font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--c) 72%,#f3ead6);text-shadow:0 -1px 0 #000}
+.bv-side p{margin:0.125rem 0;font-size:var(--fs-sm);color:#ece3cf}
+.bv-side small{display:block;font-family:${FONT};font-weight:700;font-size:var(--fs-xs);letter-spacing:.12em;text-transform:uppercase;color:#c4b89c;margin-top:0.375rem}
+.bv-vs{align-self:center;font-family:${FONT};font-weight:700;font-size:var(--fs-xs);letter-spacing:.2em;color:#d9b26a}
+.bv-hint{margin-top:0.875rem;font-family:'IM Fell English',Georgia,serif;font-style:italic;font-size:var(--fs-sm);color:#c4b89c}
 .bv-caption{position:absolute;left:0.75rem;right:0.75rem;margin:0 auto;width:fit-content;bottom:0.875rem;transform:translateY(0.375rem);max-width:47.5rem;z-index:2;
-  padding:0.5rem 1.125rem;text-align:center;font-size:clamp(var(--fs-sm),1.7vw,1rem);letter-spacing:.08em;color:#f6efdc;pointer-events:none;
-  background:linear-gradient(90deg,transparent,rgba(10,10,14,.9) 15%,rgba(10,10,14,.9) 85%,transparent);
-  border-top:1px solid rgba(230,196,120,.25);border-bottom:1px solid rgba(230,196,120,.25);
-  opacity:0;transition:opacity .35s,transform .35s;text-shadow:0 0 0.5rem rgba(230,190,110,.6)}
+  padding:0.55rem 1.25rem 0.6rem;text-align:center;font-family:'IM Fell English',Georgia,serif;font-size:clamp(var(--fs-md),1.7vw,1.125rem);color:#2a1d10;pointer-events:none;
+  /* the commentary is a vellum slip laid on the table */
+  background:var(--k-grain) 0 0/160px,radial-gradient(130% 120% at 30% 20%,#f3e8cc 0%,#e4d3ab 60%,#cdb588 100%) #e4d3ab;background-blend-mode:multiply,normal;
+  clip-path:polygon(0% 6%,8% 0%,22% 4%,38% 0%,55% 3%,72% 0%,88% 4%,100% 0%,99% 50%,100% 96%,86% 100%,68% 96%,50% 100%,32% 97%,14% 100%,0% 95%,1% 50%);
+  filter:drop-shadow(0.12rem 0.3rem 0.35rem rgba(0,0,0,.65));
+  opacity:0;transition:opacity .35s,transform var(--k-t-settle,.26s) var(--k-ease-heavy,ease-out)}
 .bv-caption.bv-show{opacity:1;transform:none}
-.bv-end table{margin:0.625rem auto 0;border-collapse:collapse;font-size:var(--fs-xs);letter-spacing:.1em}
-.bv-end th{font-weight:500;font-size:var(--fs-xs);letter-spacing:.24em;text-transform:uppercase;color:#a89a80;padding:0.25rem 0.625rem;border-bottom:1px solid rgba(214,178,110,.2)}
-.bv-end td{padding:0.3125rem 0.625rem;text-align:center;border-bottom:1px solid rgba(255,255,255,.05)}
-.bv-end td:first-child{text-align:left;text-transform:uppercase;letter-spacing:.16em;font-weight:600}
-.bv-mvp{display:inline-block;margin-top:0.875rem;padding:0.5rem 1rem;border:1px solid rgba(255,210,120,.45);background:rgba(255,190,80,.07);
-  box-shadow:0 0 1.125rem rgba(255,190,80,.15)}
-.bv-mvp small{display:block;font-size:var(--fs-xs);letter-spacing:.34em;color:#ffcf7a;text-transform:uppercase}
-.bv-mvp b{font-size:1rem;letter-spacing:.12em}
+.bv-end table{margin:0.625rem auto 0;border-collapse:collapse;font-size:var(--fs-sm)}
+.bv-end th{font-family:${FONT};font-weight:700;font-size:var(--fs-xs);letter-spacing:.12em;text-transform:uppercase;color:#d9b26a;padding:0.25rem 0.625rem;
+  box-shadow:inset 0 -2px 0 rgba(0,0,0,.7),inset 0 -1px 0 rgba(220,180,108,.35)}
+.bv-end td{padding:0.3125rem 0.625rem;text-align:center;font-weight:700;border-bottom:1px solid rgba(220,180,108,.08)}
+.bv-end td:first-child{text-align:left;font-family:${FONT};text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.bv-mvp{display:inline-block;margin-top:0.875rem;padding:0.5rem 1rem;border-radius:3px;border: 1px solid; border-color: #dcb46c #6b4a1c #3a2810 #a87a35;
+  background:var(--k-grain) 0 0/160px,radial-gradient(120% 90% at 20% 0%,#2e313b 0%,#1d1f25 50%,#131418 100%) padding-box;background-blend-mode:soft-light,normal,normal;box-shadow:var(--k-bevel),var(--k-cast-lift)}
+.bv-mvp small{display:block;font-family:${FONT};font-weight:700;font-size:var(--fs-xs);letter-spacing:.16em;color:#f1d488;text-transform:uppercase}
+.bv-mvp b{font-family:${FONT};font-size:1.0625rem;letter-spacing:.06em}
 .bv-hl{list-style:none;margin:0.875rem auto 0;padding:0;max-width:40rem;text-align:left}
-.bv-hl li{font-size:var(--fs-xs);letter-spacing:.04em;color:#ddd4bc;padding:0.25rem 0 0.25rem 1rem;position:relative;border-bottom:1px solid rgba(255,255,255,.04)}
-.bv-hl li:before{content:'';position:absolute;left:0.125rem;top:0.625rem;width:0.3125rem;height:0.3125rem;transform:rotate(45deg);background:#d4a650;box-shadow:0 0 0.375rem #d4a650}
+.bv-hl li{font-family:'IM Fell English',Georgia,serif;font-size:var(--fs-md);color:#c4b89c;padding:0.25rem 0 0.25rem 1rem;position:relative;border-bottom:1px solid rgba(220,180,108,.08)}
+.bv-hl li:before{content:'';position:absolute;left:0.125rem;top:0.65rem;width:0.3125rem;height:0.3125rem;transform:rotate(45deg);background:linear-gradient(135deg,#efd59a,#8a5f22);box-shadow:0.5px 0.5px 0 rgba(0,0,0,.6)}
 .bv-endbtns{margin-top:1rem;display:flex;gap:0.625rem;justify-content:center}
 /* touch screens: every control a thumb-sized target */
 @media (pointer:coarse){
@@ -322,7 +340,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   const sides: SideInfo[] = [];
   let seedN = 1;
   report.sides.forEach((sd, si) => {
-    const color = ctx.playerColor(sd.owner);
+    // the house enamel's lit tone for names and lines; ships and bases take the enamel base from it themselves
+    const color = enamel(ctx.playerColor(sd.owner)).hi;
     const name = ctx.playerName(sd.owner) + (ctx.you !== null && sd.owner === ctx.you ? ' (You)' : '');
     const info: SideInfo = { owner: sd.owner, color, name, units: [], label: { x: 0, y: 0, align: 'center', text: name.toUpperCase() } };
     const mk = (u: Partial<Unit> & Pick<Unit, 'id' | 'name' | 'cls' | 'maxHp' | 'startHp' | 'garrison'>): Unit => {
@@ -351,6 +370,10 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   const retreatsAt: { t: number; fleet: number; owner: number }[] = [];
   let t = INTRO;
   let shotIdx = 0;
+  // the volley that truly decided the battle (fx/battlefacts.ts): slow-mo and a push-in on it, once (DELIGHT #55)
+  const decisive = reduced ? null : decisiveVolley(report);
+  let decisiveT = Infinity;
+  let decisiveTo: Unit | null = null;
   const hpAtBuild = new Map<number, number>();
   for (const u of units.values()) hpAtBuild.set(u.id, u.startHp);
   const engineDownBy = (u: Unit, tt: number) => u.sysTl.some(x => x.sys === 'engines' && x.t <= tt);
@@ -367,6 +390,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       if (from) from.lastFire[ri] = t0;
       if (!from || !to) return;
       const off = (mulberry(shotIdx * 31 + 7)() - 0.5) * 2;
+      if (decisive && decisive.round === ri && decisive.shot === i) { decisiveT = t1; decisiveTo = to; }
       shots.push({ t0, t1, from, to, rec, off, idx: shotIdx++ });
       if (rec.miss || rec.dmg <= 0) return;
       const prev = hpAtBuild.get(to.id)!;
@@ -507,7 +531,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     sides.forEach((sd, i) => {
       const rs = report.sides[i];
       if (i > 0) parts.push('<div class="bv-vs">VS</div>');
-      const fl = rs.fleets.map(f => `<p>${esc(f.name)} <span style="color:#9d8cc9">— ${esc(f.commander)}</span></p>`).join('');
+      const fl = rs.fleets.map(f => `<p>${esc(f.name)} <span style="color:#c4b89c;font-family:'IM Fell English',Georgia,serif;font-style:italic">— ${esc(f.commander)}</span></p>`).join('');
       const g = rs.garrison ? `<small>Garrison · ${rs.garrison.hp} hp</small>` : '';
       parts.push(`<div class="bv-side" style="--c:${esc(sd.color)};animation-delay:${0.1 + i * 0.12}s"><h3>${esc(sd.name)}</h3>${fl}
         ${rs.ships.length ? `<small>${rs.ships.length} ship${rs.ships.length === 1 ? '' : 's'}</small>` : ''}${g}</div>`);
@@ -525,33 +549,33 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   const outro = el('div', 'bv-card bv-end');
   {
     const w = report.winner;
-    let head: string, col = '#e8e0ff';
+    let head: string, col = '#ece3cf';
     const inBattle = ctx.you !== null && report.sides.some(sd => sd.owner === ctx.you);
     if (report.ongoing) head = 'The battle rages on';
     else if (w === null) head = 'No decision';
     else {
-      col = ctx.playerColor(w);
+      col = enamel(ctx.playerColor(w)).hi;
       if (ctx.you !== null && w === ctx.you) head = 'Victory';
-      else if (inBattle) { head = 'Defeat'; col = '#ff5d73'; }
+      else if (inBattle) { head = 'Defeat'; col = SEMANTIC.bad; }
       else head = `${ctx.playerName(w)} prevails`;
     }
     const sub = report.ongoing ? `Day ${report.day ?? 1} · ${report.totalRounds ?? report.rounds.length} rounds so far · it continues next ${ctx.live ? 'tick' : 'turn'}. Reinforcements can still turn it.`
       : w === null ? 'The field remains contested'
-      : `<span style="color:${esc(ctx.playerColor(w))}">${esc(ctx.playerName(w))}${ctx.you === w ? ' (You)' : ''}</span> holds the field`;
+      : `<span style="color:${esc(enamel(ctx.playerColor(w)).hi)}">${esc(ctx.playerName(w))}${ctx.you === w ? ' (You)' : ''}</span> holds the field`;
     const rows = sides.map((sd, i) => {
       const rs = report.sides[i];
       const lost = report.losses[String(sd.owner)] ?? 0;
       const fled = sd.units.filter(u => u.retreatT < Infinity).length;
       const gar = rs.garrison ? (units.get(rs.garrison.id)!.deathT < Infinity ? 'Fallen' : `${Math.max(0, hpAt(units.get(rs.garrison.id)!, 1e9))} hp`) : '—';
-      return `<tr><td style="color:${esc(sd.color)};text-shadow:0 0 0.5rem ${esc(sd.color)}">${esc(sd.name)}</td><td>${rs.ships.length}</td><td>${lost}</td><td>${fled}</td><td>${gar}</td></tr>`;
+      return `<tr><td style="color:${esc(sd.color)}">${esc(sd.name)}</td><td>${rs.ships.length}</td><td>${lost}</td><td>${fled}</td><td>${gar}</td></tr>`;
     }).join('');
     const mvpHtml = mvp && (mvp.dmg > 0 || mvp.kills > 0)
       ? `<div class="bv-mvp"><small>★ Ship of the battle</small><b style="color:${esc(sides[mvp.side].color)}">${esc(mvp.name)}</b>
-         <div style="font-size:var(--fs-xs);letter-spacing:.18em;color:#cbbfee;text-transform:uppercase">${esc(mvp.clsName)} · ${mvp.kills} kill${mvp.kills === 1 ? '' : 's'} · ${mvp.dmg} damage</div></div>`
+         <div style="font-size:var(--fs-sm);color:#c4b89c">${esc(mvp.clsName)} · ${mvp.kills} kill${mvp.kills === 1 ? '' : 's'} · ${mvp.dmg} damage</div></div>`
       : '';
     const hl = report.highlights.length ? `<ul class="bv-hl">${report.highlights.map(h => `<li>${esc(h)}</li>`).join('')}</ul>` : '';
     outro.innerHTML = `<div class="bv-card-in"><div class="bv-kicker">${report.ongoing ? 'This turn' : 'Battle concluded'} · ${nRounds} round${nRounds === 1 ? '' : 's'}</div>
-      <div class="bv-big" style="color:${esc(col)};text-shadow:0 0 1.375rem ${esc(col)}">${esc(head)}</div><div class="bv-sub">${sub}</div>
+      <div class="bv-big" style="color:${esc(col)}">${esc(head)}</div><div class="bv-sub">${sub}</div>
       <div class="bv-rule"></div>
       <table><tr><th>Side</th><th>Ships</th><th>Lost</th><th>Fled</th><th>Garrison</th></tr>${rows}</table>
       ${mvpHtml}${hl}
@@ -571,6 +595,9 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   let mouse: { x: number; y: number } | null = null;
   const g = canvas.getContext('2d')!;
   let bg: HTMLCanvasElement | null = null;
+  /** the shared GL table (sky, lamp, coronas, grain) moved under this viewer while it is open; null = 2D table */
+  const table = tableFor(canvas, Math.abs(report.id * 131 + report.region * 7) % 100000);
+  const pacer = new Pacer();
   let farDist = 800;
 
   function hpAt(u: Unit, tt: number): number {
@@ -718,8 +745,10 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   }
 
   function buildBg() {
-    // the skirmish mat: deep-space cloth with a printed nebula tinted by the combatants, a fine weave, printed stars,
-    // a faint range grid, and the lamp's warm pool with a dark vignette
+    // with the GL table under the canvas, the sky, felt, lamp and vignette are the board's own (art/gl/stage.ts)
+    if (table) { bg = null; return; }
+    // the 2D table: a dark felt mat with a printed nebula in the sky pigments (umber, oxblood, verdigris), a fine
+    // weave, printed stars, and the lamp's warm pool with a dark vignette
     bg = document.createElement('canvas');
     bg.width = canvas.width; bg.height = canvas.height;
     const b = bg.getContext('2d')!;
@@ -732,8 +761,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       const nc = document.createElement('canvas'); nc.width = nw; nc.height = nh;
       const ng = nc.getContext('2d')!;
       const img = ng.createImageData(nw, nh);
-      const cols = sides.map(sd => artMix(artRgb(sd.color), [40, 30, 90], 0.55));
-      while (cols.length < 2) cols.push([60, 40, 140]);
+      const cols = sides.map(sd => artMix(artRgb(enamel(sd.color).lo), [106, 63, 38], 0.55));
+      while (cols.length < 2) cols.push([28, 72, 72]);
       const seed = report.id * 13 + 7;
       for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) {
         const n = fbm2(x / 46, y / 46, 5, seed), m = fbm2(x / 30 + 9, y / 30, 3, seed + 3), d = fbm2(x / 18, y / 18, 3, seed + 5);
@@ -750,15 +779,13 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     b.globalAlpha = 0.85; b.drawImage(starfield(Math.ceil(W), Math.ceil(H), report.id), 0, 0, W, H); b.globalAlpha = 1;
     for (let i = 0; i < 6; i++) {
       const x = rnd() * W, y = rnd() * H;
-      b.fillStyle = 'rgba(235,240,255,0.8)'; b.fillRect(x, y, 1.4, 1.4);
-      b.strokeStyle = 'rgba(220,225,255,.28)'; b.lineWidth = 0.6;
-      b.beginPath(); b.moveTo(x - 6, y + 0.7); b.lineTo(x + 7.4, y + 0.7); b.moveTo(x + 0.7, y - 6); b.lineTo(x + 0.7, y + 7.4); b.stroke();
+      b.fillStyle = 'rgba(241,236,223,0.8)'; b.fillRect(x, y, 1.4, 1.4);
     }
     // the cloth's weave
     const pat = b.createPattern(weaveTile(), 'repeat');
     if (pat) { b.save(); b.globalCompositeOperation = 'overlay'; b.globalAlpha = 0.22; b.fillStyle = pat; b.fillRect(0, 0, W, H); b.restore(); }
-    // a faint printed range grid (hexes would be busier; a fine square grid reads as a game mat)
-    b.strokeStyle = 'rgba(190,200,255,0.035)'; b.lineWidth = 1;
+    // a faint printed range grid, engraved in the mat's brass ink
+    b.strokeStyle = 'rgba(220,180,108,0.035)'; b.lineWidth = 1;
     const step = 56;
     b.beginPath();
     for (let x = (W / 2) % step; x < W; x += step) { b.moveTo(x, 0); b.lineTo(x, H); }
@@ -873,7 +900,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         g.font = F(600, 13);
         g.textAlign = 'center'; g.textBaseline = 'top';
         g.fillStyle = '#e4dcc8';
-        setLs(g, '0.1em');
+        setLs(g, '0.06em');
         // names of ships packed side by side would run into each other: the first one drawn wins the spot
         const nm = u.name.toUpperCase(), tw = g.measureText(nm).width;
         const box = { l: ps.x - tw / 2 - 3, r: ps.x + tw / 2 + 3, t: by + 4, b: by + 20 };
@@ -889,16 +916,37 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     drawShipArt(g, x, y, L, L * dpr, u.cls, u.owner, color, ang, o);
   }
 
+  /** Hull as enamel pips on a brass rail (ART-BIBLE §8: "HP is enamel pips on a brass rail"): one pip per share of
+   *  the hull, lit in the owner's enamel while healthy, amber when hurt, cinnabar when failing; a pip lost this moment
+   *  stays as a pale chip that drains away. */
   function drawHpBar(x: number, y: number, w: number, h: number, frac: number, a: number, color: string, lag?: number) {
+    g.save();
     g.globalAlpha = a;
-    g.fillStyle = 'rgba(255,255,255,.12)';
-    g.fillRect(x, y, w, h);
-    const f = clamp(frac);
-    // recent damage lingers as a white chunk that drains away
-    if (lag !== undefined && lag > f) { g.fillStyle = 'rgba(255,240,220,.85)'; g.fillRect(x + w * f, y, w * (clamp(lag) - f), h); }
-    g.fillStyle = f > 0.6 ? color : f > 0.3 ? '#ffb347' : '#ff4b5c';
-    g.fillRect(x, y, w * f, h);
-    g.globalAlpha = 1;
+    const n = Math.max(4, Math.min(12, Math.round(w / 6)));
+    const ph = Math.max(3, h + 1.5), gap = 1, pw = (w - 2 - gap * (n - 1)) / n;
+    // the rail: brass, lit along its top edge (flat fills: this runs for every hull, every frame)
+    g.fillStyle = 'rgba(0,0,0,.6)'; g.fillRect(x - 0.5, y - 0.5, w + 2, ph + 3);
+    g.fillStyle = '#a87a35'; g.fillRect(x - 1, y - 1, w + 2, ph + 2);
+    g.fillStyle = '#efd59a'; g.fillRect(x - 1, y - 1, w + 2, 1);
+    // the sockets: one dark strip; the brass shows through the gaps between pips
+    g.fillStyle = '#1a1208'; g.fillRect(x, y, w - 2 + 2, ph);
+    g.fillStyle = '#a87a35';
+    for (let i = 1; i < n; i++) g.fillRect(x + i * (pw + gap) - gap, y, gap, ph);
+    const f = clamp(frac), lg = lag !== undefined ? clamp(lag) : f;
+    const E = enamel(color);
+    const fill = f > 0.6 ? E.hi : f > 0.3 ? SEMANTIC.warn : SEMANTIC.bad;
+    const lit = Math.ceil(Math.max(f, lg) * n);
+    for (let i = 0; i < lit; i++) {
+      const px = x + i * (pw + gap), lo = i / n, hi = (i + 1) / n;
+      const k = clamp((f - lo) / (hi - lo));
+      const kl = clamp((lg - lo) / (hi - lo));
+      if (kl > k) { g.fillStyle = 'rgba(236,227,207,.7)'; g.fillRect(px + pw * k, y, pw * (kl - k), ph); }
+      if (k > 0) {
+        g.fillStyle = fill; g.fillRect(px, y, pw * k, ph);
+        g.fillStyle = 'rgba(255,245,225,.35)'; g.fillRect(px, y, pw * k, Math.max(1, ph * 0.35));
+      }
+    }
+    g.restore();
   }
 
   const WORLDS: WorldType[] = ['terran', 'desert', 'ocean', 'garden', 'ice', 'lava', 'barren', 'toxic'];
@@ -912,7 +960,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     const recent = u.hits.some(h => h.t <= tt && tt - h.t < 0.14);
     drawBodyShadow(g, x + r * 0.45, y + r * 0.9, r * 1.2, 0.55);
     // the owner's colour as a faint halo of territory
-    drawGlow(g, x, y, r * 2.2, artRgb(color), dead ? 0.08 : 0.22, 0);
+    drawGlow(g, x, y, r * 2.2, artRgb(enamel(color).base), dead ? 0.06 : 0.16, 0);
     // orbital batteries behind the world (upper half), then the world, then the near ones
     const n = 6, rot = reduced ? 0 : tt * 0.18;
     const plats = Array.from({ length: n }, (_, i) => { const a = rot + (i / n) * Math.PI * 2; return { a, x: x + Math.cos(a) * r * 1.5, y: y + Math.sin(a) * r * 0.55, front: Math.sin(a) > 0 }; });
@@ -935,9 +983,10 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     const bw = r * 2.4, by = y + r * 1.55 + 6;
     if (!dead) drawHpBar(x - bw / 2, by, bw, 3, hpNow / u.maxHp, 1, color, lagHp(u, tt) / u.maxHp);
     g.font = F(600, 13); g.textAlign = 'center'; g.textBaseline = 'top';
-    g.fillStyle = dead ? 'rgba(255,120,120,.85)' : rgba(color, 0.95);
-    setLs(g, '0.22em');
+    setLs(g, '0.14em');
     const gl = dead ? 'GARRISON FALLEN' : `GARRISON ${Math.max(0, hpNow)}`, gw = g.measureText(gl).width;
+    g.lineWidth = 3; g.strokeStyle = 'rgba(6,5,4,.85)'; g.lineJoin = 'round'; g.strokeText(gl, x, by + 6);
+    g.fillStyle = dead ? SEMANTIC.bad : color;
     g.fillText(gl, x, by + 6);
     nameBoxes.push({ l: x - gw / 2 - 3, r: x + gw / 2 + 3, t: by + 4, b: by + 8 + 15 * U });
     setLs(g, '0px');
@@ -1058,7 +1107,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
           const ix = B[0] + (sh.off * sh.to.s * 0.3), iy = B[1] + (sh.off * 0.6 * sh.to.s * 0.3);
           if (shielded) {
             const tp2 = pose(sh.to, tt);
-            shieldHit(g, tp2.x, tp2.y, shipLen(sh.to) * 0.62, Math.atan2(A[1] - tp2.y, A[0] - tp2.x), [130, 210, 255], 1 - ip);
+            shieldHit(g, tp2.x, tp2.y, shipLen(sh.to) * 0.62, Math.atan2(A[1] - tp2.y, A[0] - tp2.x), [255, 214, 160], 1 - ip);
           }
           const rr = (sh.to.garrison ? sh.to.s * 0.22 : Math.max(5, sh.to.s * 0.55)) + sh.rec.dmg * 0.5;
           if (sh.to.garrison) {
@@ -1157,15 +1206,23 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     // status callouts (DESTROYED / WEAPONS OFFLINE / SHIELDS DOWN...) never overprint: each takes the first free
     // row above its ship, stepping up until it clears the ones already placed this frame
     // (ship names and the HUD's labels are taken already)
-    const placed: Box[] = nameBoxes.slice();
+    const toWorld = (b: Box): Box => ({ l: (b.l - camX) / camK, r: (b.r - camX) / camK, t: (b.t - camY) / camK, b: (b.b - camY) / camK });
+    const placed: Box[] = [...nameBoxes, toWorld(rosterBox()), ...sides.map(sd => toWorld(labelBox(sd)))];
     const slot = (x: number, y: number, w: number, h: number, optional = false): number => {
-      for (const i of [0, 1, 2, 3, 4, 5, 6, 7, -1, -2, -3, -4]) {
-        const yy = clamp(y - i * (h + 3), (h / 2 + 4 - camY) / camK, (H - h / 2 - 4 - camY) / camK);
-        const box = { l: x - w / 2 - 4, r: x + w / 2 + 4, t: yy - h / 2, b: yy + h / 2 };
-        if (!placed.some(p => hit(box, p))) { placed.push(box); return yy; }
+      sx = x;
+      // first straight up (or down) from the ship; on a short stage, then sideways as well
+      for (const dx of optional ? [0] : [0, -0.7, 0.7, -1.4, 1.4]) {
+        const xx = dx ? cx(x + dx * (w + 8 / camK), w) : x;
+        for (const i of dx ? [0, 1, 2, 3, -1, -2, -3] : [0, 1, 2, 3, 4, 5, 6, 7, -1, -2, -3, -4]) {
+          const yy = clamp(y - i * (h + 3), (h / 2 + 4 - camY) / camK, (H - h / 2 - 4 - camY) / camK);
+          const box = { l: xx - w / 2 - 4, r: xx + w / 2 + 4, t: yy - h / 2, b: yy + h / 2 };
+          if (!placed.some(p => hit(box, p))) { placed.push(box); sx = xx; return yy; }
+        }
       }
       return optional ? NaN : y;
     };
+    /** the x the last slot() chose (a status callout may step sideways to stay clear) */
+    let sx = 0;
     /** a callout's x: centred on its ship, but never past the stage's edge */
     const cx = (x: number, w: number) => clamp(x, (w / 2 + 6 - camX) / camK, (W - w / 2 - 6 - camX) / camK);
     for (const sh of shots) {
@@ -1176,14 +1233,14 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       if (e < 1.1) {
         const k = e / 1.1;
         g.globalAlpha = 1 - k * k;
-        g.font = F(700, 14 + Math.min(6, sh.rec.dmg * 0.6));
-        g.lineWidth = 3; g.strokeStyle = 'rgba(8,2,20,.85)';
+        g.font = `800 ${(Math.max(13, 14 + Math.min(6, sh.rec.dmg * 0.6)) * U).toFixed(2)}px ${UIFONT}`;
+        g.lineWidth = 3; g.strokeStyle = 'rgba(6,5,4,.85)';
         const dw = g.measureText(`-${sh.rec.dmg}`).width;
         // a damage number with no free spot is dropped (the hp bar shows the hit); a status callout always shows
         const x = cx(tp.x + sh.off * 10, dw), y = slot(x, top - k * 22, dw, (14 + Math.min(6, sh.rec.dmg * 0.6)) * U, true);
         if (!Number.isNaN(y)) {
           g.strokeText(`-${sh.rec.dmg}`, x, y);
-          g.fillStyle = sh.rec.kill ? '#ff6b6b' : '#fff';
+          g.fillStyle = sh.rec.kill ? SEMANTIC.bad : '#f3ead6';
           g.fillText(`-${sh.rec.dmg}`, x, y);
         }
       }
@@ -1195,12 +1252,12 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         g.font = `700 ${(Math.max(13, 13 * pop) * U).toFixed(2)}px ${FONT}`;
         setLs(g, '0.2em');
         const tw = g.measureText(txt).width, x = cx(tp.x, tw);
-        const y = slot(x, top - 18 - k * 14, tw, 15 * pop * U);
-        g.lineWidth = 3; g.strokeStyle = 'rgba(8,2,20,.9)';
-        g.strokeText(txt, x, y);
-        g.shadowColor = sh.rec.kill ? '#ff3355' : '#ff9f1a'; g.shadowBlur = 10;
-        g.fillStyle = sh.rec.kill ? '#ff8095' : '#ffc061';
-        g.fillText(txt, x, y);
+        const y = slot(x, top - 18 - k * 14, tw, 15 * pop * U), x2 = sx;
+        g.lineWidth = 3; g.strokeStyle = 'rgba(6,5,4,.9)';
+        g.strokeText(txt, x2, y);
+        // text never glows (only light sources do): engraved caps with an ink halo
+        g.fillStyle = sh.rec.kill ? SEMANTIC.bad : SEMANTIC.warn;
+        g.fillText(txt, x2, y);
         g.shadowBlur = 0;
         setLs(g, '0px');
       }
@@ -1223,10 +1280,9 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         g.globalAlpha = 1 - clamp((e - 1.1) / 0.5);
         g.font = F(700, 13); setLs(g, '0.22em');
         const tw = g.measureText(txt).width, x = cx(tp.x, tw);
-        const y = slot(x, tp.y - Math.max(u.s, 8) - 30 * U - e * 8, tw, 16 * U);
-        g.lineWidth = 3; g.strokeStyle = 'rgba(8,2,20,.9)'; g.strokeText(txt, x, y);
-        g.shadowColor = sh.rec.first ? '#ffb340' : '#b070ff'; g.shadowBlur = 10;
-        g.fillStyle = sh.rec.first ? '#ffe08a' : '#dcc0ff'; g.fillText(txt, x, y);
+        const y = slot(x, tp.y - Math.max(u.s, 8) - 30 * U - e * 8, tw, 16 * U), x2 = sx;
+        g.lineWidth = 3; g.strokeStyle = 'rgba(6,5,4,.9)'; g.strokeText(txt, x2, y);
+        g.fillStyle = sh.rec.first ? SEMANTIC.fate : '#ab95d8'; g.fillText(txt, x2, y);
         g.shadowBlur = 0; setLs(g, '0px');
       }
       g.globalAlpha = 1;
@@ -1238,8 +1294,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       if (e < 0 || e > 2.2) continue;
       g.globalAlpha = 1 - clamp((e - 1.6) / 0.6);
       g.font = F(700, 15); setLs(g, '0.3em');
-      g.fillStyle = '#ff8095'; g.shadowColor = '#ff3355'; g.shadowBlur = 12;
-      { const tw = g.measureText('GARRISON FALLS').width, x = cx(u.hx, tw); g.fillText('GARRISON FALLS', x, slot(x, u.hy - u.s * 1.7 - 8, tw, 18 * U)); }
+      g.fillStyle = SEMANTIC.bad; g.lineWidth = 3; g.strokeStyle = 'rgba(6,5,4,.9)';
+      { const tw = g.measureText('GARRISON FALLS').width, x = cx(u.hx, tw); const yy = slot(x, u.hy - u.s * 1.7 - 8, tw, 18 * U); g.strokeText('GARRISON FALLS', sx, yy); g.fillText('GARRISON FALLS', sx, yy); }
       g.shadowBlur = 0; setLs(g, '0px');
     }
     // retreat callouts
@@ -1251,9 +1307,9 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       if (!sd || !fu) continue;
       g.globalAlpha = 1 - clamp((e - 1.2) / 0.6);
       g.font = F(700, 13.5); setLs(g, '0.28em');
-      g.fillStyle = '#e8e0ff'; g.shadowColor = sd.color; g.shadowBlur = 10;
+      g.fillStyle = sd.color; g.lineWidth = 3; g.strokeStyle = 'rgba(6,5,4,.9)';
       const fn = (fleetName.get(r.fleet)?.name ?? 'Fleet').toUpperCase();
-      { const txt = `${fn} RETREATS`, tw = g.measureText(txt).width, rx = cx(fu.hx, tw); g.fillText(txt, rx, slot(rx, clamp(fu.hy - 40, 60, H - 60), tw, 17 * U)); }
+      { const txt = `${fn} RETREATS`, tw = g.measureText(txt).width, rx = cx(fu.hx, tw); const yy = slot(rx, clamp(fu.hy - 40, 60, H - 60), tw, 17 * U); g.strokeText(txt, sx, yy); g.fillText(txt, sx, yy); }
       g.shadowBlur = 0; setLs(g, '0px');
     }
     g.restore();
@@ -1272,12 +1328,17 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         const y = bannerY();
         g.font = bannerFont();
         setLs(g, '0.5em');
-        g.fillStyle = '#f4ead2'; g.shadowColor = 'rgba(214,166,80,0.9)'; g.shadowBlur = 14;
+        g.lineWidth = 4; g.strokeStyle = 'rgba(6,5,4,.85)'; g.lineJoin = 'round';
+        g.strokeText(`ROUND ${ri + 1}`, W / 2 + 6, y);
+        g.fillStyle = '#efd59a';
         g.fillText(`ROUND ${ri + 1}`, W / 2 + 6, y);
         g.shadowBlur = 0; setLs(g, '0px');
         const lw = 60 + 60 * clamp(e / 0.4);
-        g.strokeStyle = 'rgba(214,178,110,.7)'; g.lineWidth = 1;
-        g.beginPath(); g.moveTo(W / 2 - lw - 70, y); g.lineTo(W / 2 - 80, y); g.moveTo(W / 2 + 80, y); g.lineTo(W / 2 + lw + 70, y); g.stroke();
+        // engraved rules either side: a dark groove over a brass lip
+        for (const [col, dy] of [['rgba(0,0,0,.7)', 0], ['rgba(220,180,108,.55)', 1]] as [string, number][]) {
+          g.strokeStyle = col; g.lineWidth = 1;
+          g.beginPath(); g.moveTo(W / 2 - lw - 70, y + dy); g.lineTo(W / 2 - 80, y + dy); g.moveTo(W / 2 + 80, y + dy); g.lineTo(W / 2 + lw + 70, y + dy); g.stroke();
+        }
         g.restore();
       }
     }
@@ -1286,9 +1347,12 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     g.textAlign = 'center'; g.textBaseline = 'middle';
     for (const sd of sides) {
       g.font = F(600, 13); setLs(g, '0.24em');
-      g.fillStyle = sd.color; g.shadowColor = sd.color; g.shadowBlur = 8;
       g.globalAlpha = clamp((tt - 0.4) / 0.6) * 0.95;
       g.textAlign = sd.label.align;
+      // Cinzel caps in the owner's lit enamel with an ink halo (ART-BIBLE §7), never a glow
+      g.lineWidth = 3.5; g.strokeStyle = 'rgba(6,5,4,.85)'; g.lineJoin = 'round';
+      g.strokeText(sd.label.text, sd.label.x, sd.label.y);
+      g.fillStyle = sd.color;
       g.fillText(sd.label.text, sd.label.x, sd.label.y);
       g.shadowBlur = 0;
     }
@@ -1307,16 +1371,20 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
         if (!gone) hp += h;
         if (!u.garrison) { total++; if (h > 0 && !gone) alive++; }
       }
-      g.fillStyle = sd.color;
-      g.beginPath(); g.moveTo(12 * U, y - 3 * U); g.lineTo(15 * U, y); g.lineTo(12 * U, y + 3 * U); g.lineTo(9 * U, y); g.closePath(); g.fill();
-      g.font = F(600, 13); setLs(g, '0.16em');
-      g.fillStyle = 'rgba(230,220,255,.85)';
+      // the house: a small enamel coin in a brass bezel
+      { const E = enamel(sd.color), cr = 4.5 * U, gr = g.createRadialGradient(12 * U - cr * 0.3, y - cr * 0.35, 0, 12 * U, y, cr);
+        gr.addColorStop(0, E.hi); gr.addColorStop(0.6, E.base); gr.addColorStop(1, E.lo);
+        g.beginPath(); g.arc(12 * U, y, cr + 1.2, 0, Math.PI * 2); g.fillStyle = '#a87a35'; g.fill();
+        g.beginPath(); g.arc(12 * U, y, cr, 0, Math.PI * 2); g.fillStyle = gr; g.fill(); }
+      g.font = F(700, 13); setLs(g, '0.08em');
+      g.lineWidth = 3; g.strokeStyle = 'rgba(6,5,4,.8)'; g.lineJoin = 'round';
+      g.fillStyle = 'rgba(236,227,207,.92)';
       let label = sd.name.toUpperCase();
       const lw = Math.min(230 * U, W * 0.44), lx = 20 * U;
       while (label.length > 3 && g.measureText(label).width > lw - 34 * U) label = label.slice(0, -2).trimEnd() + '…';
-      g.fillText(label, lx, y);
+      g.strokeText(label, lx, y); g.fillText(label, lx, y);
       setLs(g, '0px');
-      g.fillStyle = 'rgba(190,175,230,.8)';
+      g.fillStyle = 'rgba(196,184,156,.9)';
       g.textAlign = 'right';
       g.fillText(total ? `${alive}/${total}` : '', lx + lw, y);
       g.textAlign = 'left';
@@ -1396,13 +1464,16 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     let bx = ps.x + 18, by = ps.y - h / 2;
     if (bx + w > W - 6) bx = ps.x - 18 - w;
     by = clamp(by, 6, H - h - 6);
-    g.fillStyle = 'rgba(10,4,24,.92)'; g.strokeStyle = rgba(color, 0.7);
-    g.fillRect(bx, by, w, h); g.strokeRect(bx + 0.5, by + 0.5, w - 1, h - 1);
-    g.fillStyle = color; g.fillRect(bx, by, 2, h);
+    // the tooltip is a vellum slip with a cast shadow (ART-BIBLE §5), the house as an enamel edge
+    g.save(); g.shadowColor = 'rgba(0,0,0,.6)'; g.shadowBlur = 8; g.shadowOffsetX = 2; g.shadowOffsetY = 4;
+    const vg = g.createRadialGradient(bx + w * 0.3, by + h * 0.2, 0, bx + w * 0.3, by + h * 0.2, Math.max(w, h) * 1.2);
+    vg.addColorStop(0, '#f3e8cc'); vg.addColorStop(0.6, '#e4d3ab'); vg.addColorStop(1, '#cdb588');
+    g.fillStyle = vg; g.fillRect(bx, by, w, h); g.restore();
+    g.fillStyle = enamel(color).base; g.fillRect(bx, by, 3, h);
     g.textAlign = 'left'; g.textBaseline = 'top';
     lines.forEach((l, i) => {
-      g.fillStyle = i === 0 ? color : i > 3 || (i === 3 && !(u.kills || u.dmg)) ? '#ffb347' : '#d6cdf2';
-      g.font = F(i === 0 ? 700 : 500, 13);
+      g.fillStyle = i === 0 ? '#2a1d10' : i > 3 || (i === 3 && !(u.kills || u.dmg)) ? '#8e1f1f' : '#4a3820';
+      g.font = i === 0 ? F(700, 13) : `${i === 1 ? 700 : 500} ${(13 * U).toFixed(2)}px ${UIFONT}`;
       g.fillText(l, bx + 10 * U, by + 6 * U + i * lh);
     });
     g.restore();
@@ -1421,10 +1492,18 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   }
 
   let camK = 1, camX = 0, camY = 0;
+  let slowFired = false, slowUntil = 0, slowFrom = 0;
   function camera(tt: number) {
     if (reduced) { camK = 1; camX = 0; camY = 0; return; }
     let k = 1 + 0.045 * clamp((tt - INTRO) / Math.max(1, BATTLE_END - INTRO));
     let fx = W / 2, fy = H / 2;
+    // the push-in on the decisive volley: eases in over the slow-mo and back out over 500 ms after it
+    if (slowFired && decisiveTo) {
+      const now = performance.now();
+      const inK = clamp((now - slowFrom) / 260), outK = 1 - clamp((now - slowUntil) / 500);
+      const w = (1 - (1 - inK) ** 3) * (now < slowUntil ? 1 : outK * outK);
+      if (w > 0) { k += 0.09 * w; fx = lerp(fx, decisiveTo.hx, 0.45 * w); fy = lerp(fy, decisiveTo.hy, 0.45 * w); }
+    }
     for (const u of units.values()) {
       if (u.deathT === Infinity) continue;
       const e = tt - u.deathT;
@@ -1449,6 +1528,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     g.clearRect(0, 0, W, H);
     const [sx, sy] = shake(tt);
     if (bg) g.drawImage(bg, sx * 0.3 - 2, sy * 0.3 - 2, W + 4, H + 4);
+    // on the GL table: a breath of felt over the open sky so the pieces read first (the board has its fog for this)
+    else if (table) { g.fillStyle = 'rgba(7,8,12,0.34)'; g.fillRect(0, 0, W, H); }
     // camera: a slow push-in over the fight, a small punch toward each kill
     camera(tt);
     g.save();
@@ -1467,9 +1548,14 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     g.restore();
     drawHud(tt);
     drawHover(tt);
-    // vignette
+    if (table) {
+      // the same table, closer: the board's sky pushed in with the battle's camera; the lamp, motes and grain over it
+      if (pacer.tick(playing)) table.frame({ cam: { x: (report.region % 13) * 90 - camX * 0.4, y: (report.id % 7) * 60 - camY * 0.4, z: 1.1 * camK }, t: performance.now() / 1000, stars: [], bloomSrc: canvas }, W, H);
+      return;
+    }
+    // vignette (the 2D table)
     const vg = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
-    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(6,4,2,0.6)');
     g.fillStyle = vg; g.fillRect(0, 0, W, H);
   }
 
@@ -1517,7 +1603,14 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     last = now;
     if (playing) {
       const prevT = T;
-      T += dt * speed;
+      // the decisive volley: 600 ms (real time) at 0.35x, starting just before its impact; only when the playhead
+      // runs into it (never on a seek), once per battle. Time only slows: no number, hit or outcome changes.
+      if (!slowFired && decisiveT < Infinity && prevT < decisiveT - 0.12 && prevT + dt * speed >= decisiveT - 0.12) {
+        slowFired = true; slowUntil = now + 600; slowFrom = now;
+        audio.slowMo({ dur: 0.6 });
+      }
+      const slow = now < slowUntil ? 0.35 : 1;
+      T += dt * speed * slow;
       if (T >= END) { T = END; playing = false; }
       // sound follows the playhead while it plays; seeking (scrubber, skip, next round) stays silent
       shotSounds(prevT, T);
@@ -1601,6 +1694,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     if (overlay.isConnected) audio.ui('close');
     cancelAnimationFrame(raf);
     ro.disconnect();
+    // hand the table back: the map mounts it again on its next frame
+    releaseTable(canvas);
     window.removeEventListener('keydown', onKey, true);
     // fade out (renamed so nothing treats it as an open viewer any more), unless it was already taken out of the page
     if (reduced || !overlay.isConnected) { overlay.remove(); return; }
@@ -1609,6 +1704,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   }
 
   closeOpen = close;
+  // test hook: the decisive volley (impact time) and whether its slow-mo has played
+  (window as unknown as { __bvDecisive?: () => unknown }).__bvDecisive = () => ({ at: Number.isFinite(decisiveT) ? decisiveT : null, fired: slowFired, kind: decisive?.kind ?? null });
   // warm the battle sounds (cached after the first battle; the opening INTRO covers the decode)
   void audio.preload(['bt_laser', 'bt_laser_heavy', 'bt_cannon', 'bt_explosion', 'bt_shield', 'bt_destroyed']);
   audio.ui('open');

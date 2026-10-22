@@ -12,6 +12,9 @@ import { drawBase, drawStand, formation, BASE_SQUASH } from '../art/minis.ts';
 import { drawBodyShadow, artGeneration } from '../art/planets.ts';
 import { drawStarNode, starKindOf, STAR_NODE, drawOrbitLines, drawSpecks, drawTwinkle, drawPulsarBeams, drawAccretionShimmer } from '../art/stars.ts';
 import { matBackdrop, lampOverlay, weaveTile, nebulaPrint, starfield } from '../art/mat.ts';
+import { tableFor, onTableChange, Pacer, type CoronaStar } from '../art/gl/table.ts';
+import type { ArtStage } from '../art/gl/stage.ts';
+import { enamel as enamelOf, retint, HATCH, CORONA, SEMANTIC, LAMP, type HouseKey } from '../art/bible.ts';
 import { drawGlow, beam, tracer, fireball, smoke, stamp, shieldHit } from '../art/fx.ts';
 import { enamel } from '../art/plates.ts';
 import { drawStructure, shieldDome, rockSprite, buoySprite, type Structure } from '../art/structures.ts';
@@ -95,10 +98,12 @@ const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
 const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 const easeOutBack = (t: number) => { const c = 1.9; return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2; };
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
-const GOLD = '#ffd86b';
-const WARDEN = '#e7b6ff';
-const STONE = '#e6e0fa';
+const GOLD = SEMANTIC.fate;
+const WARDEN = '#ab95d8';
+const STONE = '#ece3cf';
 const FADE_MS = 150;
+/** GL corona strength by star kind (>0.55 adds the faint lens cross). */
+const CORONA_AMP: Record<string, number> = { throne: 1, blue: 0.8, white: 0.7, yellow: 0.62, binary: 0.7, red: 0.5, pulsar: 0.72, blackhole: 0.32 };
 
 export interface DrawInput {
   state: GameState;
@@ -154,6 +159,14 @@ export class MapRenderer {
   /** battle markers drawn this frame (world centre, radius in design px), for the tooltip */
   private battleHits: { rid: number; x: number; y: number; r: number }[] = [];
   private hatch: { cut: CanvasPattern | null; dark: CanvasPattern | null } = { cut: null, dark: null };
+  /** the GL table under and over this canvas (art/gl/table.ts), or null: the 2D mat painters draw the table */
+  private stage: ArtStage | null = null;
+  private pacer = new Pacer();
+  private stageCam = '';
+  /** star coronas for the GL light pass, collected while the stars are drawn (screen px) */
+  private coronas: CoronaStar[] = [];
+  /** engraved hatching per house (pattern cue for colour-blind players), screen-constant */
+  private houseHatch = new Map<string, CanvasPattern | null>();
 
   // ---- semantic zoom
   private _tier: Tier | null = null;
@@ -217,11 +230,17 @@ export class MapRenderer {
     canvas.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') this.mouse = null; }, { passive: true });
     // labels are cached in the static layer: redraw once web fonts arrive
     document.fonts?.ready.then(() => this.invalidate()).catch(() => { /* */ });
+    // the GL table came, went, or lost its context: the cached layer bakes the 2D table in or out
+    this.offTable = onTableChange(() => this.invalidate());
     // sprites painted in idle time (stars, planets) are drawn in the per-frame pass, which picks them up on the next
     // frame: the cached layer holds no such art, so a bake landing must not force a rebuild (it did, every frame,
     // while zooming)
     this.bindTip();
   }
+
+  private offTable: () => void;
+  /** Stop listening to the shared table (the stage itself is shared and moves to the next board). */
+  dispose() { this.offTable(); }
 
   resize() {
     const r = this.canvas.getBoundingClientRect();
@@ -461,9 +480,10 @@ export class MapRenderer {
     this.trackOwners(I);
     this.rememberGarrisons(I);
     const lens = I.lens ?? 'political';
+    this.stage = tableFor(this.canvas, st.seed);
     // hover & selection live in the dynamic pass (faded), so they don't force a rebuild of the static layer
     const base = [this.objId(st), this.staticSig(I), this.objId(I.visible), I.visible.size, I.you, I.owners.join(','), W, H, this.dpr, this.ui,
-      I.cutOff ? `${this.objId(I.cutOff)}:${I.cutOff.size}` : 0, lens, I.peek ? 1 : 0, this.coarse ? 1 : 0].join('|');
+      I.cutOff ? `${this.objId(I.cutOff)}:${I.cutOff.size}` : 0, lens, I.peek ? 1 : 0, this.coarse ? 1 : 0, this.stage ? 1 : 0].join('|');
     const cam = this.cam;
     if (!this.lastCam || cam.x !== this.lastCam.x || cam.y !== this.lastCam.y || cam.z !== this.lastCam.z) { this.camMovedAt = now; this.lastCam = { ...cam }; }
     if (!this.layer || this.layer.width !== W || this.layer.height !== H) {
@@ -476,7 +496,17 @@ export class MapRenderer {
     // while the camera is moving (drag, pinch, wheel, flights) the cached layer is blitted with the camera transform
     // instead of being redrawn every frame; it is rebuilt crisp once the camera settles (cheap frames on phones)
     const moving = !camSame && (now - this.camMovedAt < 140 || !!this.camAnim);
-    const fast = base === this.layerKey && moving && !!lc && !!this.bgCanvas && Math.abs(Math.log(cam.z / lc.z)) < 1.2;
+    // the cached layer may stand in for a redraw only while it still covers the whole view at the new camera: a flight
+    // that zooms out or pans far would otherwise show it as a rectangle with the empty table around it
+    // (a drag leaves a thin strip uncovered at one edge, which is fine for the few frames until the camera settles;
+    // a zoom-out shrinks the whole layer into a rectangle, which is not)
+    const covers = (c: Cam | null, slack = 0.22) => {
+      if (!c) return false;
+      const k = cam.z / c.z, ox = (this.w / 2) * (1 - k) + (c.x - cam.x) * cam.z, oy = (this.h / 2) * (1 - k) + (c.y - cam.y) * cam.z;
+      const sx = this.w * slack, sy = this.h * slack;
+      return k >= 0.985 && ox <= sx && oy <= sy && ox + this.w * k >= this.w - sx && oy + this.h * k >= this.h - sy;
+    };
+    const fast = base === this.layerKey && moving && !!lc && (!!this.bgCanvas || !!this.stage) && Math.abs(Math.log(cam.z / lc.z)) < 1.2 && covers(lc);
     if (!fast && (base !== this.layerKey || !camSame)) {
       // tier switch: keep a snapshot of the old layer and crossfade it out (text never scales; the content swaps)
       if (this.layerKey && lc && !reducedMotion() && (prevTier !== this._tier || Math.abs(Math.log(cam.z / lc.z)) > 0.02)) {
@@ -496,7 +526,12 @@ export class MapRenderer {
       this.layerCam = { ...cam };
     }
     const { ctx } = this;
-    if (fast && lc) {
+    if (fast && lc && this.stage) {
+      // the GL table draws the sky under this canvas: the board is transparent around its inlays
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      this.blitAt(this.layer, lc, 1);
+    } else if (fast && lc) {
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       ctx.drawImage(this.bgCanvas!, 0, 0, this.w, this.h);
       // stars under the strip the shifted layer uncovers at the edge
@@ -508,15 +543,20 @@ export class MapRenderer {
       this.blitAt(this.layer, lc, 1);
     } else {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
+      if (this.stage) ctx.clearRect(0, 0, W, H);
       ctx.drawImage(this.layer, 0, 0);
     }
     if (this.fade) {
       const t = (now - this.fade.t0) / FADE_MS;
-      if (t >= 1) this.fade = null;
+      // the snapshot was rendered at its own camera: once a flight pans or zooms out past it, it no longer covers
+      // the screen and its edges would show as a rectangle (seen during reveal push-ins): drop the crossfade then
+      if (t >= 1 || !covers(this.fade.cam, 0)) this.fade = null;
       else { ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0); this.blitAt(this.fade.c, this.fade.cam, 1 - easeOutCubic(clamp01(t))); }
     }
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    this.drawTwinkles(now);
+    // the GL coronas twinkle the stars; the 2D table keeps its few live twinkles
+    if (!this.stage) this.drawTwinkles(now);
+    this.coronas = [];
     ctx.save();
     ctx.translate(this.w / 2, this.h / 2);
     ctx.scale(this.cam.z, this.cam.z);
@@ -540,6 +580,13 @@ export class MapRenderer {
     this.drawDynamic(I);
     ctx.restore();
     this.updateTip(I);
+    if (this.stage) {
+      // the light: drawn every frame while the camera or the board moves, at a gentler pace on a still board
+      const ck = `${cam.x},${cam.y},${cam.z},${this.w},${this.h}`;
+      const busy = ck !== this.stageCam || moving || !!this.fade || this.particles.length > 0 || I.fx.length > 0 || !!I.drag;
+      this.stageCam = ck;
+      if (this.pacer.tick(busy)) this.stage.frame({ cam, t: now / 1000, stars: this.coronas, bloomSrc: this.canvas }, this.w, this.h);
+    }
   }
 
   /** Draw a cached full-canvas layer rendered at camera `lc` under the current camera (dpr transform already set). */
@@ -582,8 +629,10 @@ export class MapRenderer {
     return h;
   }
 
-  private colorOf(st: GameState, o: number | null | undefined) { return o === null || o === undefined || o < 0 ? (o === -1 ? WARDEN : NEUTRAL_COLOR) : st.players[o]?.color ?? NEUTRAL_COLOR; }
-  private regionColor(st: GameState, o: number | null | undefined) { return o === null || o === undefined || o < 0 ? NEUTRAL_COLOR : st.players[o]?.color ?? NEUTRAL_COLOR; }
+  /** An owner's colour on the board: the house enamel's lit tone (`hi`), whatever the state carries (old saves and
+   *  servers still hold the retired neons). Ships, bases and counters take the enamel `base` from it themselves. */
+  private colorOf(st: GameState, o: number | null | undefined) { return enamelOf(o === null || o === undefined || o < 0 ? (o === -1 ? WARDEN : NEUTRAL_COLOR) : st.players[o]?.color ?? NEUTRAL_COLOR).hi; }
+  private regionColor(st: GameState, o: number | null | undefined) { return enamelOf(o === null || o === undefined || o < 0 ? NEUTRAL_COLOR : st.players[o]?.color ?? NEUTRAL_COLOR).hi; }
 
   /** Remember garrisons while visible, so fogged banners can say "~N". */
   private rememberGarrisons(I: DrawInput) {
@@ -633,16 +682,19 @@ export class MapRenderer {
     const lens = I.lens ?? 'political';
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     // ---------------------------------------------------------------- background (pre-rendered gradient + one star-pattern pass)
-    if (!this.stars || !this.bgCanvas) {
+    const gl = !!this.stage;
+    if (!this.hatch.cut) this.hatch = { cut: ctx.createPattern(hatchTile('rgba(239,213,154,0.5)', 8, 1.6), 'repeat'), dark: ctx.createPattern(hatchTile('rgba(0,0,0,0.55)', 6, 2), 'repeat') };
+    if (!gl && (!this.stars || !this.bgCanvas)) {
       this.stars = starfield(this.w, this.h, st.seed);
       this.starPattern = ctx.createPattern(this.stars, 'repeat');
       this.bgCanvas = matBackdrop(this.w, this.h);
       this.lamp = lampOverlay(this.w, this.h);
       this.weave = ctx.createPattern(weaveTile(), 'repeat');
-      this.hatch = { cut: ctx.createPattern(hatchTile('rgba(255,255,255,0.55)', 8, 1.6), 'repeat'), dark: ctx.createPattern(hatchTile('rgba(0,0,0,0.55)', 6, 2), 'repeat') };
     }
-    ctx.drawImage(this.bgCanvas, 0, 0, this.w, this.h);
-    if (this.starPattern) {
+    // the GL table paints sky, felt, lamp and vignette around this canvas: the layer stays transparent
+    if (gl) ctx.clearRect(0, 0, this.w, this.h);
+    else if (this.bgCanvas) ctx.drawImage(this.bgCanvas, 0, 0, this.w, this.h);
+    if (!gl && this.starPattern) {
       const par = { x: -this.cam.x * this.cam.z * 0.05, y: -this.cam.y * this.cam.z * 0.05 };
       ctx.save();
       ctx.globalAlpha = 0.8;
@@ -663,9 +715,9 @@ export class MapRenderer {
     this.hatch.cut?.setTransform(pm); this.hatch.dark?.setTransform(pm);
 
     // deep-space nebula haze: soft, so a low-resolution bake scaled up looks the same and costs one blit
-    if (this.haze) ctx.drawImage(this.haze.c, this.haze.x, this.haze.y, this.haze.w, this.haze.h);
+    if (!gl && this.haze) ctx.drawImage(this.haze.c, this.haze.x, this.haze.y, this.haze.w, this.haze.h);
     // the cloth's weave, anchored to the mat (screen-constant scale)
-    if (this.weave) {
+    if (!gl && this.weave) {
       ctx.save();
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       const ox = -this.cam.x * this.cam.z, oy = -this.cam.y * this.cam.z;
@@ -677,23 +729,23 @@ export class MapRenderer {
 
     const political = lens === 'political';
     const W = this.zw;
-    // bold, flat owner colour (a board game's territories): strongest zoomed out, still clear up close
-    const fillA = W.s * 0.5 + W.o * 0.34 + W.d * 0.26;
     const { conn, sup } = this.supplySets(I);
+    // territories: cloisonne enamel inlays (wash, engraved hatching, a bevel lit from the lamp); the wires come later
+    const terr = this.territories(I, political);
+    for (const t of terr) this.inlay(t, political);
     // ---------------------------------------------------------------- region fills + terrain textures
     for (const r of st.regions) {
       if (isLane(r) || r.poly.length < 3) continue;
       const owner = I.owners[r.id];
-      const c = this.regionColor(st, owner);
       path(ctx, r.poly);
-      if (owner === null || owner === undefined) ctx.fillStyle = 'rgba(40,30,70,0.26)';
-      else ctx.fillStyle = political ? hexA(c, fillA) : hexA(desat(c, 0.8), 0.12);
-      ctx.fill();
+      // unclaimed space is the printed sky itself (a breath of ink on the 2D table)
+      if ((owner === null || owner === undefined) && !gl) { ctx.fillStyle = 'rgba(7,8,12,0.18)'; ctx.fill(); }
       // terrain by texture only: void is black and starless, a nebula a soft haze, an asteroid field speckle
-      if (r.kind === 'void') { ctx.fillStyle = 'rgba(2,1,6,0.86)'; ctx.fill(); }
+      if (r.kind === 'void') { ctx.fillStyle = 'rgba(5,6,10,0.86)'; ctx.fill(); }
       if (r.feature === 'nebula') {
+        // pigment, not light: an umber and verdigris haze (no violet)
         const g = ctx.createRadialGradient(r.centroid.x, r.centroid.y, 0, r.centroid.x, r.centroid.y, 260);
-        g.addColorStop(0, 'rgba(190,90,255,0.24)'); g.addColorStop(1, 'rgba(120,40,200,0.02)');
+        g.addColorStop(0, 'rgba(106,63,38,0.30)'); g.addColorStop(0.6, 'rgba(28,72,72,0.12)'); g.addColorStop(1, 'rgba(28,72,72,0.0)');
         ctx.fillStyle = g; ctx.fill();
       }
       if (r.feature === 'asteroids') {
@@ -715,36 +767,14 @@ export class MapRenderer {
         if (d || v) { path(ctx, r.poly); ctx.fillStyle = `rgba(255,200,110,${0.05 + 0.05 * d + 0.04 * v})`; ctx.fill(); }
       }
       if (lens === 'supply' && sup && r.kind !== 'void' && !sup.has(r.id)) { path(ctx, r.poly); ctx.fillStyle = 'rgba(0,0,0,0.38)'; ctx.fill(); if (this.hatch.dark) { ctx.fillStyle = this.hatch.dark; ctx.fill(); } }
-      if (I.you !== null && !I.visible.has(r.id)) { path(ctx, r.poly); ctx.fillStyle = 'rgba(3,2,8,0.42)'; ctx.fill(); }
+      if (I.you !== null && !I.visible.has(r.id)) { path(ctx, r.poly); ctx.fillStyle = 'rgba(7,8,12,0.42)'; ctx.fill(); }
     }
 
-    // ---------------------------------------------------------------- borders: thin region seams, thick empire edges
+    // ---------------------------------------------------------------- borders: engraved region seams, cloisonne wires
     ctx.lineJoin = 'round';
-    ctx.strokeStyle = 'rgba(170,150,230,0.10)'; ctx.lineWidth = S;
+    ctx.strokeStyle = 'rgba(220,180,108,0.07)'; ctx.lineWidth = S;
     for (const r of st.regions) { if (r.poly.length > 2) { path(ctx, r.poly); ctx.stroke(); } }
-    const edges = regionEdges(st);
-    const bw = (W.s * 4.6 + W.o * 3.4 + W.d * 3) * (political ? 1 : 0.6);
-    // one clip (the owner's territory) and one stroke (its outer edges) per owner: the band sits inside the border
-    for (const pl of st.players) {
-      const mine = st.regions.filter(r => I.owners[r.id] === pl.id && r.poly.length > 2);
-      if (!mine.length) continue;
-      const c = this.regionColor(st, pl.id);
-      ctx.save();
-      ctx.beginPath();
-      for (const r of mine) { r.poly.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); ctx.closePath(); }
-      ctx.clip();
-      ctx.beginPath();
-      for (const r of mine) for (const e of edges[r.id]) {
-        if (e.other >= 0 && I.owners[e.other] === pl.id) continue;
-        ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y);
-      }
-      // painted border: a soft wash, a solid brush band, then a fine dark ink line on the edge itself
-      ctx.lineCap = 'round';
-      ctx.strokeStyle = hexA(c, political ? 0.16 : 0.08); ctx.lineWidth = bw * 6 * S; ctx.stroke();
-      ctx.strokeStyle = political ? hexA(c, 0.85) : hexA(c, 0.45); ctx.lineWidth = bw * 2 * S; ctx.stroke();
-      ctx.restore();
-      ctx.strokeStyle = 'rgba(2,2,8,0.7)'; ctx.lineWidth = 1.3 * S; ctx.stroke();
-    }
+    for (const t of terr) this.wires(t, political);
 
     // ---------------------------------------------------------------- hyperlanes: a quiet etched thread on the mat
     {
@@ -754,9 +784,12 @@ export class MapRenderer {
       for (const L of hyperlanes(st)) { L.pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); }
       // lanes touching a hovered/selected star, your selected fleet's reach and routes are lit in the dynamic pass
       // (drawLaneFocus); waypoint buoys only show there, or faintly up close
+      // an engraved groove: a dark under-stroke and a thin brass inlay set toward the lamp
       const lw = W.s * 1 + (1 - W.s) * 1.1;
-      ctx.strokeStyle = 'rgba(0,0,8,0.28)'; ctx.lineWidth = (lw + 1.8) * S; ctx.stroke();
-      ctx.strokeStyle = 'rgba(205,218,255,0.2)'; ctx.lineWidth = lw * S; ctx.stroke();
+      ctx.strokeStyle = 'rgba(0,0,0,0.42)'; ctx.lineWidth = (lw + 2) * S; ctx.stroke();
+      ctx.save(); ctx.translate(-0.4 * S, -0.5 * S);
+      ctx.strokeStyle = 'rgba(214,170,98,0.3)'; ctx.lineWidth = lw * S; ctx.stroke();
+      ctx.restore();
       if (W.d > 0.02) {
         const buoy = buoySprite(3 * this.rdpr, false);
         const bwd = (buoy.width / this.rdpr) * S;
@@ -774,7 +807,7 @@ export class MapRenderer {
         if (!r) continue;
         path(ctx, r.poly);
         if (this.hatch.cut) { ctx.globalAlpha = lens === 'supply' ? 1 : 0.55; ctx.fillStyle = this.hatch.cut; ctx.fill(); ctx.globalAlpha = 1; }
-        ctx.save(); ctx.setLineDash([7 * S, 5 * S]); ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1.4 * S; ctx.stroke(); ctx.restore();
+        ctx.save(); ctx.setLineDash([7 * S, 5 * S]); ctx.strokeStyle = 'rgba(239,213,154,0.6)'; ctx.lineWidth = 1.4 * S; ctx.stroke(); ctx.restore();
       }
     }
     if ((lens === 'supply' || I.peek) && conn && I.you !== null) {
@@ -806,6 +839,101 @@ export class MapRenderer {
     ctx.restore();
     // the table: lamp pool and vignette over the board (screen space, static)
     if (this.lamp) ctx.drawImage(this.lamp, 0, 0, this.w, this.h);
+  }
+
+  // ---------------------------------------------------------------- territories as cloisonne enamel (ART-BIBLE §3)
+  /** Each house's territory this frame: its regions, the union path, and its outer edges with the outward normal. */
+  private territories(I: DrawInput, _political: boolean) {
+    const st = I.state;
+    const edges = regionEdges(st);
+    const out: { owner: number; E: ReturnType<typeof enamelOf>; P: Path2D; outer: { a: Pt; b: Pt; nx: number; ny: number }[] }[] = [];
+    for (const pl of st.players) {
+      const mine = st.regions.filter(r => I.owners[r.id] === pl.id && r.poly.length > 2 && !isLane(r));
+      if (!mine.length) continue;
+      const P = new Path2D();
+      for (const r of mine) { r.poly.forEach((q, i) => (i ? P.lineTo(q.x, q.y) : P.moveTo(q.x, q.y))); P.closePath(); }
+      const outer: { a: Pt; b: Pt; nx: number; ny: number }[] = [];
+      for (const r of mine) for (const e of edges[r.id]) {
+        if (e.other >= 0 && I.owners[e.other] === pl.id) continue;
+        const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y, L = Math.hypot(dx, dy) || 1;
+        let nx = dy / L, ny = -dx / L;
+        // outward: away from the region's own site
+        if (nx * ((e.a.x + e.b.x) / 2 - r.site.x) + ny * ((e.a.y + e.b.y) / 2 - r.site.y) < 0) { nx = -nx; ny = -ny; }
+        outer.push({ a: e.a, b: e.b, nx, ny });
+      }
+      out.push({ owner: pl.id, E: enamelOf(pl.color), P, outer });
+    }
+    return out;
+  }
+  /** Screen-constant engraved hatching for a house: lines at the house's own angle (a pattern cue beside colour). */
+  private hatchFor(key: HouseKey, col: string): CanvasPattern | null {
+    const k = `${key}|${col}|${this.dpr}`;
+    if (this.houseHatch.has(k)) return this.houseHatch.get(k)!;
+    const { a, cross } = HATCH[key];
+    const n = Math.round(9 * this.dpr), c = document.createElement('canvas');
+    c.width = c.height = n;
+    const g = c.getContext('2d')!;
+    g.strokeStyle = col; g.lineWidth = Math.max(1, 0.9 * this.dpr); g.lineCap = 'square';
+    const line = (ang: number) => {
+      g.beginPath();
+      if (Math.abs(Math.sin(ang)) < 0.01) { g.moveTo(-1, n / 2); g.lineTo(n + 1, n / 2); }
+      else if (Math.abs(Math.cos(ang)) < 0.01) { g.moveTo(n / 2, -1); g.lineTo(n / 2, n + 1); }
+      else if (Math.sin(ang) * Math.cos(ang) < 0) { for (const o of [-n, 0, n]) { g.moveTo(o - 1, n + 1); g.lineTo(o + n + 1, -1); } }
+      else { for (const o of [-n, 0, n]) { g.moveTo(o - 1, -1); g.lineTo(o + n + 1, n + 1); } }
+      g.stroke();
+    };
+    line(a); if (cross) line(a + Math.PI / 2);
+    const pat = this.ctx.createPattern(c, 'repeat');
+    this.houseHatch.set(k, pat);
+    return pat;
+  }
+  /** The enamel itself: a translucent wash, engraved hatching in the lit enamel, and the inlay's bevel (a lit inner
+   *  edge on the sides that face the lamp, a dark one on the far sides). Cut fills come from regions, so two houses
+   *  meet edge to edge and never overlap. */
+  private inlay(t: ReturnType<MapRenderer['territories']>[number], political: boolean) {
+    const { ctx } = this;
+    const S = this.px(1), W = this.zw;
+    const { E, P } = t;
+    // the wash: strongest zoomed out (territory is the story there), quiet up close where the minis are
+    const wash = political ? W.s * 0.34 + W.o * 0.24 + W.d * 0.17 : 0.07;
+    ctx.save();
+    ctx.fillStyle = hexA(E.base, wash); ctx.fill(P);
+    const pat = this.hatchFor(E.house ?? 'neutral', E.hi);
+    if (pat) {
+      pat.setTransform(new DOMMatrix().scale(S / this.dpr, S / this.dpr));
+      ctx.globalAlpha = (political ? 0.16 + 0.08 * W.s : 0.07) * (HATCH[E.house ?? 'neutral'].cross ? 0.6 : 1);
+      ctx.fillStyle = pat; ctx.fill(P);
+      ctx.globalAlpha = 1;
+    }
+    // the bevel, clipped inside: each outer edge lit by how squarely it faces the lamp
+    ctx.clip(P);
+    const lx = LAMP.dir[0], ly = LAMP.dir[1], ll = Math.hypot(lx, ly);
+    ctx.lineCap = 'round';
+    const bw = (W.s * 9 + W.o * 7 + W.d * 6) * S;
+    ctx.lineWidth = bw;
+    for (const e of t.outer) {
+      const d = (e.nx * lx + e.ny * ly) / ll;
+      if (Math.abs(d) < 0.12) continue;
+      ctx.strokeStyle = d > 0 ? hexA(E.hi, (political ? 0.3 : 0.14) * d) : `rgba(0,0,0,${((political ? 0.38 : 0.2) * -d).toFixed(3)})`;
+      ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  /** The cloisonne wire: a thin lit enamel line just inside, then the ink wire on the border with a cast shadow. */
+  private wires(t: ReturnType<MapRenderer['territories']>[number], political: boolean) {
+    const { ctx } = this;
+    const S = this.px(1), W = this.zw;
+    const wp = new Path2D();
+    for (const e of t.outer) { wp.moveTo(e.a.x, e.a.y); wp.lineTo(e.b.x, e.b.y); }
+    const k = political ? 1 : 0.6;
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.save(); ctx.clip(t.P);
+    ctx.strokeStyle = hexA(t.E.hi, political ? 0.9 : 0.5); ctx.lineWidth = (W.s * 7 + (1 - W.s) * 6) * S * k; ctx.stroke(wp);
+    ctx.restore();
+    ctx.shadowColor = 'rgba(0,0,0,0.7)'; ctx.shadowBlur = 3 * this.dpr; ctx.shadowOffsetX = 1.5 * this.dpr; ctx.shadowOffsetY = 2.5 * this.dpr;
+    ctx.strokeStyle = 'rgba(6,5,4,0.92)'; ctx.lineWidth = (W.s * 2.6 + (1 - W.s) * 2.1) * S; ctx.stroke(wp);
+    ctx.restore();
   }
 
   /** Kept for callers: banners no longer change with selection (the art never jumps in size). */
@@ -864,6 +992,12 @@ export class MapRenderer {
       const nb = Math.min(3, (r.bodies?.length ?? 0) + ((r.buildings.station ?? 0) > 0 ? 1 : 0));
       if (W.d > 0.02 && nb) { ctx.save(); ctx.globalAlpha = W.d; drawOrbitLines(ctx, p.x, p.y, pr, nb, 0.8 * S, fog); ctx.restore(); }
       drawStarNode(ctx, p.x, p.y, pr * core, R * core * this.rdpr, kind, fog);
+      // the GL corona: light on the painted sprite (fogged stars are pewter and get none)
+      if (this.stage && !fog) {
+        const sp = this.toScreen(p);
+        if (sp.x > -80 && sp.y > -80 && sp.x < this.w + 80 && sp.y < this.h + 80)
+          this.coronas.push({ x: sp.x, y: sp.y, r: pr * core * this.cam.z, amp: CORONA_AMP[kind] ?? 0.55, color: CORONA[kind] ?? LAMP.color, seed: r.id * 37 + 11 });
+      }
       if (reducedMotion() && kind === 'pulsar') drawPulsarBeams(ctx, p.x, p.y, pr * core, 0.6, r.id, fog ? 0.35 : 1);
       // objectives: a Crown wears a gold ring, the Throne a larger double ring (hover says what they are worth)
       if (r.kind === 'crown' || r.kind === 'throne') this.goldRing(r, R, fog);
@@ -879,11 +1013,11 @@ export class MapRenderer {
       if (W.s < 0.98 && contestOn(st) && r.owner !== null && r.bodies) {
         const cs = systemStatus(st, r);
         if (cs.contested) {
-          const hc = cs.holder === null ? '#bdb6d6' : this.colorOf(st, cs.holder);
+          const hc = cs.holder === null ? '#a9abb3' : this.colorOf(st, cs.holder);
           const rr = pr * 1.5 + 4 * S;
           ctx.save(); ctx.globalAlpha = 1 - W.s;
           ctx.setLineDash([3.2 * S, 2.4 * S]);
-          ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, TAU); ctx.strokeStyle = 'rgba(5,3,12,0.85)'; ctx.lineWidth = 2.6 * S; ctx.stroke();
+          ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, TAU); ctx.strokeStyle = 'rgba(6,5,4,0.85)'; ctx.lineWidth = 2.6 * S; ctx.stroke();
           ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, TAU); ctx.strokeStyle = hc; ctx.lineWidth = 1.3 * S; ctx.stroke();
           ctx.restore();
         }
@@ -948,8 +1082,20 @@ export class MapRenderer {
 
   /** Empire names: large letter-spaced lettering across each territory, zoomed out only (fades as you zoom in). */
   private empMemo: { key: string; v: { owner: number; p: Pt; span: number; n: number }[] } = { key: '', v: [] };
+  /** Set true while a ceremony overlay owns the screen (a title card, the crowning): the board's big empire lettering
+   *  steps back so it never reads through the title. The map also notices `.dl-title` / `.cr-room` on its own. */
+  hushLettering = false;
+  private hushA = 1;
+  private hushSeen = { at: 0, on: false };
+  private lettersHushed(now: number): boolean {
+    if (this.hushLettering) return true;
+    if (now - this.hushSeen.at > 250) this.hushSeen = { at: now, on: !!document.querySelector('.dl-title, .cr-room, .dl-crown') };
+    return this.hushSeen.on;
+  }
   private drawEmpireNames(I: DrawInput) {
-    const a0 = this.zw.s * (I.peek ? 0.3 : 1);
+    const hushed = this.lettersHushed(this.now);
+    this.hushA += ((hushed ? 0 : 1) - this.hushA) * (reducedMotion() ? 1 : 1 - Math.exp(-this.dt / 140));
+    const a0 = this.zw.s * (I.peek ? 0.3 : 1) * this.hushA;
     if (a0 < 0.02) return;
     const { ctx } = this;
     const st = I.state;
@@ -973,7 +1119,7 @@ export class MapRenderer {
       ctx.font = displayFont(fs * S);
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.globalAlpha = a0 * (political ? 0.62 : 0.3);
-      ctx.lineWidth = 2.4 * S; ctx.strokeStyle = 'rgba(5,3,12,0.55)'; ctx.lineJoin = 'round';
+      ctx.lineWidth = 2.4 * S; ctx.strokeStyle = 'rgba(6,5,4,0.55)'; ctx.lineJoin = 'round';
       ctx.fillStyle = hexA(pl.color, 1);
       const lh = fs * 1.15 * S;
       lines.forEach((l, i) => letterSpaced(ctx, l, L.p.x, L.p.y + (i - (lines.length - 1) / 2) * lh, fs * 0.3 * S, true));
@@ -1100,9 +1246,9 @@ export class MapRenderer {
         const c = ctx as CanvasRenderingContext2D & { letterSpacing?: string };
         const ls = typeof c.letterSpacing === 'string';
         if (ls) c.letterSpacing = `${(fs * 0.12).toFixed(1)}px`;
-        ctx.lineJoin = 'round'; ctx.lineWidth = 3.2 * this.ui; ctx.strokeStyle = 'rgba(4,2,12,0.72)';
+        ctx.lineJoin = 'round'; ctx.lineWidth = 3.2 * this.ui; ctx.strokeStyle = 'rgba(6,5,4,0.72)';
         if (ls) ctx.strokeText(r.name, x, y);
-        ctx.fillStyle = fog ? '#c9c4dc' : kingly ? '#ffe3a0' : r.kind === 'home' ? '#f6f1ff' : '#e6e1f6';
+        ctx.fillStyle = fog ? '#a9abb3' : kingly ? '#f1d488' : r.kind === 'home' ? '#f3ead6' : '#ece3cf';
         if (ls) ctx.fillText(r.name, x, y); else spacedText(ctx, r.name, x, y, fs * 0.12);
         if (ls) c.letterSpacing = '0px';
         ctx.restore();
@@ -1123,9 +1269,9 @@ export class MapRenderer {
       const sw = 7.5 * u, gap = 3 * u, w = sw + gap + tw;
       const x0 = sp.x - w / 2, yc = sp.y + (gy + 8) * u;
       shieldPath(ctx, x0 + sw / 2, yc, sw, 9 * u);
-      ctx.lineWidth = 2.6 * u; ctx.strokeStyle = 'rgba(4,2,12,0.7)'; ctx.stroke();
-      ctx.lineWidth = 1.2 * u; ctx.strokeStyle = '#d9d3ee'; ctx.stroke();
-      haloText(ctx, g.txt, x0 + sw + gap, yc + 0.5 * u, '#f3efff', 'rgba(4,2,12,0.75)', 3 * u);
+      ctx.lineWidth = 2.6 * u; ctx.strokeStyle = 'rgba(6,5,4,0.7)'; ctx.stroke();
+      ctx.lineWidth = 1.2 * u; ctx.strokeStyle = '#c4b89c'; ctx.stroke();
+      haloText(ctx, g.txt, x0 + sw + gap, yc + 0.5 * u, '#ece3cf', 'rgba(6,5,4,0.75)', 3 * u);
       ctx.restore();
     }
   }
@@ -1235,8 +1381,9 @@ export class MapRenderer {
     };
     const pulse = 0.85 + 0.15 * Math.sin(I.now / 260);
     for (const r of st.regions) {
-      const col = I.highlight.get(r.id);
-      if (!col) continue;
+      const col0 = I.highlight.get(r.id);
+      if (!col0) continue;
+      const col = retint(col0);
       const k = near(r.site);
       if (r.poly.length < 3) {
         ctx.beginPath(); ctx.arc(r.site.x, r.site.y, this.px(5), 0, TAU); ctx.fillStyle = hexA(col, 0.35 + 0.5 * k); ctx.fill();
@@ -1572,7 +1719,7 @@ export class MapRenderer {
       if (end > R + 2 * S) {
         ctx.save(); ctx.globalAlpha = A * 0.6; ctx.lineCap = 'round';
         ctx.beginPath(); ctx.moveTo(reg.site.x + dx / L * R, reg.site.y + dy / L * R); ctx.lineTo(reg.site.x + dx / L * end, reg.site.y + dy / L * end);
-        ctx.strokeStyle = 'rgba(4,2,12,0.6)'; ctx.lineWidth = 2.6 * S; ctx.stroke();
+        ctx.strokeStyle = 'rgba(6,5,4,0.6)'; ctx.lineWidth = 2.6 * S; ctx.stroke();
         ctx.strokeStyle = fill; ctx.lineWidth = 1.2 * S; ctx.stroke();
         ctx.restore();
       }
@@ -1590,8 +1737,11 @@ export class MapRenderer {
     if (W.s > 0.01) {
       ctx.globalAlpha = A * W.s;
       ctx.save(); ctx.rotate(d.ang); chevronPath(ctx, tr * 1.25 * S);
-      ctx.lineJoin = 'round'; ctx.strokeStyle = sel ? '#ffffff' : 'rgba(4,2,12,0.92)'; ctx.lineWidth = (sel ? 2.4 : 2) * S; ctx.stroke();
-      ctx.fillStyle = fill; ctx.fill();
+      // an enamel arrowhead in an ink wire, lit from the lamp
+      ctx.lineJoin = 'round'; ctx.strokeStyle = sel ? '#f1d488' : 'rgba(6,5,4,0.92)'; ctx.lineWidth = (sel ? 2.6 : 2) * S; ctx.stroke();
+      const E = enamelOf(fill), R = tr * 1.25 * S;
+      const eg = ctx.createLinearGradient(-R, -R, R, R); eg.addColorStop(0, E.hi); eg.addColorStop(0.55, E.base); eg.addColorStop(1, E.lo);
+      ctx.fillStyle = eg; ctx.fill();
       ctx.restore();
     }
     ctx.globalAlpha = A;
@@ -1613,10 +1763,10 @@ export class MapRenderer {
     if (t.fleets.length > 1) {
       const txt = String(t.fleets.length);
       ctx.font = numFont(12 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      if (W.s > 0.6) haloText(ctx, txt, (tr + 5) * S, (tr * 0.6) * S, '#ffffff', 'rgba(4,2,12,0.85)', 3 * S);
+      if (W.s > 0.6) haloText(ctx, txt, (tr + 5) * S, (tr * 0.6) * S, '#ffffff', 'rgba(6,5,4,0.85)', 3 * S);
       else {
         const cw = ctx.measureText(txt).width + 8 * S, ch = 15 * S, cy = (ry + 2) * S;
-        roundRect(ctx, -cw / 2, cy, cw, ch, 4 * S); ctx.fillStyle = 'rgba(8,4,16,0.94)'; ctx.fill();
+        roundRect(ctx, -cw / 2, cy, cw, ch, 4 * S); ctx.fillStyle = 'rgba(14,15,19,0.94)'; ctx.fill();
         ctx.strokeStyle = hexA(fill, 0.9); ctx.lineWidth = 1.2 * S; ctx.stroke();
         ctx.fillStyle = '#ffffff'; ctx.fillText(txt, 0, cy + ch / 2 + 0.5 * S);
         below = ry + 2 + 15 + 2;
@@ -1627,8 +1777,8 @@ export class MapRenderer {
       const txt = String(Math.max(0, Math.round(t.power)));
       ctx.font = numFont(13 * S); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
       const w = 14 * S + ctx.measureText(txt).width, y = -(tr + 9 + W.d * (this.miniGeom().stand + this.miniGeom().len * 0.7)) * S;
-      drawIcon(ctx, 'attack', -w / 2 + 6 * S, y, 13 * S, '#ffe6b0', { halo: 'rgba(4,2,12,0.9)', haloWidth: 2.5 * S });
-      haloText(ctx, txt, -w / 2 + 14 * S, y + 0.5 * S, '#ffffff', 'rgba(4,2,12,0.85)', 3 * S);
+      drawIcon(ctx, 'attack', -w / 2 + 6 * S, y, 13 * S, '#ffe6b0', { halo: 'rgba(6,5,4,0.9)', haloWidth: 2.5 * S });
+      haloText(ctx, txt, -w / 2 + 14 * S, y + 0.5 * S, '#ffffff', 'rgba(6,5,4,0.85)', 3 * S);
     }
     if (tPost && tPost !== 'steady' && (sel || W.d > 0.5) || (dug && W.d > 0.5)) {
       const marks: { t: IconName; fill: string; ink: string }[] = [];
@@ -1652,21 +1802,33 @@ export class MapRenderer {
     this.tokHits.push({ x: d.x, y: d.y, l: -hr, t: -top - 4, r: hr, b: tr + 6, cr: Math.max(this.hitR(), tr + 5), hit: { region: t.region, owner: t.owner, fleetIds: t.fleets.map(f => f.id) } });
   }
 
-  /** The operational counter: a round enamel disc in the owner colour with a ship arrow pointing along its heading. */
+  /** The operational counter: an enamel token (ART-BIBLE §8): a domed coin of the house enamel lit from the lamp,
+   *  set in a brass bezel, with the heading struck into it as an ivory chevron. Never a flat circle. */
   private drawCounter(ang: number, fill: string, sel: boolean, tr: number, S: number) {
     const { ctx } = this;
     const R = tr * S;
-    ctx.beginPath(); ctx.arc(0, 1.6 * S, R, 0, TAU); ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fill();
-    ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fillStyle = fill; ctx.fill();
-    const g = ctx.createRadialGradient(-R * 0.35, -R * 0.45, R * 0.1, 0, 0, R);
-    g.addColorStop(0, 'rgba(255,255,255,0.42)'); g.addColorStop(0.55, 'rgba(255,255,255,0.05)'); g.addColorStop(1, 'rgba(0,0,0,0.3)');
+    const E = enamelOf(fill);
+    // cast shadow down and right
+    ctx.beginPath(); ctx.arc(1.2 * S, 2.2 * S, R + 1.2 * S, 0, TAU); ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fill();
+    // the bezel: brass, lit at the upper left
+    ctx.beginPath(); ctx.arc(0, 0, R + 1.4 * S, 0, TAU);
+    const bz = ctx.createLinearGradient(-R, -R, R, R);
+    bz.addColorStop(0, sel ? '#fbedc8' : '#efd59a'); bz.addColorStop(0.5, '#a87a35'); bz.addColorStop(1, '#3a2810');
+    ctx.fillStyle = bz; ctx.fill();
+    ctx.lineWidth = 0.9 * S; ctx.strokeStyle = 'rgba(6,5,4,0.9)'; ctx.stroke();
+    // the domed enamel
+    ctx.beginPath(); ctx.arc(0, 0, R - 0.6 * S, 0, TAU);
+    const g = ctx.createRadialGradient(-R * 0.3, -R * 0.4, R * 0.08, 0, 0, R);
+    g.addColorStop(0, cssA(mixA(rgbA(E.hi), [255, 255, 255], 0.25))); g.addColorStop(0.5, E.base); g.addColorStop(1, E.lo);
     ctx.fillStyle = g; ctx.fill();
-    ctx.lineWidth = (sel ? 2.4 : 1.6) * S; ctx.strokeStyle = sel ? '#ffffff' : 'rgba(5,3,12,0.92)'; ctx.stroke();
-    ctx.beginPath(); ctx.arc(0, 0, R - 2 * S, 0, TAU); ctx.strokeStyle = 'rgba(255,255,255,0.32)'; ctx.lineWidth = 0.9 * S; ctx.stroke();
-    ctx.save(); ctx.rotate(ang); chevronPath(ctx, R * 0.58);
-    ctx.fillStyle = inkOn(fill) === INK ? 'rgba(11,7,22,0.9)' : '#ffffff'; ctx.fill();
+    ctx.lineWidth = 0.8 * S; ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.stroke();
+    // the glaze's specular, toward the lamp
+    ctx.beginPath(); ctx.ellipse(-R * 0.32, -R * 0.42, R * 0.34, R * 0.18, -0.5, 0, TAU); ctx.fillStyle = 'rgba(255,245,225,0.28)'; ctx.fill();
+    ctx.save(); ctx.rotate(ang); chevronPath(ctx, R * 0.56);
+    ctx.lineJoin = 'round'; ctx.lineWidth = 1.4 * S; ctx.strokeStyle = 'rgba(6,5,4,0.55)'; ctx.stroke();
+    ctx.fillStyle = '#f3ead6'; ctx.fill();
     ctx.restore();
-    if (sel) { ctx.beginPath(); ctx.arc(0, 0, R + 3 * S, 0, TAU); ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 1.2 * S; ctx.stroke(); }
+    if (sel) { ctx.beginPath(); ctx.arc(0, 0, R + 4 * S, 0, TAU); ctx.strokeStyle = 'rgba(241,212,136,0.9)'; ctx.lineWidth = 1.4 * S; ctx.stroke(); }
   }
 
   /** Detail zoom: miniatures on clear flight stands over one enamel base (the base rim is the owner colour), and the
@@ -1879,11 +2041,11 @@ export class MapRenderer {
       ctx.save();
       ctx.globalAlpha = a;
       ctx.lineCap = 'round';
-      ctx.strokeStyle = 'rgba(5,3,12,0.9)'; ctx.lineWidth = 4 * S;
+      ctx.strokeStyle = 'rgba(6,5,4,0.9)'; ctx.lineWidth = 4 * S;
       ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(base.x, top); ctx.stroke();
       ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2 * S; ctx.stroke();
       ctx.beginPath(); ctx.moveTo(base.x + 1 * S, top); ctx.lineTo(base.x + 17 * S, top + 5 * S); ctx.lineTo(base.x + 1 * S, top + 11 * S); ctx.closePath();
-      ctx.fillStyle = c; ctx.fill(); ctx.strokeStyle = 'rgba(5,3,12,0.9)'; ctx.lineWidth = 1.2 * S; ctx.stroke();
+      ctx.fillStyle = c; ctx.fill(); ctx.strokeStyle = 'rgba(6,5,4,0.9)'; ctx.lineWidth = 1.2 * S; ctx.stroke();
       swords(ctx, base.x + 7 * S, top + 5.5 * S, 3.5 * S, inkOn(c), 1.1 * S);
       ctx.restore();
     }
@@ -2144,7 +2306,7 @@ export class MapRenderer {
         ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, gr, 0, TAU); ctx.fill();
       } else if (kind === 'pulsar') drawPulsarBeams(ctx, p.x, p.y, core, t, r.id, fog ? 0.35 : 1);
       else if (kind === 'blackhole') drawAccretionShimmer(ctx, p.x, p.y, core, t, r.id, fog ? 0.4 : 1);
-      else if (!fog) drawTwinkle(ctx, p.x, p.y, core, kind, t, r.id);
+      else if (!fog && !this.stage) drawTwinkle(ctx, p.x, p.y, core, kind, t, r.id);
     }
     // detail zoom: the bodies as tiny specks riding their orbits (frozen with reduced motion)
     if (W.d > 0.02 && r.bodies) {
@@ -2186,7 +2348,7 @@ export class MapRenderer {
       ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, TAU);
       for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + Math.PI / 4; ctx.moveTo(p.x + Math.cos(a) * (R - 5 * S), p.y + Math.sin(a) * (R - 5 * S)); ctx.lineTo(p.x + Math.cos(a) * (R + 2 * S), p.y + Math.sin(a) * (R + 2 * S)); }
     };
-    draw(); ctx.strokeStyle = 'rgba(5,3,12,0.75)'; ctx.lineWidth = 4.4 * S; ctx.stroke();
+    draw(); ctx.strokeStyle = 'rgba(6,5,4,0.75)'; ctx.lineWidth = 4.4 * S; ctx.stroke();
     draw(); ctx.strokeStyle = color; ctx.lineWidth = 2 * S; ctx.stroke();
     ctx.restore();
     return R / S;
@@ -2195,6 +2357,7 @@ export class MapRenderer {
   /** A planned order: one clean dashed line in the owner colour with a head at the destination (hollow for a join);
    *  a seize ends in a target reticle round the star it attacks. A label is only kept for LIVE ETAs and the join "+". */
   arrow(a: Pt, b: Pt, color: string, dashed: boolean, label: string, alpha: number, kind: Order['type'] = 'move') {
+    color = retint(color);
     const { ctx } = this;
     const dx = b.x - a.x, dy = b.y - a.y;
     const L = Math.hypot(dx, dy) || 1;
@@ -2223,7 +2386,7 @@ export class MapRenderer {
     ctx.globalAlpha = alpha;
     const trace = () => { ctx.beginPath(); pts.forEach((pp, i) => (i ? ctx.lineTo(pp.x, pp.y) : ctx.moveTo(pp.x, pp.y))); };
     ctx.lineCap = 'round';
-    trace(); ctx.strokeStyle = 'rgba(5,3,12,0.5)'; ctx.lineWidth = 5.5 * s; ctx.stroke();
+    trace(); ctx.strokeStyle = 'rgba(6,5,4,0.5)'; ctx.lineWidth = 5.5 * s; ctx.stroke();
     ctx.strokeStyle = color; ctx.lineWidth = 2.6 * s;
     ctx.setLineDash([8 * s, 6 * s]); ctx.lineDashOffset = reducedMotion() ? 0 : -(this.now / 60) * s;
     trace(); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
@@ -2233,8 +2396,8 @@ export class MapRenderer {
       ctx.beginPath(); ctx.moveTo(p2.x + Math.cos(ang) * 10 * s, p2.y + Math.sin(ang) * 10 * s);
       ctx.lineTo(p2.x + Math.cos(ang + 2.5) * 10 * s, p2.y + Math.sin(ang + 2.5) * 10 * s);
       ctx.lineTo(p2.x + Math.cos(ang - 2.5) * 10 * s, p2.y + Math.sin(ang - 2.5) * 10 * s); ctx.closePath();
-      ctx.strokeStyle = 'rgba(5,3,12,0.8)'; ctx.lineWidth = 1.6 * s; ctx.stroke();
-      if (dashed && kind !== 'move' && !seize) { ctx.fillStyle = 'rgba(5,3,12,0.9)'; ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = 1.6 * s; ctx.stroke(); }
+      ctx.strokeStyle = 'rgba(6,5,4,0.8)'; ctx.lineWidth = 1.6 * s; ctx.stroke();
+      if (dashed && kind !== 'move' && !seize) { ctx.fillStyle = 'rgba(6,5,4,0.9)'; ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = 1.6 * s; ctx.stroke(); }
       else { ctx.fillStyle = color; ctx.fill(); }
     }
     // only a LIVE ETA ("3h") or the join "+" is spelled out on the map; order slots live in the strip
@@ -2242,7 +2405,7 @@ export class MapRenderer {
       ctx.font = numFont(13 * s); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
       const w = measureIconText(ctx, label);
       const hx = p2.x + (Math.cos(ang) >= 0 ? 10 * s : -10 * s - w), hy = p2.y - 14 * s;
-      haloText(ctx, label, hx, hy, '#ffffff', 'rgba(5,3,12,0.85)', 3 * s);
+      haloText(ctx, label, hx, hy, '#ffffff', 'rgba(6,5,4,0.85)', 3 * s);
       ctx.textBaseline = 'alphabetic';
     }
     ctx.restore();
@@ -2251,6 +2414,7 @@ export class MapRenderer {
   /** A route along hyperlane dots: one dashed polyline in the owner colour, a head at the destination, or the target
    *  reticle for a seize. Rivals' routes are fainter. */
   private routeArrow(pts: Pt[], color: string, seize: boolean, dest: number, mine: boolean) {
+    color = retint(color);
     const { ctx } = this;
     const s = this.px(1);
     const end = pts[pts.length - 1], prev = pts[pts.length - 2];
@@ -2263,7 +2427,7 @@ export class MapRenderer {
     ctx.globalAlpha = mine ? 1 : 0.6;
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     const trace = () => { ctx.beginPath(); pts.slice(0, -1).forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.lineTo(tip.x, tip.y); };
-    trace(); ctx.strokeStyle = 'rgba(5,3,12,0.5)'; ctx.lineWidth = 5.5 * s; ctx.stroke();
+    trace(); ctx.strokeStyle = 'rgba(6,5,4,0.5)'; ctx.lineWidth = 5.5 * s; ctx.stroke();
     ctx.setLineDash([8 * s, 6 * s]); ctx.lineDashOffset = reducedMotion() ? 0 : -(this.now / 60) * s;
     trace(); ctx.strokeStyle = color; ctx.lineWidth = 2.6 * s; ctx.stroke();
     ctx.setLineDash([]); ctx.lineDashOffset = 0;
@@ -2272,7 +2436,7 @@ export class MapRenderer {
       ctx.beginPath(); ctx.moveTo(tip.x + Math.cos(ang) * 10 * s, tip.y + Math.sin(ang) * 10 * s);
       ctx.lineTo(tip.x + Math.cos(ang + 2.5) * 10 * s, tip.y + Math.sin(ang + 2.5) * 10 * s);
       ctx.lineTo(tip.x + Math.cos(ang - 2.5) * 10 * s, tip.y + Math.sin(ang - 2.5) * 10 * s); ctx.closePath();
-      ctx.strokeStyle = 'rgba(5,3,12,0.8)'; ctx.lineWidth = 1.6 * s; ctx.stroke();
+      ctx.strokeStyle = 'rgba(6,5,4,0.8)'; ctx.lineWidth = 1.6 * s; ctx.stroke();
       ctx.fillStyle = color; ctx.fill();
     }
     ctx.restore();
@@ -2489,6 +2653,7 @@ export class MapRenderer {
 
   /** The arrow under a drag: marching dashes toward the head, a verb glyph at the head; the head eases (snaps) to `to`. */
   private drawDrag(D: DragArrow, now: number) {
+    D = { ...D, color: retint(D.color) };
     const { ctx } = this;
     const s = this.px(1);
     if (!this.dragHead || reducedMotion()) this.dragHead = { ...D.to };
@@ -2523,11 +2688,11 @@ export class MapRenderer {
     };
     ctx.save();
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    trace(); ctx.strokeStyle = 'rgba(5,3,12,0.6)'; ctx.lineWidth = 8 * s; ctx.stroke();
+    trace(); ctx.strokeStyle = 'rgba(6,5,4,0.6)'; ctx.lineWidth = 8 * s; ctx.stroke();
     if (invalid) { ctx.setLineDash([0.1 * s, 8 * s]); ctx.strokeStyle = col; ctx.lineWidth = 4 * s; trace(); ctx.stroke(); }
     else {
       ctx.strokeStyle = hexA0(od ? '#ffb347' : D.color.startsWith('#') ? D.color : '#ffffff', hollow ? 0.0 : 0.45); ctx.lineWidth = 4.5 * s; if (!hollow) { trace(); ctx.stroke(); }
-      if (hollow) { ctx.strokeStyle = col; ctx.lineWidth = 5 * s; trace(); ctx.stroke(); ctx.strokeStyle = 'rgba(5,3,12,0.95)'; ctx.lineWidth = 2 * s; trace(); ctx.stroke(); }
+      if (hollow) { ctx.strokeStyle = col; ctx.lineWidth = 5 * s; trace(); ctx.stroke(); ctx.strokeStyle = 'rgba(6,5,4,0.95)'; ctx.lineWidth = 2 * s; trace(); ctx.stroke(); }
       ctx.setLineDash([10 * s, 8 * s]); ctx.lineDashOffset = reducedMotion() ? 0 : -(now / 28) * s;
       ctx.strokeStyle = hollow ? col : '#ffffff'; ctx.lineWidth = (hollow ? 2 : 2.4) * s; trace(); ctx.stroke();
     }
@@ -2542,9 +2707,9 @@ export class MapRenderer {
       ctx.lineTo(H.x + Math.cos(ang + 2.55) * 16 * s, H.y + Math.sin(ang + 2.55) * 16 * s);
       ctx.lineTo(H.x - Math.cos(ang) * 6 * s, H.y - Math.sin(ang) * 6 * s);
       ctx.lineTo(H.x + Math.cos(ang - 2.55) * 16 * s, H.y + Math.sin(ang - 2.55) * 16 * s); ctx.closePath();
-      ctx.fill(); ctx.strokeStyle = 'rgba(5,3,12,0.9)'; ctx.lineWidth = 1.5 * s; ctx.stroke();
+      ctx.fill(); ctx.strokeStyle = 'rgba(6,5,4,0.9)'; ctx.lineWidth = 1.5 * s; ctx.stroke();
     } else {
-      ctx.beginPath(); ctx.arc(H.x, H.y, 14 * s, 0, TAU); ctx.fillStyle = 'rgba(5,3,12,0.94)'; ctx.fill();
+      ctx.beginPath(); ctx.arc(H.x, H.y, 14 * s, 0, TAU); ctx.fillStyle = 'rgba(6,5,4,0.94)'; ctx.fill();
       ctx.strokeStyle = col; ctx.lineWidth = 2.5 * s; if (invalid || hollow) ctx.setLineDash([3 * s, 2.5 * s]); ctx.stroke(); ctx.setLineDash([]);
       ctx.strokeStyle = invalid ? '#c8c6d7' : '#ffffff'; ctx.lineWidth = 2.6 * s; ctx.lineCap = 'round';
       const vi: IconName = D.verb === 'seize' || D.verb === 'join' ? 'attack' : D.verb === 'merge' ? 'merge' : D.verb === 'split' ? 'split' : 'close';
@@ -2555,6 +2720,7 @@ export class MapRenderer {
 
   /** The drag arrow along a multi-step route: a polyline through the waypoints to the (eased) head. */
   private drawDragRoute(D: DragArrow, now: number) {
+    D = { ...D, color: retint(D.color) };
     const { ctx } = this;
     const s = this.px(1);
     const pts = [D.from, ...D.path!.slice(1, -1), this.dragHead ?? D.to];
@@ -2568,10 +2734,10 @@ export class MapRenderer {
     const trace = () => { ctx.beginPath(); pts.slice(0, -1).forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.lineTo(tipP.x, tipP.y); };
     ctx.save();
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    trace(); ctx.strokeStyle = 'rgba(5,3,12,0.6)'; ctx.lineWidth = 8 * s; ctx.stroke();
+    trace(); ctx.strokeStyle = 'rgba(6,5,4,0.6)'; ctx.lineWidth = 8 * s; ctx.stroke();
     trace(); ctx.strokeStyle = hexA0(col.startsWith('#') ? col : '#ffffff', hollow ? 0.9 : 0.45); ctx.lineWidth = (hollow ? 5 : 4.5) * s; ctx.stroke();
     ctx.setLineDash([10 * s, 8 * s]); ctx.lineDashOffset = reducedMotion() ? 0 : -(now / 28) * s;
-    trace(); ctx.strokeStyle = hollow ? 'rgba(5,3,12,0.95)' : '#ffffff'; ctx.lineWidth = (hollow ? 2 : 2.4) * s; ctx.stroke();
+    trace(); ctx.strokeStyle = hollow ? 'rgba(6,5,4,0.95)' : '#ffffff'; ctx.lineWidth = (hollow ? 2 : 2.4) * s; ctx.stroke();
     ctx.setLineDash([]);
     // waypoint beads
     ctx.fillStyle = '#ffffff';
@@ -2583,9 +2749,9 @@ export class MapRenderer {
       ctx.lineTo(H.x + Math.cos(ang + 2.55) * 16 * s, H.y + Math.sin(ang + 2.55) * 16 * s);
       ctx.lineTo(H.x - Math.cos(ang) * 6 * s, H.y - Math.sin(ang) * 6 * s);
       ctx.lineTo(H.x + Math.cos(ang - 2.55) * 16 * s, H.y + Math.sin(ang - 2.55) * 16 * s); ctx.closePath();
-      ctx.fill(); ctx.strokeStyle = 'rgba(5,3,12,0.9)'; ctx.lineWidth = 1.5 * s; ctx.stroke();
+      ctx.fill(); ctx.strokeStyle = 'rgba(6,5,4,0.9)'; ctx.lineWidth = 1.5 * s; ctx.stroke();
     } else {
-      ctx.beginPath(); ctx.arc(H.x, H.y, 14 * s, 0, TAU); ctx.fillStyle = 'rgba(5,3,12,0.94)'; ctx.fill();
+      ctx.beginPath(); ctx.arc(H.x, H.y, 14 * s, 0, TAU); ctx.fillStyle = 'rgba(6,5,4,0.94)'; ctx.fill();
       ctx.strokeStyle = col; ctx.lineWidth = 2.5 * s; if (hollow) ctx.setLineDash([3 * s, 2.5 * s]); ctx.stroke(); ctx.setLineDash([]);
       swords(ctx, H.x, H.y, 8.5 * s, '#ffffff', 2 * s);
     }
@@ -2600,7 +2766,7 @@ export class MapRenderer {
     for (const fx of list) {
       const t = (I.now - fx.t0) / fx.dur;
       if (t < 0 || t > 1) continue;
-      const c = fx.color;
+      const c = retint(fx.color);
       const P = fx.pos;
       if (!this.fxInit.has(fx)) { this.fxInit.add(fx); if (!reduced) this.spawnFor(fx); }
       if (fx.kind === 'battle' || fx.kind === 'clash') {
@@ -2714,10 +2880,10 @@ export class MapRenderer {
         break;
       }
       case 'warden': this.burst(P, '#d9a8ff', Math.round(14 * m), 0.2, 1000, true); break;
-      case 'capture': this.burst(P, fx.color, Math.round(18 * m), 0.25, 900); break;
-      case 'excavate': for (let i = 0; i < 16 * m && this.particles.length < (this.compact ? 220 : 450); i++) this.particles.push({ x: P.x + (Math.random() - 0.5) * this.px(24), y: P.y, vx: (Math.random() - 0.5) * this.px(0.02), vy: -this.px(0.04 + Math.random() * 0.08), t0: this.now, life: 900 + Math.random() * 600, size: 1.5 + Math.random() * 1.5, color: fx.color, drag: 0.999, streak: false, grav: 0 }); break;
+      case 'capture': this.burst(P, retint(fx.color), Math.round(18 * m), 0.25, 900); break;
+      case 'excavate': for (let i = 0; i < 16 * m && this.particles.length < (this.compact ? 220 : 450); i++) this.particles.push({ x: P.x + (Math.random() - 0.5) * this.px(24), y: P.y, vx: (Math.random() - 0.5) * this.px(0.02), vy: -this.px(0.04 + Math.random() * 0.08), t0: this.now, life: 900 + Math.random() * 600, size: 1.5 + Math.random() * 1.5, color: retint(fx.color), drag: 0.999, streak: false, grav: 0 }); break;
       case 'clash': case 'battle': this.burst(P, '#ffd27a', Math.round(12 * m), 0.28, 700, true); break;
-      case 'build': this.burst(P, fx.color, Math.round(8 * m), 0.12, 700); break;
+      case 'build': this.burst(P, retint(fx.color), Math.round(8 * m), 0.12, 700); break;
     }
   }
 
@@ -2849,7 +3015,7 @@ export function path(ctx: CanvasRenderingContext2D, poly: Pt[]) {
   ctx.closePath();
 }
 
-export function hexA(hex: string, a: number): string { return hexA0(hex, a); }
+export function hexA(hex: string, a: number): string { return hexA0(retint(hex), a); }
 
 // ------------------------------------------------------------------ lane focus: hyperlanes as segments
 interface LaneSeg { a: Pt; b: Pt; u: number; v: number }

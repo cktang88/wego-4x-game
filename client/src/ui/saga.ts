@@ -9,6 +9,7 @@ import { bannerSvg, drawSigil, goldPaint } from '../art/sigils.ts';
 import { headlineIcon } from './herald.ts';
 import { beatIcon } from '../hud/soul.ts';
 import { iconizeDom, ic, icFor } from '../art/icons.ts';
+import { ownerHi, ownerText } from '../art/bible.ts';
 
 const FATE: Record<FleetSaga['fate'], [string, string]> = {
   alive: ['Still flies', 'alive'], destroyed: ['Destroyed', 'dead'], caught: ['Hunted down', 'dead'], broken: ['Broken', 'dead'], retired: ['Retired', 'retired'], merged: ['Merged', 'merged'],
@@ -24,19 +25,19 @@ export function openSaga(g: GameScreen) {
   el?.remove();
   el = document.createElement('div');
   el.className = 'saga-ov';
-  const pn = (p: number) => `<b style="color:${esc(g.color(p))}">${esc(g.pname(p))}</b>`;
+  const pn = (p: number) => `<b style="color:${esc(ownerText(g.color(p)))}">${esc(g.pname(p))}</b>`;
   const winner = st.winner !== null ? st.players[st.winner] : null;
   const ranks = st.players.slice().sort((a, b) => b.vp - a.vp);
   const lastTurn = Math.max(1, st.winner !== null ? st.turn : st.turn - 1);
   // reigns as a bar over the game's turns
   const reigns = S.reigns.map(r => {
     const to = r.to ?? lastTurn + 1;
-    return `<i style="left:${((r.from - 1) / lastTurn * 100).toFixed(2)}%;width:${(Math.max(0.6, (to - r.from) / lastTurn * 100)).toFixed(2)}%;background:${esc(g.color(r.player))}" title="${esc(r.name)} T${r.from}–${r.to ?? 'end'}"></i>`;
+    return `<i style="left:${((r.from - 1) / lastTurn * 100).toFixed(2)}%;width:${(Math.max(0.6, (to - r.from) / lastTurn * 100)).toFixed(2)}%;background:${esc(ownerHi(g.color(r.player)))}" title="${esc(r.name)} T${r.from}–${r.to ?? 'end'}"></i>`;
   }).join('');
   const fleets = S.fleets.map(f => {
     const [fw, fc] = FATE[f.fate];
-    return `<article class="sg-fleet ${fc}" style="--pc:${esc(g.color(f.owner))}">
-      <header>${bannerSvg(f.sigil || 'star', g.color(f.owner), 52, { rim: f.rank >= 4 ? 'gold' : 'silver', rank: f.rank, broken: f.oathbreaker })}
+    return `<article class="sg-fleet ${fc}" style="--pc:${esc(ownerText(g.color(f.owner)))}">
+      <header>${bannerSvg(f.sigil || 'star', ownerHi(g.color(f.owner)), 52, { rim: f.rank >= 4 ? 'gold' : 'silver', rank: f.rank, broken: f.oathbreaker })}
         <div><h3>${esc(f.name)}</h3>${f.epithets.length ? `<em>${esc(f.epithets.join(' · '))}</em>` : ''}<small>${esc(f.rankName)} · ${esc(f.commander)}</small></div>
         <span class="sg-fate">${fw}${f.fateTurn ? ` · T${f.fateTurn}` : ''}</span></header>
       <p>${esc(f.paragraph)}</p>
@@ -55,7 +56,7 @@ export function openSaga(g: GameScreen) {
   el.innerHTML = `<div class="saga" role="dialog" aria-label="The Saga">
     <header class="sg-head"><small class="kicker">The Saga of</small><h1>The Three Crowns</h1>
       <div class="sg-win">${winner ? `<span style="color:${esc(winner.color)}">♛ ${esc(winner.name)}</span> <span class="dim">${esc(st.winReason || 'wins')}</span>` : `<span class="dim">${g.live ? 'Cycle' : 'Turn'} ${st.turn} · the game goes on</span>`}</div>
-      <ol class="sg-ranks">${ranks.map(p => `<li style="--pc:${esc(p.color)}"><b>${esc(p.name)}</b><span>${p.vp} ♛</span>${(p.oathbreaker ?? []).length ? '<em>Oathbreaker</em>' : ''}</li>`).join('')}</ol></header>
+      <ol class="sg-ranks">${ranks.map(p => `<li style="--pc:${esc(ownerText(p.color))}"><b>${esc(p.name)}</b><span>${p.vp} ♛</span>${(p.oathbreaker ?? []).length ? '<em>Oathbreaker</em>' : ''}</li>`).join('')}</ol></header>
     ${moments ? `<section class="sg-sec"><h2>The moments</h2><div class="sg-moments">${moments}</div></section>` : ''}
     <section class="sg-sec"><h2>The Hollow Throne</h2>${reigns ? `<div class="sg-reigns"><div class="bar">${reigns}</div><div class="axis"><span>T1</span><span>T${lastTurn}</span></div><ul>${S.reigns.map(r => `<li>${pn(r.player)} <small>T${r.from}–${r.to ?? (st.winner !== null ? 'end' : 'now')}</small></li>`).join('')}</ul></div>` : '<p class="dim">No one ever sat the Throne.</p>'}</section>
     <section class="sg-sec"><h2>The banners</h2><div class="sg-fleets">${fleets || '<p class="dim">No banners were raised.</p>'}</div></section>
@@ -171,15 +172,15 @@ export async function saveImage(g: GameScreen, S: Saga = sagaOf(g.st)) {
       const last = Math.max(1, st.turn);
       if (draw) {
         c.fillStyle = 'rgba(255,255,255,0.06)'; c.fillRect(P, y, W - P * 2, 18);
-        for (const r of S.reigns) { const to = r.to ?? last + 1; c.fillStyle = g.color(r.player); c.fillRect(P + ((r.from - 1) / last) * (W - P * 2), y, Math.max(3, ((to - r.from) / last) * (W - P * 2)), 18); }
+        for (const r of S.reigns) { const to = r.to ?? last + 1; c.fillStyle = ownerHi(g.color(r.player)); c.fillRect(P + ((r.from - 1) / last) * (W - P * 2), y, Math.max(3, ((to - r.from) / last) * (W - P * 2)), 18); }
       }
       y += 54;
     }
     text('THE BANNERS', `700 20px ${serif}`, '#d9b46a', P, 'left', 30);
     for (const f of S.fleets.slice(0, 6)) {
       const y0 = y;
-      if (draw) shield(c, P, y - 4, 54, g.color(f.owner), f.sigil);
-      text(`${f.name}${f.epithets.length ? `, ${f.epithets.join(', ')}` : ''}`, `700 24px ${serif}`, g.color(f.owner), P + 72, 'left', 28);
+      if (draw) shield(c, P, y - 4, 54, ownerHi(g.color(f.owner)), f.sigil);
+      text(`${f.name}${f.epithets.length ? `, ${f.epithets.join(', ')}` : ''}`, `700 24px ${serif}`, ownerHi(g.color(f.owner)), P + 72, 'left', 28);
       c.font = `20px ${body}`;
       for (const l of wrap(c, f.paragraph, W - P * 2 - 72).slice(0, 4)) text(l, `20px ${body}`, '#dccfb4', P + 72, 'left', 25);
       y = Math.max(y, y0 + 62) + 14;

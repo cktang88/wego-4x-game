@@ -2,7 +2,7 @@
    Icons (client/src/art/icons.ts): inline SVG silhouettes sized from the text
    they sit in, so "⚙ 34" becomes an icon as heavy as the number beside it.
    The ink fills its box edge to edge, so 1.15em puts the icon's top a little
-   above the cap height of Rajdhani / Cinzel numerals and its foot just under
+   above the cap height of Alegreya Sans / Cinzel numerals and its foot just under
    the baseline: optically level with the digits, never smaller than them.
    ============================================================================ */
 .ic {
@@ -31,10 +31,10 @@
 
 /* metals, matching the chrome (theme.css) */
 .ic-brass { color: var(--brass-hi, #f4dc9c); }
-.ic-gold { color: var(--gold, #ffd86b); }
+.ic-gold { color: var(--gold, #f1d488); }
 .ic-silver { color: var(--silver, #c3c9d6); }
-.ic-good { color: var(--good, #7ee3a2); }
-.ic-bad { color: var(--bad, #ff6b5e); }
+.ic-good { color: var(--good, #86c08f); }
+.ic-bad { color: var(--bad, #e2725d); }
 .ic-dim { opacity: 0.7; }
 
 /* on the parchment Herald and Saga the icons are printed in the page's ink */

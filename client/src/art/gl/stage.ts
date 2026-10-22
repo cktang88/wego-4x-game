@@ -138,6 +138,8 @@ class UnderLayer {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
   dispose() { dropTarget(this.gl, this.nebT); this.nebT = null; }
+  /** force a nebula redraw on the next frame */
+  forget() { this.lastCam = ''; }
 }
 
 class LightLayer {
@@ -366,6 +368,11 @@ export class ArtStage {
     this.U?.dispose(); this.L?.dispose();
     for (const c of [this.under, this.light, this.shade]) (c.getContext('webgl2') as GL | null)?.getExtension('WEBGL_lose_context')?.loseContext();
   }
+
+  /** A new map: the sky is seeded per galaxy. */
+  setSeed(seed: number) { if (seed !== this.seed) { this.seed = seed; this.U?.forget(); } }
+  /** Fixed: the player chose a tier, the governor keeps out of it. */
+  setFixed(v: boolean) { this.fixed = v; this.slowFor = 0; }
 
   setQuality(q: Quality) {
     if (q === this.quality) return;

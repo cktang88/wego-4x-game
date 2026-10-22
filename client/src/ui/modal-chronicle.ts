@@ -6,6 +6,7 @@ import { bodyKindAt, taggedBodyName } from '../../../shared/sim/systems.ts';
 import { openBattleViewer } from '../render/battle.ts';
 import { type Ctx, ui, esc } from './modal-util.ts';
 import { ic, icFor } from '../art/icons.ts';
+import { ownerHi } from '../art/bible.ts';
 
 const sentence = (t: string) => { const m = /^(.+?[.!?])(\s|$)/.exec(t); return m ? m[1] : t; };
 function clip(t: string, words = 10): { short: string; more: boolean } {
@@ -72,13 +73,13 @@ export function chronicleBody(c: Ctx): string {
     const battles = bs === null ? '<span class="dim">Loading battles…</span>' : bsShown.map(b => {
       const lost = Object.values(b.losses).reduce((a, n) => a + n, 0);
       const w = b.winner;
-      return `<button class="bchip" data-a="battle" data-id="${b.id}" data-turn="${turn}" style="--pc:${esc(w === null ? '#a59ccc' : g.color(w))}" title="${esc(b.name)}"><span class="bchip-ic">⚔</span><b>${esc(b.name.replace(/^(The )?Battle (of|for) /i, ''))}</b><span class="dim">${b.sides.map(s => `<i class="dot" style="background:${esc(g.color(s.owner))}"></i>`).join('')}${lost ? ` −${lost}` : ''}</span></button>`;
+      return `<button class="bchip" data-a="battle" data-id="${b.id}" data-turn="${turn}" style="--pc:${esc(w === null ? '#a9abb3' : ownerHi(g.color(w)))}" title="${esc(b.name)}"><span class="bchip-ic">⚔</span><b>${esc(b.name.replace(/^(The )?Battle (of|for) /i, ''))}</b><span class="dim">${b.sides.map(s => `<i class="dot" style="background:${esc(ownerHi(g.color(s.owner)))}"></i>`).join('')}${lost ? ` −${lost}` : ''}</span></button>`;
     }).join('');
     const entries = es.map(({ e, i }) => {
       const k = `${turn}:${i}`;
       const open = ui.chronOpen.has(k);
       const { short, more } = clip(e.text);
-      const col = e.players.length === 1 ? g.color(e.players[0]) : e.players.length === 2 ? g.color(e.players[0]) : 'var(--m-line2)';
+      const col = e.players.length === 1 ? ownerHi(g.color(e.players[0])) : e.players.length === 2 ? ownerHi(g.color(e.players[0])) : 'var(--m-line2)';
       // star systems: the body it happened on, with its tag once earned ("Vel II, the Burned World")
       const reg = e.region !== undefined ? st.regions[e.region] : undefined;
       const bk = reg && e.body !== undefined ? bodyKindAt(reg, e.body) : null;
@@ -107,7 +108,7 @@ export function chronicleAct(c: Ctx, a: string, el: HTMLElement): boolean {
       const rep = h && h !== 'loading' ? h.battles.find(b => b.id === bid) : st.last?.battles.find(b => b.id === bid);
       if (!rep) return true;
       openBattleViewer(rep, {
-        rules: st.rules, you: g.you, live: g.live, regionName: r => st.regions[r]?.name ?? '?', playerColor: o => g.color(o),
+        rules: st.rules, you: g.you, live: g.live, regionName: r => st.regions[r]?.name ?? '?', playerColor: o => ownerHi(g.color(o)),
         playerName: o => o === -1 ? (rep.sides.some(x => x.owner === -1 && x.fleets.length) ? 'The Warden' : 'Neutral garrison') : g.pname(o),
       });
       return true;

@@ -6,6 +6,7 @@ import type { Ship } from '../../../shared/sim/types.ts';
 import { type Ctx, type Host, ui, esc, ROMAN, per, costHtml, pendingResearch, pendingRevoke, pendingBlueprint, pendingOrder, leftover, affordable, shortOf, dropFree, dropOrder, lockWhy, costState, pendingPlayers } from './modal-util.ts';
 import { ic as icn, icFor } from '../art/icons.ts';
 import { miniUrl, paintMinis } from './ship-plinth.ts';
+import { ownerHi, enamelBoss } from '../art/bible.ts';
 
 const BRANCH_IDS = Object.keys(BRANCHES) as Branch[];
 const TIER = ['', 'I', 'II', 'III', '★'];
@@ -74,7 +75,7 @@ export function empirePid(g: Host): number {
 /** Header extras: spectator player picker + one compact resource line. */
 export function empireHead(c: Ctx): string {
   const g = c.g, st = g.st, pid = empirePid(g);
-  const pick = g.you === null ? `<div class="mh-pick">${st.players.map(p => `<button class="crest-b ${p.id === pid ? 'on' : ''}" data-a="emp-pid" data-id="${p.id}" style="--pc:${esc(p.color)}">${esc(p.name)}</button>`).join('')}</div>` : '';
+  const pick = g.you === null ? `<div class="mh-pick">${st.players.map(p => `<button class="crest-b ${p.id === pid ? 'on' : ''}" data-a="emp-pid" data-id="${p.id}" style="--pc:${esc(ownerHi(p.color))}">${esc(p.name)}</button>`).join('')}</div>` : '';
   if (st.rules.empire?.enabled === false) return pick;
   const conn = connected(st, pid);
   const cut = st.regions.filter(r => r.owner === pid && !conn.has(r.id)).length;
@@ -147,9 +148,9 @@ function researchHtml(c: Ctx): string {
       : inf.s === 'other' ? '<span class="dim">forsaken</span>'
       : showCost ? costHtml(cost, inf.s === 'short' ? shortOf(g, pid, left, cost) : undefined) : '';
     const rivals = st.players.filter(p => p.id !== pid && p.techs?.includes(t.id) && !(inf.s === 'rival' && p.id === inf.owner));
-    const dots = rivals.length ? `<span class="rn-dots">${rivals.map(p => `<i style="background:${esc(p.color)}" title="${esc(p.name)} has it"></i>`).join('')}</span>` : '';
-    const rc = inf.owner !== undefined ? `;--rc:${esc(st.players[inf.owner].color)}` : '';
-    return `<button class="rn s-${inf.s} t${t.tier}${ui.tech === t.id ? ' sel' : ''}${fx} ${cls}" data-a="tech" data-id="${t.id}" style="--bc:${B.color}${rc}" title="${esc(t.name)}" aria-label="${esc(`${t.name}, ${TIER[t.tier]}, ${inf.s}`)}">
+    const dots = rivals.length ? `<span class="rn-dots">${rivals.map(p => `<i style="background:${esc(ownerHi(p.color))}" title="${esc(p.name)} has it"></i>`).join('')}</span>` : '';
+    const rc = inf.owner !== undefined ? `;--rc:${esc(ownerHi(st.players[inf.owner].color))}` : '';
+    return `<button class="rn s-${inf.s} t${t.tier}${ui.tech === t.id ? ' sel' : ''}${fx} ${cls}" data-a="tech" data-id="${t.id}" style="--bc:${enamelBoss(B.color)}${rc}" title="${esc(t.name)}" aria-label="${esc(`${t.name}, ${TIER[t.tier]}, ${inf.s}`)}">
       <span class="rn-disc"><span class="rn-ic">${icn(icFor('tech', t.id, t.icon))}</span><i class="rn-tier">${TIER[t.tier]}</i></span><span class="rn-nm">${esc(t.name.replace(/^The /, ''))}</span><span class="rn-sub">${sub}</span>${dots}</button>`;
   };
   const cols = BRANCH_IDS.map(b => {
@@ -157,7 +158,7 @@ function researchHtml(c: Ctx): string {
     const ts = TECHS.filter(t => t.branch === b);
     const f = ts.filter(t => t.tier === 3);
     const owned = ts.filter(t => pl.techs?.includes(t.id)).length;
-    return `<section class="rb" style="--bc:${B.color}" data-branch="${b}">
+    return `<section class="rb" style="--bc:${enamelBoss(B.color)}" data-branch="${b}">
       <header class="rb-h"><span class="rb-ic">${icn(icFor('branch', b, B.icon))}</span><b>${B.name}</b><span class="rb-pips">${[0, 1, 2, 3].map(i => `<i class="${i < owned ? 'on' : ''}"></i>`).join('')}</span></header>
       <div class="rb-tree"><svg class="rb-lines" aria-hidden="true"></svg>
         <div class="rb-row">${node(ts.find(t => t.tier === 1))}</div>
@@ -187,7 +188,7 @@ function techCard(c: Ctx, pid: number, editable: boolean): string {
   let act = '';
   if (editable && inf.s === 'avail') {
     const pend = pendingResearch(g);
-    act = `<button class="mbtn go" data-a="research" data-id="${t.id}" style="--bc:${B.color}">${pend ? 'Research instead' : 'Research'} <span class="cost">${costHtml(cost)}</span></button>`;
+    act = `<button class="mbtn go" data-a="research" data-id="${t.id}" style="--bc:${enamelBoss(B.color)}">${pend ? 'Research instead' : 'Research'} <span class="cost">${costHtml(cost)}</span></button>`;
   } else if (editable && inf.s === 'pending' && !g.live) act = `<span class="m-why gold">✺ Queued</span><button class="mbtn m-ghost" data-a="unresearch">↶ Undo</button>`;
   else if (inf.s === 'short') act = `<span class="m-why neg">Need ${costHtml(cost, shortOf(g, pid, left, cost))}</span>`;
   else if (inf.s === 'own') act = `<span class="m-why ok">✓ Researched</span>`;
@@ -195,12 +196,12 @@ function techCard(c: Ctx, pid: number, editable: boolean): string {
   else if (inf.why) act = `<span class="m-why ${inf.s === 'rival' || inf.s === 'locked' ? 'neg' : 'dim'}">${esc(inf.why)}</span>${inf.s === 'busy' || inf.s === 'locked' ? `<span class="m-why dim">${costHtml(cost)}</span>` : ''}`;
   if (g.you === pid && !g.canPlan && inf.s === 'avail') act = `<span class="m-why dim">${esc(lockWhy(g))}</span>`;
   const owners = st.players.filter(p => p.techs?.includes(t.id));
-  return `<div class="tcard" data-a="noop" style="--bc:${B.color}" role="dialog" aria-label="${esc(t.name)}">
+  return `<div class="tcard" data-a="noop" style="--bc:${enamelBoss(B.color)}" role="dialog" aria-label="${esc(t.name)}">
     <button class="tcard-x" data-a="tech-close" aria-label="Close">×</button>
     <div class="tcard-h"><span class="tcard-ic">${icn(icFor('tech', t.id, t.icon))}</span><div><b>${esc(t.name)}</b><small>${icn(icFor('branch', t.branch, B.icon))} ${B.name} ${TIER[t.tier]}${t.tier === 3 ? ' · pick one' : t.tier === 4 ? ' · one owner' : ''}</small></div></div>
     <div class="tcard-fx" title="${esc(t.desc)}">${esc(TECH_FX[t.id] ?? '')}</div>
     ${unlock.length ? `<div class="tcard-un">${unlock.map(unlockChip(pid, st.players[pid]?.color ?? '#888')).join('')}</div>` : ''}
-    ${owners.length ? `<div class="tcard-own">${owners.map(p => `<span class="crest-dot" style="--pc:${esc(p.color)}">${esc(p.name)}</span>`).join('')}</div>` : ''}
+    ${owners.length ? `<div class="tcard-own">${owners.map(p => `<span class="crest-dot" style="--pc:${esc(ownerHi(p.color))}">${esc(p.name)}</span>`).join('')}</div>` : ''}
     <div class="tcard-act">${act}</div></div>`;
 }
 
@@ -352,7 +353,7 @@ function lawsHtml(c: Ctx): string {
     ui.prevLaw.set(i, activeId);
     const card = (l: typeof pair[number], s: LawSt, other: typeof pair[number]) => {
       const rivals = st.players.filter(p => p.id !== pid && p.laws?.includes(l.id));
-      const riv = rivals.length ? `<span class="lw-riv" title="Rivals with this law in force">${rivals.map(p => `<span><i style="background:${esc(p.color)}"></i>${esc(p.name)}</span>`).join('')}</span>` : '';
+      const riv = rivals.length ? `<span class="lw-riv" title="Rivals with this law in force">${rivals.map(p => `<span><i style="background:${esc(ownerHi(p.color))}"></i>${esc(p.name)}</span>`).join('')}</span>` : '';
       let foot = '';
       const costTx = `✦${s.cost}`;
       if (s.state === 'on') foot = `<span class="lw-tag on">${icn('check')} In force</span>${editable ? `<button class="mbtn m-ghost sm lw-btn" data-a="revoke" data-id="${l.id}" title="Revoke (free)">${icn('undo')} Revoke</button>` : ''}`;
@@ -421,8 +422,8 @@ function shipsHtml(c: Ctx): string {
     const pills = RES_IC.filter(([r]) => cost[r]).map(([r, icon, nm]) => `<span class="arm-pill r-${r}" title="${nm} ${cost[r]}">${icn(icon)}<b>${cost[r]}</b></span>`).join('') || '<span class="arm-pill">free</span>';
     const stat = (icon: string, label: string, val: string, t: string) => `<span class="arm-stat" title="${esc(t)}">${icn(icon)}<b>${val}</b><small>${label}</small></span>`;
     const atk = s.shots > 1 ? `${s.attack}<small>×${s.shots}</small>` : `${s.attack}`;
-    return `<article class="arm-card${block ? ' locked' : ''}${pend ? ' pending' : ''}" data-cls="${k}" style="--pc:${esc(color)}">
-      <div class="arm-art"><canvas data-mini data-cls="${k}" data-owner="${pid}" data-team="${esc(color)}" aria-hidden="true"></canvas>${block ? `<span class="arm-lock" title="Locked">${icn('lock')}</span>` : ''}</div>
+    return `<article class="arm-card${block ? ' locked' : ''}${pend ? ' pending' : ''}" data-cls="${k}" style="--pc:${esc(ownerHi(color))}">
+      <div class="arm-art"><canvas data-mini data-cls="${k}" data-owner="${pid}" data-team="${esc(ownerHi(color))}" aria-hidden="true"></canvas>${block ? `<span class="arm-lock" title="Locked">${icn('lock')}</span>` : ''}</div>
       <div class="arm-body">
         <header class="arm-h"><div class="arm-tt"><h4 class="arm-nm">${esc(d.name)}</h4><span class="arm-role" title="${esc(d.role)}">${esc(ROLE[k] ?? d.role)}</span></div><div class="arm-cost">${pills}</div></header>
         <div class="arm-st">${stat('attack', 'Attack', atk, `Attack ${s.attack}${s.shots > 1 ? ` × ${s.shots} shots` : ''} per round`)}${stat('hull', 'Hull', `${s.hp}`, `Hull ${s.hp}`)}${stat('speed', 'Speed', `${s.speed}`, `Speed ${s.speed} (regions per move)`)}${stat('shield', 'Shield', `${s.shields}`, `Shields ${s.shields} (damage blocked per hit)`)}</div>

@@ -2,6 +2,7 @@
 // The owner colour itself stays the ownership signal (base rings, enamel plates, territory paint); the hull paint is
 // derived from it so a recoloured player still reads as theirs.
 import { type RGB, rgb, mix, shade, saturate } from './util.ts';
+import { enamel as enamelOf, houseOf } from './bible.ts';
 
 export type Faction = 'azure' | 'crimson' | 'gilded' | 'warden' | 'neutral';
 
@@ -40,6 +41,8 @@ export function factionOf(owner: number | null | undefined): Faction {
 
 const cache = new Map<string, Scheme>();
 export function scheme(owner: number | null | undefined, teamHex: string): Scheme {
+  // hulls are lacquered in the house enamel (ART-BIBLE §2.3): any owner colour maps to its enamel base
+  if (houseOf(teamHex)) teamHex = enamelOf(teamHex).base;
   const f = factionOf(owner);
   const k = `${f}|${teamHex}`;
   let s = cache.get(k);

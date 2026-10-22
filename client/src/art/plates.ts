@@ -1,6 +1,7 @@
 // Engraved metal and enamel plates for the map's information: the shield cap (owner enamel, metal rim, the garrison
 // number stays bold and high-contrast), name plates (dark gunmetal with an engraved rule) and number plates on bases.
 import { rgb, css, lit, mix } from './util.ts';
+import { enamel as enamelOf, houseOf } from './bible.ts';
 
 export type Rim = 'iron' | 'silver' | 'gold';
 const RIMS: Record<Rim, [string, string, string]> = {
@@ -11,7 +12,8 @@ const RIMS: Record<Rim, [string, string, string]> = {
 
 /** Fill + rim the current path as an enamel plate in `color` (top-lit), y0..y1 its vertical extent. */
 export function enamel(g: CanvasRenderingContext2D, color: string, y0: number, y1: number, rim: Rim, lw: number) {
-  const c = rgb(color);
+  // a house colour is fired as its enamel base (the lit tone comes from the gradient)
+  const c = rgb(houseOf(color) ? enamelOf(color).base : color);
   const gr = g.createLinearGradient(0, y0, 0, y1);
   gr.addColorStop(0, css(lit(c, 0.32))); gr.addColorStop(0.45, css(c)); gr.addColorStop(1, css(lit(c, -0.32)));
   g.fillStyle = gr; g.fill();

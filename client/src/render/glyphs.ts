@@ -5,11 +5,13 @@ import type { Pt } from '../../../shared/sim/types.ts';
 import { drawIcon, icFor } from '../art/icons.ts';
 
 export const TAU = Math.PI * 2;
-export const numFont = (px: number, w = 700) => `${w} ${px}px "Rajdhani", system-ui, sans-serif`;
-export const nameFont = (px: number) => `600 ${px}px "Rajdhani", system-ui, sans-serif`;
-export const displayFont = (px: number) => `700 ${px}px "Cinzel", "Rajdhani", Georgia, serif`;
-export const PLATE = 'rgba(9,6,20,0.88)';
-export const INK = '#0b0716';
+/** Figures: Alegreya Sans (ART-BIBLE §7), humanist like Fell and Cinzel. */
+export const numFont = (px: number, w = 700) => `${w >= 700 ? 800 : w} ${px}px "Alegreya Sans", "Gill Sans", system-ui, sans-serif`;
+export const nameFont = (px: number) => `700 ${px}px "Alegreya Sans", "Gill Sans", system-ui, sans-serif`;
+/** Labels and names in space: Cinzel caps. */
+export const displayFont = (px: number) => `700 ${px}px "Cinzel", Georgia, serif`;
+export const PLATE = 'rgba(14,15,19,0.88)';
+export const INK = '#07080c';
 
 export function hexA(hex: string, a: number): string {
   const h = hex.replace('#', '');

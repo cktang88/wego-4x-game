@@ -5,6 +5,8 @@ import './ux.css';
 import './empire.css';
 import './shell.css';
 import './icons.css';
+// the art bible's tokens and component kit (.k-*): every screen's chrome is built from it
+import './art/kit.css';
 import { GameScreen, backfillRules } from './game.ts';
 import { LocalSource, RemoteSource, api, tokens, type LocalSave } from './net.ts';
 import { esc, toast, overlay } from './ui/dom.ts';
@@ -12,6 +14,10 @@ import { ic } from './art/icons.ts';
 import { openTweaks, loadOverrides, countOverrides } from './ui/tweaks.ts';
 import { audio } from './audio/audio.ts';
 import { installAudioHooks, openSoundSettings, soundIcon } from './audio/hooks.ts';
+import { openGraphicsSettings } from './ui/graphics.ts';
+import { enhanceSelects } from './ui/kselect.ts';
+import { tableFor, onTableChange } from './art/gl/table.ts';
+import { enamel } from './art/bible.ts';
 import type { GameMeta } from '../../shared/protocol.ts';
 import { LIVE_SPEEDS } from '../../shared/sim/live.ts';
 import { PLAYER_COLORS, NEUTRAL_COLOR } from '../../shared/config/content.ts';
@@ -168,7 +174,37 @@ function notice(kind: 'wait' | 'bad', title: string, body: string) {
     <div class="lb-actions"><a class="lb-btn" href="#/">${kind === 'wait' ? 'Cancel' : 'Back to lobby'}</a></div></div></div></div>`;
 }
 
-const seatColor = (seat: number) => PLAYER_COLORS[seat] ?? NEUTRAL_COLOR;
+/** A seat's colour in the lobby: the house enamel's lit tone (the state may still carry the retired neons). */
+const seatColor = (seat: number) => enamel(PLAYER_COLORS[seat] ?? NEUTRAL_COLOR).hi;
+
+/** The war table under the lobby: the same GL sky, lamp and grain as the board (art/gl/table.ts), slowly drifting.
+ *  Without WebGL2 (or Graphics: off) the CSS felt and lamp pool in lobby.css are the table. */
+function lobbyTable(host: HTMLElement) {
+  const c = document.createElement('canvas');
+  c.className = 'lb-sky';
+  c.setAttribute('aria-hidden', 'true');
+  host.appendChild(c);
+  const seed = 4471;
+  const t0 = performance.now();
+  // the lobby is a still page: the sky drifts at ~10 fps on a timer (no animation-frame loop, idle CPU stays low),
+  // pauses while the tab is hidden, and stops altogether on the 2D table (the CSS felt needs no frames)
+  let timer = 0;
+  const step = () => {
+    timer = 0;
+    if (!c.isConnected) { off(); return; }
+    const st = tableFor(c, seed);
+    host.classList.toggle('gl', !!st);
+    if (!st) return;
+    if (!document.hidden) {
+      const t = (performance.now() - t0) / 1000;
+      st.frame({ cam: { x: Math.sin(t * 0.013) * 160, y: Math.cos(t * 0.011) * 90, z: 0.55 }, t, stars: [] }, host.clientWidth, host.clientHeight);
+    }
+    timer = window.setTimeout(step, 100);
+  };
+  // the player switched Graphics on (or the context came back): start again
+  const off = onTableChange(() => { if (!timer && c.isConnected) step(); });
+  step();
+}
 
 function joinDialog(meta: GameMeta) {
   const live = meta.mode === 'live';
@@ -233,11 +269,11 @@ function lobby() {
   const saved = store.get('tc.local.autosave');
   if (saved) { try { const sv = JSON.parse(saved) as LocalSave; saveTurn = sv.state.winner === null ? Math.max(1, Number(sv.state.turn) || 1) : -1; } catch { saveTurn = 0; } }
   const name = store.get('tc.name') ?? '';
-  app.innerHTML = `<div class="lobby"><div class="lobby-inner">
-    <header class="title"><h1>THREE CROWNS</h1>
+  app.innerHTML = `<div class="lobby"><div class="lb-table" aria-hidden="true"></div><div class="lobby-inner">
+    <header class="title"><h1>Three Crowns</h1><div class="lb-orn" aria-hidden="true"><i></i>${ic('crown')}<i></i></div>
       <p>Three heirs. One empty throne. <b>Five orders a turn</b>, no matter how big your empire grows. Everyone plans in secret, then everything happens at once.</p></header>
     <div class="cards">
-      <section class="card lb-play"><h2>Play vs AI</h2>
+      <section class="card lb-play lb-sheet"><div class="lb-articles">Articles of War</div><h2>Play vs AI</h2>
         <div class="form">
           <label for="l-name">Your name</label><input id="l-name" data-l="name" maxlength="40" autocomplete="nickname" value="${esc(name)}" placeholder="Azure Compact">
           <label for="l-ai1">Rival 1</label><select id="l-ai1" data-l="ai1">${AI_OPTS('standard', 'Human (hotseat)')}</select>
@@ -246,7 +282,7 @@ function lobby() {
           <p class="lb-hint" data-l="hint" aria-live="polite"></p>
           <label for="l-seed">Seed</label><input id="l-seed" data-l="seed" placeholder="Random map" inputmode="numeric" pattern="[0-9]*">
         </div>
-        <div class="lb-actions"><button class="primary lb-start" data-l="start">Start</button>${saveTurn > 0 ? `<button data-l="continue">Continue <span class="lb-count">turn ${saveTurn}</span></button>` : saveTurn < 0 ? '<button data-l="continue">Last game <span class="lb-count">finished</span></button>' : ''}<button data-l="load">Load file…</button><button data-l="watch">Watch 3 AIs</button></div>
+        <div class="lb-actions"><button class="primary lb-start lb-seal" data-l="start" title="Seal the articles and begin"><span class="lb-wax" aria-hidden="true">${ic('crown')}</span><span class="lb-seal-t">Start</span></button>${saveTurn > 0 ? `<button data-l="continue">Continue <span class="lb-count">turn ${saveTurn}</span></button>` : saveTurn < 0 ? '<button data-l="continue">Last game <span class="lb-count">finished</span></button>' : ''}<button data-l="load">Load file…</button><button data-l="watch">Watch 3 AIs</button></div>
       </section>
       <section class="card lb-online"><h2>Online multiplayer</h2>
         <p class="lb-lead">Send the link to your rivals and play at your own pace. A turn resolves when all three have sealed their orders, or at the deadline (an AI steward covers anyone late).</p>
@@ -263,11 +299,13 @@ function lobby() {
       </section>
       <section class="card lb-fiddle"><h2>Fiddle</h2>
         <p class="lb-lead">Everything is a knob. Change any rule (orders per turn, ship stats, VP values, combat odds…) and start a new game to try it.</p>
-        <div class="lb-actions"><button data-l="tweaks">${tweaksLabel()}</button><button data-l="help">${ic('help')} How to play</button><button data-l="sound">${soundIcon()} Sound</button></div>
+        <div class="lb-actions"><button data-l="tweaks">${tweaksLabel()}</button><button data-l="help">${ic('help')} How to play</button><button data-l="sound">${soundIcon()} Sound</button><button data-l="gfx">${ic('star')} Graphics</button></div>
         <p class="lb-dev">Dev tips: <code>npm run sim -- --games 50</code> runs headless AI-vs-AI balance tests. The <i>Menu</i> in a local game can reveal the whole map. All rules: <code>shared/config/rules.ts</code>.</p>
       </section>
     </div></div></div>`;
   const q = (s: string) => app.querySelector<HTMLInputElement>(s)!;
+  lobbyTable(app.querySelector<HTMLElement>('.lb-table')!);
+  enhanceSelects(app);
   // live / hotseat hints: say what the choice means (and that live turns hotseat rivals into AIs) before Start
   const hintPlay = () => {
     const mode = q('[data-l="mode"]').value, live = mode.startsWith('live');
@@ -342,6 +380,7 @@ function lobby() {
     const b = q('[data-l="sound"]'), off = audio.subscribe(s => { b.innerHTML = `${soundIcon(s.muted)} Sound`; });
     openSoundSettings().addEventListener('fx-removed', off);
   });
+  q('[data-l="gfx"]').addEventListener('click', () => openGraphicsSettings());
   q('[data-l="help"]').addEventListener('click', async () => {
     const { helpHtml } = await import('./ui/help.ts');
     const { createGame } = await import('../../shared/sim/setup.ts');

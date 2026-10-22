@@ -112,20 +112,7 @@ export function smoke(g: CanvasRenderingContext2D, x: number, y: number, r: numb
 }
 
 // ------------------------------------------------------------------ shields
-let hexSpr: HTMLCanvasElement | null = null;
-function hexTile(): HTMLCanvasElement {
-  if (hexSpr) return hexSpr;
-  const c = canvas(128, 128), g = c.getContext('2d')!;
-  g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 1.2;
-  const s = 9;
-  for (let row = -1; row < 12; row++) for (let col = -1; col < 10; col++) {
-    const x = col * s * 1.5, y = row * s * Math.sqrt(3) + (col % 2 ? s * Math.sqrt(3) / 2 : 0);
-    g.beginPath(); for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU; g.lineTo(x + Math.cos(a) * s, y + Math.sin(a) * s); } g.closePath(); g.stroke();
-  }
-  hexSpr = c;
-  return c;
-}
-/** Shield shimmer: a hex-patterned bubble arc centred toward `ang` (the incoming shot), brightness a. */
+/** Shield shimmer: a warm glass bubble arc centred toward `ang` (the incoming shot), brightness a. */
 export function shieldHit(g: CanvasRenderingContext2D, x: number, y: number, r: number, ang: number, col: RGB | string, a: number) {
   if (a <= 0.01) return;
   const c = typeof col === 'string' ? rgb(col) : col;
@@ -135,8 +122,13 @@ export function shieldHit(g: CanvasRenderingContext2D, x: number, y: number, r: 
   const gr = g.createRadialGradient(x + Math.cos(ang) * r, y + Math.sin(ang) * r, 0, x + Math.cos(ang) * r, y + Math.sin(ang) * r, r * 1.6);
   gr.addColorStop(0, css(c, 0.55 * a)); gr.addColorStop(1, css(c, 0));
   g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
-  g.globalAlpha = 0.5 * a;
-  g.drawImage(hexTile(), x - r, y - r, r * 2, r * 2);
+  // warm glass, not a hex grid (ART-BIBLE §8): two faint ripples running out from the impact
+  g.globalAlpha = 0.45 * a;
+  g.strokeStyle = css(mix(c, [255, 245, 225], 0.4), 1);
+  for (const k of [0.45, 0.8]) {
+    g.lineWidth = Math.max(0.8, r * 0.035);
+    g.beginPath(); g.arc(x + Math.cos(ang) * r, y + Math.sin(ang) * r, r * k * (1.4 - a * 0.4), 0, TAU); g.stroke();
+  }
   g.restore();
   g.save(); g.globalCompositeOperation = 'lighter';
   g.strokeStyle = css(mix(c, [255, 255, 255], 0.5), 0.9 * a); g.lineWidth = Math.max(1, r * 0.06);
@@ -153,7 +145,7 @@ export function stamp(g: CanvasRenderingContext2D, text: string, x: number, y: n
   g.save();
   g.translate(x, y); g.rotate(-0.12); g.scale(slam, slam);
   g.globalAlpha *= a;
-  g.font = `900 ${px}px "Cinzel","Rajdhani",Georgia,serif`;
+  g.font = `900 ${px}px "Cinzel",Georgia,serif`;
   const w = g.measureText(text).width + px * 1.1, h = px * 1.7;
   g.strokeStyle = col; g.lineWidth = px * 0.14;
   g.strokeRect(-w / 2, -h / 2, w, h);

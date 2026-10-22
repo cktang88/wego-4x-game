@@ -102,3 +102,54 @@
 /* masthead ears: room for the sigil beside the words */
 .herald-ov .hd-mast { grid-template-columns: minmax(7rem, auto) 1fr minmax(7rem, auto); column-gap: 0.75rem; }
 .herald-ov .hd-ear svg { flex: none; }
+
+/* ============================================================================
+   The paper as an object (ART-BIBLE §3 Vellum, §12 wave 5): laid fibre (parchment.webp multiplied at 0.28; the
+   texture scrolls with the page), the lamp's falloff across the sheet, foxed edges, ink that spreads a hair into
+   the fibre, the faction rules as enamel dashes, and the controls as inked and waxed plates.
+   ============================================================================ */
+.herald-ov .herald {
+  background:
+    radial-gradient(ellipse at 18% 8%, rgba(255, 248, 228, 0.85), rgba(255, 248, 228, 0) 55%),
+    radial-gradient(ellipse at 92% 100%, rgba(110, 74, 30, 0.32), rgba(110, 74, 30, 0) 60%),
+    var(--k-grain) 0 0 / 160px,
+    linear-gradient(170deg, #f1e6ca 0%, #e4d3ab 58%, #cdb588 100%) #e4d3ab;
+  background-blend-mode: normal, normal, multiply, normal;
+  background-attachment: local;
+  border-radius: 3px;
+  box-shadow: 0.6rem 1.875rem 4.5rem rgba(0, 0, 0, 0.8), 0.15rem 0.3rem 0 rgba(0, 0, 0, 0.35), inset 0 0 3.5rem rgba(110, 76, 30, 0.3), inset 0 0 0.4rem rgba(90, 60, 20, 0.35);
+  text-shadow: 0 0 0.4px rgba(35, 25, 14, 0.55);
+}
+/* the fibre: parchment.webp multiplied under a vellum veil (the veil lets ~28% of the fibre through), with the
+   lamp's light and falloff laid over it; everything scrolls with the page */
+.herald-ov .herald {
+  background:
+    radial-gradient(ellipse at 18% 8%, rgba(255, 248, 228, 0.7), rgba(255, 248, 228, 0) 55%),
+    radial-gradient(ellipse at 92% 100%, rgba(110, 74, 30, 0.34), rgba(110, 74, 30, 0) 60%),
+    var(--k-grain) 0 0 / 160px,
+    linear-gradient(170deg, rgba(241, 230, 202, 0.74) 0%, rgba(228, 211, 171, 0.74) 58%, rgba(205, 181, 136, 0.74) 100%),
+    url('/tex/parchment.webp') 0 0 / 520px,
+    linear-gradient(170deg, #f1e6ca 0%, #e4d3ab 58%, #cdb588 100%) #e4d3ab;
+  background-blend-mode: normal, normal, multiply, normal, multiply, normal;
+  background-attachment: local;
+}
+/* dispatches: the sender's colour as a run of enamel dashes in the margin, inked dark enough to read on paper */
+.herald-ov .dsp { border-left: 0; padding-left: 0.875rem;
+  background: repeating-linear-gradient(180deg, color-mix(in srgb, var(--pc) 70%, #2a1d10) 0 0.55rem, transparent 0.55rem 0.8rem) 0 0.2rem / 0.22rem calc(100% - 0.2rem) no-repeat; }
+/* the controls: plates inked on the paper; the action a wax-red plate */
+.herald-ov .seg2 { border: 0; padding: 2px; gap: 2px; border-radius: 3px; background: rgba(42, 29, 16, 0.12); box-shadow: inset 1px 1px 2px rgba(42, 29, 16, 0.45), 0 1px 0 rgba(255, 250, 235, 0.6); }
+.herald-ov .seg2 button { border-radius: 2px; font-family: var(--display); font-weight: 700; letter-spacing: 0.06em; }
+.herald-ov .seg2 button.on { background: linear-gradient(180deg, #3a2814, #1d1309); color: #f0e4c4; box-shadow: inset 1px 1px 0 rgba(255, 230, 190, 0.2), 0 1px 2px rgba(42, 29, 16, 0.5); text-shadow: 0 -1px 0 #000; }
+.herald-ov .herald .hb { border-radius: 3px; border: 0; background: linear-gradient(170deg, #3a2814, #1d1309); box-shadow: inset 1px 1px 0 rgba(255, 230, 190, 0.18), inset -1px -1px 0 rgba(0, 0, 0, 0.5), 0.08rem 0.2rem 0.3rem rgba(42, 29, 16, 0.45); text-shadow: 0 -1px 0 #000; }
+.herald-ov .herald .hb:hover:not(:disabled) { background: linear-gradient(170deg, #4a3418, #26190c); }
+.herald-ov .herald .hb.plain { background: transparent; color: #2a1d10; box-shadow: inset 0 0 0 1px rgba(42, 29, 16, 0.55); text-shadow: none; }
+.herald-ov .herald .hb.go { color: #fde9d8; text-shadow: 0 -1px 0 rgba(40, 0, 0, 0.8);
+  background: radial-gradient(120% 160% at 30% 22%, #b23a30, #8e1f1f 55%, #4a0d0e); box-shadow: inset 1px 1px 0 rgba(255, 200, 180, 0.35), inset -1px -2px 0 rgba(40, 0, 0, 0.6), 0.1rem 0.3rem 0.4rem rgba(42, 29, 16, 0.5); }
+.herald-ov .herald .hb.go:hover:not(:disabled) { background: radial-gradient(120% 160% at 30% 22%, #c2453a, #9a2522 55%, #4a0d0e); }
+.herald-ov .plant { border: 0; border-radius: 3px; background: rgba(255, 250, 235, 0.4); box-shadow: inset 0 0 0 1px rgba(90, 70, 40, 0.5), inset 0 0 1rem rgba(110, 76, 30, 0.12); }
+.herald-ov .plant textarea { border-radius: 3px; }
+.herald-ov .hd-foot { background: linear-gradient(180deg, rgba(221, 204, 164, 0.96), rgba(205, 185, 138, 0.98)), var(--k-grain) 0 0 / 160px; background-blend-mode: normal, multiply; }
+/* Fate stories: lamp gold is Fate's colour; on paper it prints as brass ink (no violet in the palette) */
+.herald-ov .hl.k-fate h2, .herald-ov .hl.k-fate_bonus h2 { color: #6b4a1c; }
+/* bylines in the darker ink: they sit beside the coloured dashes */
+.herald-ov .dsp cite { color: #2a1d10; }

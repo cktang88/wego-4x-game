@@ -1,6 +1,7 @@
 // Miniature bases and flight stands. The base disc's enamel rim is the ownership signal (and the token's hit area);
 // the clear acrylic stand lifts the model off the mat; the cast shadow sits on the cloth.
 import { TAU, rgb, css, lit, shade, mix, canvas, SpriteCache, sizeBucket } from './util.ts';
+import { enamel as enamelOf, houseOf } from './bible.ts';
 
 export const BASE_SQUASH = 0.46;
 interface BaseSpr { img: HTMLCanvasElement; rx: number; w: number; h: number; cy: number }
@@ -61,6 +62,8 @@ function bakeBase(team: string, rx: number, sel: boolean, oos: boolean, big: boo
 
 /** Draw a base centred (top face) at (x, y); rx in ctx units, rxDev in device px. */
 export function drawBase(g: CanvasRenderingContext2D, x: number, y: number, rx: number, rxDev: number, team: string, o: { sel?: boolean; oos?: boolean; big?: boolean } = {}) {
+  // the base's rim is the house enamel (base tone), whatever owner colour the caller holds
+  team = houseOf(team) ? enamelOf(team).base : team;
   const R = sizeBucket(rxDev);
   const s = cache.get(`${team}|${R}|${o.sel ? 1 : 0}|${o.oos ? 1 : 0}|${o.big ? 1 : 0}`, () => bakeBase(team, R, !!o.sel, !!o.oos, !!o.big));
   const k = rx / s.rx;

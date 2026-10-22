@@ -31,12 +31,35 @@ export function hasWebGL2(): boolean {
 }
 
 /** A WebGL2 context tuned for a compositing layer: no depth/stencil/AA, premultiplied alpha, low-power hint. */
+/** A software rasteriser behind WebGL2 (SwiftShader, llvmpipe, Microsoft's basic renderer): the browser does not
+ *  always flag it as a "major performance caveat" (Chromium's ANGLE + SwiftShader on Vulkan doesn't), so the
+ *  renderer string is checked too. Probed once. */
+let soft: boolean | null = null;
+export function softwareGL(): boolean {
+  if (soft !== null) return soft;
+  soft = false;
+  try {
+    const g = document.createElement('canvas').getContext('webgl2');
+    const d = g?.getExtension('WEBGL_debug_renderer_info');
+    const r = g && d ? String(g.getParameter(d.UNMASKED_RENDERER_WEBGL)) : '';
+    soft = /swiftshader|llvmpipe|softpipe|software|basic render/i.test(r);
+    g?.getExtension('WEBGL_lose_context')?.loseContext();
+  } catch { /* */ }
+  return soft;
+}
+
+/** Ask for a hardware context only (the Graphics setting "auto"): a software rasteriser (SwiftShader, llvmpipe,
+ *  a blocklisted GPU) would spend the frame budget on the sky, so the 2D table is the better choice there. */
+let hardwareOnly = false;
+export function setHardwareOnly(v: boolean) { hardwareOnly = v; }
+
 export function context(canvas: HTMLCanvasElement, alpha = true): GL | null {
   if (!hasWebGL2()) return null;
   try {
     return canvas.getContext('webgl2', {
       alpha, premultipliedAlpha: true, antialias: false, depth: false, stencil: false,
       preserveDrawingBuffer: false, powerPreference: 'low-power', desynchronized: false,
+      failIfMajorPerformanceCaveat: hardwareOnly,
     }) as GL | null;
   } catch { return null; }
 }

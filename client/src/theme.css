@@ -1,187 +1,343 @@
 /* ============================================================================
-   Chrome theme: the HUD, cards, strip, buttons, modals, menus and toasts as
-   pieces of the same tabletop as the painted miniatures (client/src/art):
-   dark gunmetal and enamel plates, brass / silver / gold trim, engraved Cinzel
-   titles, lit from the same warm lamp at the upper left. Rajdhani stays for
-   numbers and body text. No backdrop blur (the map animates underneath).
-   Loaded last (game.ts), so it refines shell.css / modals.css / style.css.
+   Chrome theme (docs/ART-BIBLE.md §2, §5, §7): the HUD, cards, strip, buttons, dialogs, tooltips and toasts as
+   objects on the same war table as the painted miniatures. Built from the kit (art/kit.css, the --k-* tokens):
+     blued steel plates in a brass rim · engraved brass for the primary action · enamel tokens instead of pills ·
+     vellum slips for tooltips and notes · sunken wells for inputs · lever toggles, brass knobs, engraved selects.
+   One warm lamp at the upper left: highlight top-left, shadow bottom-right, cast shadow down-right.
+   Three radii only: 3px machined (plates, buttons, tabs, tokens), 7px (cards, sheets, dialogs), 50% (coins).
+   Loaded after style.css / shell.css (game.ts), so it refines them; it does not move anything.
    ============================================================================ */
 :root {
-  --bg: #0b0c10;
+  --bg: #07080c;
   --text: #ece3cf;
-  --dim: #a89f8c;
-  --faint: #9a907e;
+  --dim: #b4a88f;
+  --faint: #a69b84;
   --accent: #d9b26a;
-  --line: rgba(214, 173, 98, 0.22);
-  --line-strong: rgba(214, 173, 98, 0.48);
-  --good: #7ee3a2;
-  --bad: #ff6b5e;
-  --gold: #ffd86b;
-  --display: 'Cinzel', 'Rajdhani', Georgia, serif;
-  --brass: #c8964a; --brass-hi: #f4dc9c; --brass-lo: #6b4a1c;
+  --line: rgba(220, 180, 108, 0.22);
+  --line-strong: rgba(220, 180, 108, 0.48);
+  /* semantic colours in the enamel family (ART-BIBLE §2.4): malachite, cinnabar, amber, lamp gold */
+  --good: #86c08f;
+  --bad: #e2725d;
+  --warn: #e4ab4a;
+  --info: #9bbbd9;
+  --gold: #f1d488;
+  /* type (ART-BIBLE §7): Alegreya Sans for UI and figures, Cinzel for display, IM Fell for prose */
+  --font: 'Alegreya Sans', 'Gill Sans', 'Segoe UI', system-ui, sans-serif;
+  --display: 'Cinzel', 'Trajan Pro', Georgia, serif;
+  --prose: 'IM Fell English', 'Iowan Old Style', Georgia, serif;
+  --black: 'UnifrakturMaguntia', 'Cinzel', serif;
+  --brass: #c8964a; --brass-hi: #efd59a; --brass-lo: #6b4a1c;
   --silver: #c3c9d6; --iron: #6c7183;
-  /* a plate: gunmetal, lit from the upper left */
-  --plate: linear-gradient(158deg, #31343e 0%, #1d1f26 42%, #121318 100%);
-  --plate-hi: linear-gradient(158deg, #3a3e4a 0%, #23262e 42%, #16171c 100%);
-  --plate-deep: linear-gradient(158deg, #24262d 0%, #15161b 50%, #0c0d10 100%);
-  --rim: rgba(201, 160, 90, 0.42);
-  --rim-hi: rgba(240, 210, 140, 0.75);
-  --bevel: inset 1px 1px 0 rgba(255, 238, 205, 0.13), inset -1px -1px 0 rgba(0, 0, 0, 0.55);
-  --drop: 0 0.5rem 1.375rem rgba(0, 0, 0, 0.55), 0 1px 1px rgba(0, 0, 0, 0.6);
-  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ease-spring: cubic-bezier(0.2, 1.35, 0.4, 1);
+  /* plates: blued steel, lit from the upper left */
+  --plate: var(--k-steel-face);
+  /* a large plate (cards, popovers, the lobby's plates): a radial face, darker, so a big area is not a grey slab */
+  --k-card-face: radial-gradient(120% 90% at 20% 0%, #2e313b 0%, #1d1f25 50%, #131418 100%);
+  --plate-hi: var(--k-steel-face-hi);
+  --plate-deep: linear-gradient(162deg, #24262d 0%, #16171c 50%, #0e0f13 100%);
+  --rim: rgba(200, 150, 74, 0.5);
+  --rim-hi: rgba(239, 213, 154, 0.8);
+  --bevel: var(--k-bevel);
+  --drop: var(--k-cast-lift);
+  --r-plate: 3px;
+  --r-card: 7px;
+  --ease-out: var(--k-ease-heavy);
+  --ease-spring: var(--k-ease-strike);
+  /* glass is retired: the old glass tokens resolve to steel */
+  --glass: #1b1d23; --glass-hi: #262932; --panel: #16171c; --panel-solid: #16171c;
 }
 html, body { background: var(--bg); }
+body { font-variant-numeric: lining-nums tabular-nums; font-feature-settings: 'lnum' 1, 'tnum' 1; }
 
-/* ------------------------------------------------------------ global buttons, inputs, dialogs, toasts */
+/* ------------------------------------------------------------ buttons: blued-steel plates in a brass rim */
 button {
-  background: var(--plate); border: 1px solid var(--rim); color: var(--text); border-radius: 0.5rem;
-  box-shadow: var(--bevel), 0 0.125rem 0.375rem rgba(0, 0, 0, 0.35);
+  position: relative; border: 1px solid; border-color: #dcb46c #6b4a1c #3a2810 #a87a35; border-radius: var(--r-plate); color: var(--text);
+  background:var(--k-grain) 0 0 / 160px, var(--k-steel-face) padding-box #262932;
+  background-blend-mode: soft-light, normal, normal;
+  box-shadow: var(--k-bevel), var(--k-cast);
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.7);
+  transition: transform var(--k-t-press) var(--k-ease-heavy), box-shadow var(--k-t-press) var(--k-ease-heavy), filter var(--k-t-tick) linear;
 }
-button:hover:not(:disabled) { background: var(--plate-hi); border-color: var(--rim-hi); box-shadow: var(--bevel), 0 0 0 1px rgba(214, 173, 98, 0.18), 0 0.125rem 0.625rem rgba(0, 0, 0, 0.45); }
-button:active:not(:disabled) { transform: translateY(1px) scale(0.98); box-shadow: inset 1px 0.125rem 0.25rem rgba(0, 0, 0, 0.6); filter: brightness(1.1); }
+button:hover:not(:disabled) {
+  background:var(--k-grain) 0 0 / 160px, var(--k-steel-face-hi) padding-box #2b2e37;
+  background-blend-mode: soft-light, normal, normal; border-color: transparent;
+  box-shadow: var(--k-bevel), var(--k-cast); filter: brightness(1.08); border-color: #dcb46c #6b4a1c #3a2810 #a87a35; }
+button:active:not(:disabled) { transform: translate(1px, 2px); box-shadow: var(--k-press); filter: none; }
+button:focus-visible { outline: 2px solid var(--k-brass-200); outline-offset: 2px; }
+/* the primary action: an engraved brass plate, the ink cut into the metal */
 button.primary {
-  background: linear-gradient(170deg, #f6dc98 0%, #d4a24c 45%, #8e6122 100%); color: #20160a; border-color: #fff0c0; font-weight: 700;
-  text-shadow: 0 1px 0 rgba(255, 245, 210, 0.55); box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.55), inset -1px -0.125rem 0 rgba(60, 35, 5, 0.45), 0 0.25rem 0.875rem rgba(0, 0, 0, 0.5);
-}
-button.primary:hover:not(:disabled) { background: linear-gradient(170deg, #fff0bc 0%, #e2b25a 45%, #9b6a26 100%); box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.6), inset -1px -0.125rem 0 rgba(60, 35, 5, 0.45), 0 0 1rem rgba(255, 210, 120, 0.35); }
-input, select, textarea { background: rgba(4, 4, 6, 0.55); border: 1px solid var(--line); border-radius: 0.375rem; box-shadow: inset 1px 1px 0.1875rem rgba(0, 0, 0, 0.6); }
-input:focus, textarea:focus, select:focus { outline: none; border-color: var(--rim-hi); box-shadow: inset 1px 1px 0.1875rem rgba(0, 0, 0, 0.6), 0 0 0 0.125rem rgba(214, 173, 98, 0.2); }
-h1, h2, h3 { font-family: var(--display); }
-h2 { color: var(--accent); }
-.overlay { background: rgba(5, 5, 7, 0.72); }
-.dialog {
-  background: var(--plate); border: 1px solid var(--rim); border-radius: 0.875rem;
-  box-shadow: var(--bevel), 0 0 0 1px rgba(0, 0, 0, 0.6), 0 1.5rem 5rem rgba(0, 0, 0, 0.75);
-}
-.dialog::after { content: ''; position: absolute; inset: 0.3125rem; border-radius: 0.625rem; border: 1px solid rgba(214, 173, 98, 0.12); pointer-events: none; }
-.toast {
-  background: var(--plate-hi); border: 1px solid var(--rim-hi); border-radius: 0.625rem; box-shadow: var(--bevel), var(--drop);
-  font-weight: 600; letter-spacing: 0.02em; padding: 0.5625rem 1.125rem;
-}
-.uxtip { background: var(--plate-deep); border: 1px solid var(--rim); box-shadow: var(--bevel), 0 0.5rem 1.75rem rgba(0, 0, 0, 0.65); color: var(--text); }
-.banner { font-family: var(--display); font-weight: 800; color: #fff4d6; text-shadow: 0 0.125rem 0 #000, 0 0 1.375rem rgba(255, 200, 110, 0.7), 0 0 2.75rem rgba(255, 170, 80, 0.4); }
+  background:var(--k-grain) 0 0 / 160px, var(--k-brass-face) padding-box #c8964a;
+  background-blend-mode: soft-light, normal, normal;
+  color: #2a1a06; font-family: var(--display); font-weight: 700; letter-spacing: 0.06em;
+  text-shadow: 0 1px 0 rgba(255, 245, 210, 0.55), 0 -1px 0 rgba(60, 35, 5, 0.2);
+  box-shadow: var(--k-bevel-brass), var(--k-cast); border-color: #fff3c8 #8a5f22 #3a2810 #c8964a; }
+button.primary:hover:not(:disabled) {
+  background:var(--k-grain) 0 0 / 160px, var(--k-brass-face) padding-box #c8964a;
+  background-blend-mode: soft-light, normal, normal;
+  box-shadow: var(--k-bevel-brass), var(--k-cast); filter: brightness(1.07) saturate(1.05); border-color: #fff3c8 #8a5f22 #3a2810 #c8964a; }
+button.primary:active:not(:disabled) { box-shadow: inset 1px 2px 5px rgba(70, 40, 6, 0.7), var(--k-cast); }
+/* danger: cinnabar enamel in a blackened iron rim */
+button.danger {
+  color: #fde9d8; text-shadow: 0 -1px 0 rgba(40, 6, 2, 0.9);
+  background:var(--k-grain) 0 0 / 160px, radial-gradient(120% 140% at 28% 18%, #ad4436 0%, #9a3427 45%, #5a1710 100%) padding-box #9a3427;
+  background-blend-mode: soft-light, normal, normal;
+  box-shadow: inset 1px 1px 0 rgba(255, 210, 190, 0.3), inset -1px -1px 0 rgba(40, 0, 0, 0.6), var(--k-cast); border-color: #8a909c #2a2c33 #0c0d10 #5b6170; }
+button.danger:hover:not(:disabled) {
+  background:var(--k-grain) 0 0 / 160px, radial-gradient(120% 140% at 28% 18%, #b54838 0%, #a33a2b 45%, #5a1710 100%) padding-box #9a3427;
+  background-blend-mode: soft-light, normal, normal; border-color: #8a909c #2a2c33 #0c0d10 #5b6170; }
+/* disabled: an unlit, tarnished plate; the engraving still reads (never a 40% ghost) */
+button:disabled, button[aria-disabled=true] {
+  opacity: 1; cursor: not-allowed; color: #9a9080; text-shadow: 0 1px 0 rgba(255, 255, 255, 0.04); filter: none;
+  background:var(--k-grain) 0 0 / 160px, linear-gradient(162deg, #24262c, #18191d) padding-box #1f2126;
+  background-blend-mode: soft-light, normal, normal;
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.04), inset -1px -1px 0 rgba(0, 0, 0, 0.5); border-color: #4a4f5a #1d1f25 #121318 #353945; }
+button.active { box-shadow: var(--k-bevel), 0 0 0 1px var(--k-brass-300) inset, var(--k-cast); }
 .closex { border-radius: 50%; width: 1.875rem; height: 1.875rem; padding: 0; }
 
-/* ------------------------------------------------------------ HUD plates */
-.glassy, .turnbox, .respill, .crests, .strip:not(:empty), .tool, .nchip, .nbadge, .card, .pop, .dragcard, .loupe, .ri, .replaybar {
-  background: var(--plate); border: 1px solid var(--rim); box-shadow: var(--bevel), var(--drop);
+/* ------------------------------------------------------------ inputs: sunken wells in the steel */
+input:not([type=checkbox]):not([type=radio]):not([type=range]), select, textarea {
+  border: 1px solid; border-color: #050506 #3a2810 #6b4a1c #121318; border-radius: var(--r-plate); color: var(--text);
+  background:linear-gradient(180deg, #08090b, #15161b) padding-box #101114;
+  box-shadow: inset 1px 1px 3px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 230, 170, 0.08);
 }
+input::placeholder, textarea::placeholder { font-family: var(--prose); font-style: italic; color: #9a8f78; opacity: 1; }
+input:focus, textarea:focus, select:focus { outline: none; box-shadow: inset 1px 1px 3px rgba(0, 0, 0, 0.9), 0 0 0 2px rgba(220, 180, 108, 0.45); }
+/* a select is an engraved plate with a struck chevron; its list is a vellum slip (ui/kselect.ts), never the native chevron */
+select {
+  -webkit-appearance: none; appearance: none; cursor: pointer; padding-right: 2.25rem;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%23000' stroke-opacity='.7' stroke-width='2.4'/%3E%3Cpath d='M1 1 6 6 11 1' fill='none' stroke='%23efd59a' stroke-width='1.6'/%3E%3C/svg%3E") right 0.85rem center / 0.75rem no-repeat,
+    var(--k-grain) 0 0 / 160px, var(--k-steel-face) padding-box #262932;
+  background-blend-mode: normal, soft-light, normal, normal;
+  box-shadow: var(--k-bevel), var(--k-cast); border-color: #dcb46c #6b4a1c #3a2810 #a87a35; }
+select:hover { filter: brightness(1.08); }
+option { background: #e9dcbc; color: #2a1d10; }
+/* a checkbox is a lever switch with an amber indicator lamp (kit .k-toggle), drawn on the input itself */
+input[type=checkbox] {
+  -webkit-appearance: none; appearance: none; flex: none; margin: 0; cursor: pointer; vertical-align: middle;
+  width: 2.6rem; height: 1.35rem; border-radius: var(--r-plate); border: 0;
+  background:
+    radial-gradient(circle at 35% 30%, #6b5a40, #2a2016) right 0.35rem center / 0.4rem 0.4rem no-repeat,
+    linear-gradient(170deg, #f4dc9c, #c8964a 45%, #6b4a1c) 2px 50% / 1.25rem calc(100% - 4px) no-repeat,
+    linear-gradient(180deg, #060607, #1f2126);
+  box-shadow: inset 1px 1px 3px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 230, 170, 0.12), 0 0 0 1px #3a3e48;
+  transition: background-position var(--k-t-settle) var(--k-ease-heavy);
+}
+input[type=checkbox]:checked {
+  background:
+    radial-gradient(circle at 35% 30%, #fff2c0, #f0b545 50%, #8a5a10) left 0.35rem center / 0.4rem 0.4rem no-repeat,
+    linear-gradient(170deg, #f4dc9c, #c8964a 45%, #6b4a1c) calc(100% - 2px) 50% / 1.25rem calc(100% - 4px) no-repeat,
+    linear-gradient(180deg, #060607, #1f2126);
+}
+input[type=checkbox]:focus-visible { outline: 2px solid var(--k-brass-200); outline-offset: 2px; }
+input[type=checkbox]:disabled { filter: grayscale(0.8) brightness(0.7); cursor: not-allowed; }
+/* a slider is a brass knob, knurled, in a sunken groove (kit .k-slider), wherever a range input appears */
+input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; border: 0; box-shadow: none; padding: 0; cursor: pointer; }
+input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: var(--r-plate); background: linear-gradient(180deg, #050506, #22242a); box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 230, 170, 0.12); }
+input[type=range]::-moz-range-track { height: 6px; border-radius: var(--r-plate); background: linear-gradient(180deg, #050506, #22242a); box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.9); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 1.35rem; height: 1.35rem; margin-top: calc(3px - 0.675rem); border-radius: 50%; border: 0;
+  background: repeating-conic-gradient(from 0deg, rgba(0, 0, 0, 0.22) 0 6deg, transparent 6deg 12deg), radial-gradient(circle at 35% 30%, #fff1c4, #c8964a 50%, #5e4116 100%);
+  box-shadow: 0 0 0 1px #2a1c08, 0.1rem 0.25rem 0.35rem rgba(0, 0, 0, 0.7), inset 1px 1px 0 rgba(255, 250, 220, 0.6); }
+input[type=range]::-moz-range-thumb { width: 1.35rem; height: 1.35rem; border-radius: 50%; border: 0; background: radial-gradient(circle at 35% 30%, #fff1c4, #c8964a 50%, #5e4116 100%); box-shadow: 0 0 0 1px #2a1c08, 0.1rem 0.25rem 0.35rem rgba(0, 0, 0, 0.7); }
+
+h1, h2, h3 { font-family: var(--display); }
+h2 { color: var(--accent); text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.7); }
+.tag, .kbd { border-radius: var(--r-plate); }
+.trait { border-radius: var(--r-plate); background: rgba(241, 212, 136, 0.1); border-color: rgba(241, 212, 136, 0.35); }
+.vpbar, .vpbar i { border-radius: 3px; }
+.entry { border-radius: 0 var(--r-plate) var(--r-plate) 0; }
+
+/* ------------------------------------------------------------ dialogs: a leather-backed tray in a brass rim */
+.overlay { background: radial-gradient(120% 100% at 42% 34%, rgba(7, 8, 12, 0.55), rgba(4, 3, 2, 0.82)); }
+.dialog {
+  border: 1px solid; border-color: #dcb46c #6b4a1c #3a2810 #a87a35; border-radius: var(--r-card); isolation: isolate;
+  background:var(--k-grain) 0 0 / 160px, radial-gradient(120% 80% at 18% 0%, #2b2420 0%, #17120e 55%, #0b0806 100%) padding-box #17120e;
+  background-blend-mode: soft-light, normal, normal;
+  box-shadow: var(--k-bevel), 0 0 0 1px rgba(0, 0, 0, 0.6), 0.4rem 1.5rem 4rem rgba(0, 0, 0, 0.75);
+}
+.dialog::after { content: ''; position: absolute; inset: 0.3125rem; border-radius: 3px; pointer-events: none; z-index: -1;
+  box-shadow: inset 1px 1px 0 rgba(0, 0, 0, 0.5), inset -1px -1px 0 rgba(255, 230, 170, 0.08), 0 0 0 1px rgba(200, 150, 74, 0.16); }
+.dialog::before { content: ''; position: absolute; inset: 0; border-radius: inherit; z-index: -1; pointer-events: none;
+  background: var(--k-leather) 0 0 / 360px; mix-blend-mode: soft-light; opacity: 0.3; }
+.dialog h2 { font-weight: 700; letter-spacing: 0.1em; }
+
+/* ------------------------------------------------------------ toasts and tooltips: vellum slips */
+.toast {
+  color: var(--k-ink-text); border: 0; border-radius: 3px; font-weight: 700; letter-spacing: 0.01em; padding: 0.6rem 1.15rem 0.65rem;
+  background:var(--k-grain) 0 0 / 160px, radial-gradient(130% 120% at 30% 20%, #f3e8cc 0%, #e4d3ab 60%, #cdb588 100%) #e4d3ab;
+  background-blend-mode: multiply, normal;
+  clip-path: polygon(0% 6%, 8% 0%, 22% 4%, 38% 0%, 55% 3%, 72% 0%, 88% 4%, 100% 0%, 99% 50%, 100% 96%, 86% 100%, 68% 96%, 50% 100%, 32% 97%, 14% 100%, 0% 95%, 1% 50%);
+  filter: drop-shadow(0.12rem 0.35rem 0.4rem rgba(0, 0, 0, 0.65)); box-shadow: none;
+  --text: #2a1d10; --dim: #5d4a30; --good: #2f6b3c; --bad: #8e1f1f; --gold: #7a5512; --accent: #6b4a1c; --warn: #7a4e0c;
+}
+.uxtip {
+  color: var(--k-ink-text); border: 0; border-radius: 3px; font-family: var(--font);
+  background:var(--k-grain) 0 0 / 160px, radial-gradient(130% 120% at 30% 20%, #f3e8cc 0%, #e4d3ab 60%, #cdb588 100%) #e4d3ab;
+  background-blend-mode: multiply, normal;
+  clip-path: polygon(0% 2%, 6% 0%, 14% 1.5%, 23% 0%, 34% 1%, 46% 0%, 58% 1.5%, 70% 0%, 82% 1%, 93% 0%, 100% 1.5%, 99.4% 20%, 100% 42%, 99.4% 64%, 100% 86%, 99% 100%, 86% 98.5%, 74% 100%, 61% 99%, 48% 100%, 35% 98.5%, 22% 100%, 10% 98.5%, 0% 100%, 0.6% 78%, 0% 56%, 0.6% 32%);
+  filter: drop-shadow(0.12rem 0.3rem 0.35rem rgba(0, 0, 0, 0.65)); box-shadow: none;
+  /* the HUD's colour words, re-inked for paper */
+  --text: #2a1d10; --dim: #5d4a30; --faint: #6b5638; --good: #2f6b3c; --bad: #8e1f1f; --gold: #7a5512; --accent: #6b4a1c; --warn: #7a4e0c; --info: #2f5577;
+  --brass: #6b4a1c; --brass-hi: #4a2c10; --m-text: #2a1d10; --m-dim: #5d4a30;
+}
+.uxtip b, .uxtip strong, .uxtip h4 { color: #3a2208; }
+.uxtip .kbd, .uxtip kbd { color: #3a2408; border-color: rgba(42, 29, 16, 0.4); }
+.banner { font-family: var(--display); font-weight: 800; color: #f8ecd0; text-shadow: 0 0.125rem 0 #000, 0 0 1.375rem rgba(255, 200, 110, 0.55); }
+
+/* ------------------------------------------------------------ HUD plates: steel in a brass rim, grain, lamp bevel */
+.glassy, .turnbox, .respill, .crests, .strip:not(:empty), .tool, .nchip, .nbadge, .card, .pop, .dragcard, .loupe, .ri, .replaybar {
+  border: 1px solid; border-color: #dcb46c #6b4a1c #3a2810 #a87a35;
+  background:var(--k-grain) 0 0 / 160px, var(--k-steel-face) padding-box #262932;
+  background-blend-mode: soft-light, normal, normal;
+  box-shadow: var(--k-bevel), var(--k-cast);
+}
+.glassy, .turnbox, .crests, .tool, .ri, .pop, .dragcard, .loupe { border-radius: var(--r-plate); }
 .replaybar { background: transparent; border: none; box-shadow: none; }
-.turnbox b { font-family: var(--display); font-weight: 700; letter-spacing: 0.12em; color: #f6ead0; text-shadow: 0 1px 0 #000; }
+.turnbox b { font-family: var(--display); font-weight: 700; letter-spacing: 0.12em; color: #f3ead6; text-shadow: 0 -1px 0 #000; }
 .turnbox b small { font-family: var(--font); }
 .turnbox .ph-plan { color: var(--you) !important; }
-.respill { border-radius: 0.625rem; }
-.respill i { color: var(--brass); }
-.respill b { color: #f8efdc; text-shadow: 0 1px 0 #000; }
-.respill:hover, .crests:hover, .nchip:hover, .tool:hover { background: var(--plate-hi); border-color: var(--rim-hi); }
-.crests { border-radius: 0.75rem; }
-.pcrest .cb { background: linear-gradient(160deg, color-mix(in srgb, var(--pc) 70%, #fff 30%) 0%, var(--pc) 40%, color-mix(in srgb, var(--pc) 60%, #000) 100%); filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.7)) drop-shadow(0 0 0.5px #e8d29a); }
-.pcrest .vp { text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4); }
-.pcrest.you { background: linear-gradient(180deg, color-mix(in srgb, var(--pc) 22%, transparent), transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pc) 60%, transparent), inset 0 -0.125rem 0 var(--pc); }
-.pcrest .vpbar > i { background: linear-gradient(90deg, #a87a2c, var(--gold)); }
+.turnbox .ph-preview, .turnbox .ph-watch { color: var(--info) !important; }
+/* resources: enamel tokens on a small steel plate */
+.respill { border-radius: var(--r-plate); }
+.respill i { color: var(--brass-hi); filter: drop-shadow(0 -1px 0 rgba(0, 0, 0, 0.7)); }
+.respill b { color: var(--text); text-shadow: 0 -1px 0 #000; font-weight: 800; }
+.respill small { font-size: max(var(--fs-xs), 0.8em); }
+.respill:hover, .crests:hover, .nchip:hover, .tool:hover {
+  background:var(--k-grain) 0 0 / 160px, var(--k-steel-face-hi) padding-box #2b2e37; background-blend-mode: soft-light, normal, normal; border-color: transparent; border-color: #dcb46c #6b4a1c #3a2810 #a87a35; }
+/* crests: an enamel heater shield in a brass edge, the figure engraved */
+.pcrest { border-radius: var(--r-plate); }
+.pcrest .cb {
+  background: radial-gradient(circle at 35% 25%, color-mix(in srgb, var(--pc) 75%, #fff 25%) 0%, var(--pc) 45%, color-mix(in srgb, var(--pc) 45%, #000) 100%);
+  filter: drop-shadow(0 0 0.6px #c8964a) drop-shadow(0 0 0.6px #c8964a) drop-shadow(0.06rem 0.12rem 0.1rem rgba(0, 0, 0, 0.7));
+}
+.pcrest .vp { color: #f8efdc; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.8), 0 0 2px rgba(0, 0, 0, 0.6); }
+.pcrest.you { background: linear-gradient(180deg, rgba(220, 180, 108, 0.12), transparent); box-shadow: inset 0 0 0 1px rgba(220, 180, 108, 0.45), inset 0 -2px 0 var(--k-brass-300); }
+.pcrest .vpbar { border-radius: 3px; background: linear-gradient(180deg, #050506, #22242a); box-shadow: inset 1px 1px 1px rgba(0, 0, 0, 0.8); }
+.pcrest .vpbar > i { background: linear-gradient(180deg, #f4dc9c, #a87a35); }
+/* the "sealed" mark: a pressed wax dot (wax is for the irreversible commit, ART-BIBLE §3), never a mint bubble.
+   The reward-moments seal (.sealed.wax, fx/delight.css) draws its own and is left alone. */
+.pcrest .sealed:not(.wax) { color: rgba(255, 222, 205, 0.92); background: radial-gradient(circle at 35% 30%, #c2453a, #8e1f1f 60%, #4a0d0e); box-shadow: 0.05rem 0.1rem 0.15rem rgba(0, 0, 0, 0.7); border-radius: 50%; }
+.pcrest .nm .on { background: var(--good); box-shadow: 0 0 0.3rem rgba(134, 192, 143, 0.6); }
 .pcrest .crack { position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(115deg, transparent 46%, #200 46%, #ff4a3a 49%, #200 52%, transparent 52%); opacity: 0.9; }
-.pcrest.oath .cb { outline: 1.5px solid #ff4a3a; outline-offset: 1px; }
-.tool { color: #f0e2bf; text-shadow: 0 1px 0 #000; }
-.tool .dot, .nbadge .dot { background: radial-gradient(circle at 35% 35%, #fff4c4, var(--gold)); }
-.nchip { border-radius: 0.625rem; }
-.nchip.bad { border-color: rgba(255, 107, 94, 0.55); }
+  background: linear-gradient(115deg, transparent 46%, #200 46%, #c2453a 49%, #200 52%, transparent 52%); opacity: 0.9; }
+.pcrest.oath .cb { outline: 1.5px solid #c2453a; outline-offset: 1px; }
+.tool { color: #f0e2bf; text-shadow: 0 -1px 0 #000; }
+.tool .ti { color: var(--brass-hi); filter: drop-shadow(0 -1px 0 rgba(0, 0, 0, 0.7)); }
+.tool .dot, .nbadge .dot { background: radial-gradient(circle at 35% 35%, #fff4c4, #f0b545 55%, #8a5a10); box-shadow: 0 0 0.35rem rgba(255, 190, 90, 0.7); }
+.nchip { border-radius: var(--r-plate); }
+.nchip.info i { color: var(--info); }
 
-/* ------------------------------------------------------------ strip, chips, primary */
-.strip { border-radius: 0.875rem; }
-.chip { border-radius: 0.5625rem; }
-.chip.empty { border: 1.5px dashed rgba(214, 173, 98, 0.32); background: rgba(0, 0, 0, 0.22); box-shadow: inset 1px 1px 0.25rem rgba(0, 0, 0, 0.55); }
-.chip.empty small { font-family: var(--display); color: rgba(214, 173, 98, 0.78); font-weight: 700; }
+/* large plates take the darker card face; the riveted brass domes sit in their corners */
+.card, .pop, .lobby .card:not(.lb-sheet) {
+  background:var(--k-grain) 0 0 / 160px, var(--k-card-face) padding-box #1d1f25; background-blend-mode: soft-light, normal, normal;
+  box-shadow: var(--k-bevel), var(--k-cast-lift); border-color: #8a909c #353945 #1d1f25 #5b6170; }
+.lobby .card:not(.lb-sheet) { background-color: #1d1f25; }
+/* four brass rivets in the plate's corners (a pseudo-element, so the plate's own face stays one dark material) */
+.lobby .card:not(.lb-sheet)::after { content: ''; position: absolute; inset: 5px; pointer-events: none; border-radius: 3px;
+  background:
+    radial-gradient(circle at 40% 35%, #f4dc9c 0 1px, #a87a35 1.6px, #3a2810 2.6px, transparent 3px) 0 0 / 8px 8px no-repeat,
+    radial-gradient(circle at 40% 35%, #f4dc9c 0 1px, #a87a35 1.6px, #3a2810 2.6px, transparent 3px) 100% 0 / 8px 8px no-repeat,
+    radial-gradient(circle at 40% 35%, #f4dc9c 0 1px, #a87a35 1.6px, #3a2810 2.6px, transparent 3px) 0 100% / 8px 8px no-repeat,
+    radial-gradient(circle at 40% 35%, #f4dc9c 0 1px, #a87a35 1.6px, #3a2810 2.6px, transparent 3px) 100% 100% / 8px 8px no-repeat; }
+
+/* ------------------------------------------------------------ the order strip: brass sockets on a steel rail */
+.strip { border-radius: var(--r-card); }
+.chip { border-radius: var(--r-plate); }
+.chip.empty { border: 1px solid; border-color: #050506 #3a2810 #6b4a1c #121318; background: linear-gradient(180deg, #08090b, #17181d) padding-box;
+  box-shadow: inset 1px 2px 4px rgba(0, 0, 0, 0.85); }
+.chip.empty small { font-family: var(--display); color: rgba(220, 180, 108, 0.85); font-weight: 700; text-shadow: 0 -1px 0 #000; }
+.chip.empty.target { background: linear-gradient(180deg, #14110a, #221c10) padding-box, linear-gradient(180deg, #f4dc9c, #6b4a1c) border-box; }
 .chip.filled {
-  background: linear-gradient(160deg, color-mix(in srgb, var(--you) 30%, #2a2c34) 0%, color-mix(in srgb, var(--you) 14%, #15161b) 100%);
-  border: 1px solid color-mix(in srgb, var(--you) 50%, #c8964a); box-shadow: var(--bevel), 0 0.125rem 0.375rem rgba(0, 0, 0, 0.45);
+  border: 1px solid; border-color: #dcb46c #6b4a1c #3a2810 #a87a35;
+  background: var(--k-grain) 0 0 / 160px, linear-gradient(160deg, color-mix(in srgb, var(--you) 26%, #2e313b) 0%, color-mix(in srgb, var(--you) 12%, #17191e) 100%) padding-box;
+  background-blend-mode: soft-light, normal, normal;
+  box-shadow: var(--k-bevel), var(--k-cast);
 }
-.chip.k-seize { background: linear-gradient(160deg, #6a2028 0%, #3a0f16 100%); border-color: rgba(255, 120, 110, 0.7); }
-.chip .x { background: var(--plate-hi); border-color: var(--rim); }
+.chip.k-seize { background: var(--k-grain) 0 0 / 160px, linear-gradient(160deg, #6e2620 0%, #3a100c 100%) padding-box, linear-gradient(150deg, #e2725d, #4a0d0e) border-box; background-blend-mode: soft-light, normal, normal; }
+.chip.k-seize .oic { color: var(--bad); }
+.chip .x { background: var(--plate-hi); border-color: var(--rim); border-radius: 50%; }
 .chip.freec { background: var(--plate-deep); border: 1px solid var(--rim); }
-.sbtn { background: var(--plate-deep); border-color: var(--rim); }
+.sbtn { background: var(--plate-deep); border-color: var(--rim); border-radius: var(--r-plate); }
+/* the commit button. Ready to seal: a poured-wax plate with the charge debossed; else a steel plate */
 .pbtn {
-  font-family: var(--display) !important; font-weight: 800; letter-spacing: 0.14em;
-  background: linear-gradient(165deg, color-mix(in srgb, var(--you) 62%, #fff 38%) 0%, var(--you) 42%, color-mix(in srgb, var(--you) 55%, #000) 100%);
-  border: 1px solid #f0d48e; color: #0f0b06 !important; text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
-  box-shadow: 0 0 0 0.125rem #6b4a1c, inset 1px 1px 0 rgba(255, 255, 255, 0.55), inset -1px -0.1875rem 0 rgba(0, 0, 0, 0.3), 0 0.5rem 1.375rem rgba(0, 0, 0, 0.55);
-  transition: transform 0.08s, box-shadow 0.12s, filter 0.12s;
+  font-family: var(--display) !important; font-weight: 800; letter-spacing: 0.14em; border-radius: var(--r-plate);
+  border: 1px solid; border-color: #f4dc9c #8a5f22 #3a2810 #c8964a; color: #fde9d8 !important; text-shadow: 0 -1px 0 rgba(40, 6, 2, 0.9), 0 1px 0 rgba(255, 170, 150, 0.2);
+  background:radial-gradient(120% 90% at 30% 22%, rgba(255, 190, 170, 0.35), transparent 45%),
+    var(--k-grain) 0 0 / 160px,
+    radial-gradient(140% 160% at 40% 30%, #b23a30 0%, #8e1f1f 50%, #4a0d0e 100%) padding-box #8e1f1f;
+  background-blend-mode: normal, soft-light, normal, normal;
+  box-shadow: inset 1px 1px 0 rgba(255, 200, 180, 0.35), inset -1px -2px 0 rgba(40, 0, 0, 0.6), var(--k-cast-lift);
+  transition: transform var(--k-t-press) var(--k-ease-heavy), box-shadow var(--k-t-press), filter var(--k-t-tick);
 }
-.pbtn:active:not(:disabled) { transform: translateY(0.125rem); box-shadow: 0 0 0 0.125rem #6b4a1c, inset 1px 0.125rem 0.3125rem rgba(0, 0, 0, 0.45), 0 0.1875rem 0.625rem rgba(0, 0, 0, 0.5); }
-.pbtn.idle, .pbtn.research { background: var(--plate-hi); color: var(--text) !important; text-shadow: 0 1px 0 #000; border-color: var(--rim-hi); box-shadow: 0 0 0 0.125rem #3a2a12, var(--bevel), var(--drop); }
+.pbtn:hover:not(:disabled) { filter: brightness(1.1); }
+.pbtn:active:not(:disabled) { transform: translate(1px, 2px); box-shadow: inset 1px 2px 5px rgba(30, 0, 0, 0.7), var(--k-cast); }
+.pbtn.idle, .pbtn.research, .pbtn.waiting, .pbtn.clock {
+  color: var(--text) !important; text-shadow: 0 -1px 0 #000;
+  background:var(--k-grain) 0 0 / 160px, var(--k-steel-face-hi) padding-box #2b2e37; background-blend-mode: soft-light, normal, normal;
+  box-shadow: var(--k-bevel), var(--k-cast-lift); border-color: #dcb46c #6b4a1c #3a2810 #a87a35; }
 .pbtn.research { color: var(--gold) !important; }
-.pbtn.waiting, .pbtn.clock { background: var(--plate-deep); color: var(--dim) !important; text-shadow: none; border-color: var(--rim); box-shadow: var(--bevel); }
-.pbtn.gold { background: linear-gradient(165deg, #fff1bd, #d9a73e 50%, #8a5c1c); }
-.pmini { background: var(--plate-hi); border: 1px solid var(--rim); box-shadow: var(--bevel), var(--drop); }
-.pmini.seal { color: var(--you); }
-.pmini:hover { background: var(--plate); border-color: var(--rim-hi); }
+.pbtn.waiting, .pbtn.clock { color: var(--dim) !important; background: var(--k-grain) 0 0 / 160px, var(--plate-deep) padding-box, linear-gradient(150deg, #8a909c, #2a2c33) border-box; background-blend-mode: soft-light, normal, normal; box-shadow: var(--k-bevel); }
+.pbtn.gold { color: #2a1a06 !important; text-shadow: 0 1px 0 rgba(255, 245, 210, 0.55);
+  background:var(--k-grain) 0 0 / 160px, var(--k-brass-face) padding-box #c8964a; background-blend-mode: soft-light, normal, normal; box-shadow: var(--k-bevel-brass), var(--k-cast-lift); border-color: #fff3c8 #8a5f22 #3a2810 #c8964a; }
+.pmini { border-radius: var(--r-plate); background:var(--k-grain) 0 0 / 160px, var(--k-steel-face-hi) padding-box #2b2e37; background-blend-mode: soft-light, normal, normal; border: 1px solid; border-color: #dcb46c #6b4a1c #3a2810 #a87a35; box-shadow: var(--k-bevel), var(--k-cast); }
+.pmini.seal { color: var(--k-wax-hi); }
+.pmini:hover { filter: brightness(1.1); }
 
-/* ------------------------------------------------------------ selection card */
-.card { border-radius: 0.875rem; animation: cardin 0.26s var(--ease-spring); }
-.card::before { content: ''; position: absolute; left: 0.625rem; right: 0.625rem; top: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(255, 230, 170, 0.5), transparent); }
-@keyframes cardin { from { opacity: 0; transform: translateY(0.875rem) scale(0.97); } }
-.card .nm { font-family: var(--display); font-weight: 700; letter-spacing: 0.05em; text-shadow: 0 1px 0 #000; }
-.card .crestdot { background: linear-gradient(160deg, color-mix(in srgb, var(--pc) 70%, #fff) 0%, var(--pc) 45%, color-mix(in srgb, var(--pc) 60%, #000)); filter: drop-shadow(0 0 0.6px #e8d29a); }
-.card .st i { color: var(--brass); }
+/* ------------------------------------------------------------ selection card: a riveted plate (phone: a leather sheet) */
+.card { border-radius: var(--r-card); animation: cardin var(--k-t-sheet) var(--k-ease-heavy); }
+.card::before { content: ''; position: absolute; left: 0.625rem; right: 0.625rem; top: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(255, 230, 170, 0.45), transparent); }
+@keyframes cardin { from { opacity: 0; transform: translate(0.25rem, 0.875rem) rotate(0.6deg); } }
+.card .nm { font-family: var(--display); font-weight: 700; letter-spacing: 0.05em; text-shadow: 0 -1px 0 #000; }
+.card .crestdot { background: radial-gradient(circle at 35% 25%, color-mix(in srgb, var(--pc) 75%, #fff) 0%, var(--pc) 45%, color-mix(in srgb, var(--pc) 45%, #000)); filter: drop-shadow(0 0 0.6px #c8964a); }
+.card .st i { color: var(--brass-hi); }
 .card .cmd em { color: var(--gold); }
-.ib, .tile, .sc, .seg button, .odds { background: linear-gradient(158deg, rgba(255, 245, 225, 0.07), rgba(0, 0, 0, 0.18)); border-color: rgba(214, 173, 98, 0.26); box-shadow: inset 1px 1px 0 rgba(255, 238, 205, 0.07); }
-.seg { border-color: var(--rim); }
-.ib:hover:not([aria-disabled=true]), .tile:hover:not([aria-disabled=true]) { border-color: var(--rim-hi); background: linear-gradient(158deg, rgba(255, 230, 170, 0.14), rgba(0, 0, 0, 0.12)); }
-.ib:active:not([aria-disabled=true]), .tile:active:not([aria-disabled=true]), .sc:active { transform: translateY(1px) scale(0.97); }
-.seg button.on { background: linear-gradient(160deg, color-mix(in srgb, var(--you) 45%, #2a2c34), color-mix(in srgb, var(--you) 20%, #121318)); }
+.ib, .tile, .sc, .seg button, .odds { border-radius: var(--r-plate); background: linear-gradient(158deg, rgba(255, 245, 225, 0.06), rgba(0, 0, 0, 0.2)); border-color: rgba(220, 180, 108, 0.26); box-shadow: var(--k-bevel); }
+.seg { border-color: var(--rim); border-radius: var(--r-plate); }
+.ib:hover:not([aria-disabled=true]), .tile:hover:not([aria-disabled=true]) { border-color: var(--rim-hi); background: linear-gradient(158deg, rgba(255, 230, 170, 0.12), rgba(0, 0, 0, 0.12)); }
+.ib:active:not([aria-disabled=true]), .tile:active:not([aria-disabled=true]), .sc:active { transform: translate(1px, 2px); box-shadow: var(--k-press); }
+.seg button.on { color: #2a1a06; text-shadow: 0 1px 0 rgba(255, 245, 210, 0.5); background:var(--k-grain) 0 0 / 160px, var(--k-brass-face) #c8964a; background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel-brass); }
 .tile .pi { color: var(--brass-hi); }
 .trh { color: var(--brass); font-family: var(--display); letter-spacing: 0.14em; }
-.sc.up { border-color: var(--gold); background: rgba(255, 216, 107, 0.14); }
-.dpips i.on { background: linear-gradient(180deg, #f4dc9c, #b8883e); }
-.phone .card { background: var(--plate); box-shadow: 0 -0.75rem 2.5rem rgba(0, 0, 0, 0.65), var(--bevel); border-color: var(--rim); }
-.phone .card::before { left: 50%; top: 0.375rem; width: 2.5rem; height: 0.25rem; margin-left: -1.25rem; border-radius: 0.125rem; background: rgba(214, 173, 98, 0.45); right: auto; }
+.sc.up { border-color: var(--gold); background: rgba(241, 212, 136, 0.12); }
+.dpips i { border-radius: 3px; }
+.dpips i.on { background: linear-gradient(180deg, #f4dc9c, #a87a35); }
+.phone .card {
+  border-radius: var(--r-card) var(--r-card) 0 0;
+  background:var(--k-grain) 0 0 / 160px, linear-gradient(180deg, #1f1915, #0e0a08) padding-box #140f0c; background-blend-mode: soft-light, normal, normal;
+  box-shadow: var(--k-bevel), 0 -0.75rem 2.5rem rgba(0, 0, 0, 0.7); border-color: #dcb46c #6b4a1c #3a2810 #a87a35; }
+/* the phone sheet's handle: a brass bar, not a grey pill */
+.phone .card::before { left: 50%; top: 0.375rem; width: 2.75rem; height: 0.3rem; margin-left: -1.375rem; border-radius: 3px; background: linear-gradient(180deg, #f4dc9c, #6b4a1c); box-shadow: 0 1px 0 #000; right: auto; }
 
 /* ------------------------------------------------------------ ring, popovers, callouts, drag card */
-.ri { color: #f0e2bf; }
-.ri.on, .ri:hover { background: var(--plate-hi); border-color: var(--rim-hi); box-shadow: 0 0 0 0.125rem rgba(214, 173, 98, 0.35), var(--drop); }
-.pop { background: var(--plate); }
-.menu > button, .menu .mrow button { background: transparent; border: none; box-shadow: none; }
-.menu > button:hover, .menu .mrow button:hover { background: rgba(214, 173, 98, 0.14); }
-.menu i { color: var(--brass); }
-.lenses button { background: transparent; box-shadow: none; }
-.lenses button.on { border-color: var(--rim-hi); background: rgba(214, 173, 98, 0.16); }
-.callout { background: linear-gradient(170deg, #fbe7ae, #d9a84a 60%, #a8742a); box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.6), 0 0.375rem 1.5rem rgba(0, 0, 0, 0.55); font-family: var(--display); font-weight: 800; letter-spacing: 0.05em; }
-.callout::after { border-top-color: #b98436; }
+.ri { color: #f0e2bf; border-radius: 50%; }
+.ri.on, .ri:hover { box-shadow: 0 0 0 2px rgba(220, 180, 108, 0.45), var(--k-bevel), var(--k-cast); filter: brightness(1.1); }
+.menu > button, .menu .mrow button { background: transparent; border: none; box-shadow: none; border-radius: var(--r-plate); }
+.menu > button:hover, .menu .mrow button:hover { background: rgba(220, 180, 108, 0.12); filter: none; }
+.menu i { color: var(--brass-hi); }
+.lenses button { background: transparent; box-shadow: none; border-radius: var(--r-plate); }
+.lenses button.on { border-color: var(--rim-hi); background: rgba(220, 180, 108, 0.14); }
+.callout { border-radius: var(--r-plate); color: #2a1a06; background:var(--k-grain) 0 0 / 160px, var(--k-brass-face) #c8964a; background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel-brass), var(--k-cast-lift); font-family: var(--display); font-weight: 800; letter-spacing: 0.05em; }
+.callout::after { border-top-color: #9a6a2c; }
 .callout button { box-shadow: none; }
 .dragcard { border-left-width: 0.1875rem; }
-.ghost { border-color: #f0d48e; }
+.ghost { border-color: #efd59a; }
 
 /* ------------------------------------------------------------ modals */
 .mdl-root {
-  --m-panel: #15161b; --m-panel2: #1d1f26; --m-card: rgba(255, 240, 215, 0.035);
-  --m-line: rgba(214, 173, 98, 0.18); --m-line2: rgba(214, 173, 98, 0.4);
-  --m-text: #efe7d6; --m-dim: #a89f8c; --m-faint: #9a907e; --m-good: #7ee3a2; --m-bad: #ff6b5e;
+  --m-panel: #16171c; --m-panel2: #1b1d23; --m-card: rgba(255, 240, 215, 0.035);
+  --m-line: rgba(220, 180, 108, 0.2); --m-line2: rgba(220, 180, 108, 0.42);
+  --m-text: #ece3cf; --m-dim: #b4a88f; --m-faint: #a69b84; --m-good: #86c08f; --m-bad: #e2725d;
 }
-.mdl-back { background: rgba(5, 5, 7, 0.7); }
-.mdl {
-  background: radial-gradient(120% 70% at 18% -12%, #2c2e37 0%, #17181d 52%, #101115 100%);
-  border: 1px solid var(--m-line2); box-shadow: 0 1.875rem 5.625rem rgba(0, 0, 0, 0.75), var(--bevel), 0 0 0 1px rgba(0, 0, 0, 0.7);
-}
-.mdl::after { content: ''; position: absolute; inset: 0.375rem; border: 1px solid rgba(214, 173, 98, 0.1); border-radius: 0.8125rem; pointer-events: none; }
-.mh-title { font-family: var(--display); font-weight: 800; letter-spacing: 0.16em; color: #f6ead0; text-shadow: 0 0.125rem 0 #000; }
-.mdl-root h3 { font-family: var(--display); color: var(--brass); }
-.mbtn { --bb: linear-gradient(158deg, rgba(255, 245, 225, 0.08), rgba(0, 0, 0, 0.2)); --bd: var(--m-line2); --bsh: inset 1px 1px 0 rgba(255, 238, 205, 0.08); }
-.mbtn.go { --bc: #c8964a; color: #fff6e0; }
-.mbtn.go.hot { --bc: #ffd86b; color: #1c1408; }
-.mdl-head { background: linear-gradient(180deg, rgba(255, 238, 205, 0.04), transparent); }
+.mdl-back { background: radial-gradient(120% 100% at 42% 34%, rgba(7, 8, 12, 0.55), rgba(4, 3, 2, 0.84)); }
+.mh-title { font-family: var(--display); font-weight: 800; letter-spacing: 0.14em; color: #f3ead6; text-shadow: 0 -1px 0 #000, 0 1px 0 rgba(255, 230, 170, 0.08); }
+.mdl-root h3 { font-family: var(--display); color: var(--k-engraved); }
 
-/* ------------------------------------------------------------ lobby */
-.lobby { background: radial-gradient(ellipse at 28% 18%, #2c2a26 0%, #141519 52%, #08080a 100%); }
-.title h1 { font-family: var(--display); font-weight: 900; color: var(--gold); text-shadow: 0 0.1875rem 0 #000, 0 0 1.875rem rgba(255, 200, 110, 0.35); }
-.lobby .card { background: var(--plate); border: 1px solid var(--rim); box-shadow: var(--bevel), var(--drop); }
+/* ------------------------------------------------------------ the lobby's board-card geometry guard */
 /* the board's selection card (shell.css .card: 22rem wide, max-height + scroll) shares the class name: undo its
    geometry here, or phone lobby cards were clipped to a scrolling sliver with their inputs past the screen edge */
-.lobby .card { position: relative; width: auto; max-height: none; overflow: visible; left: auto; right: auto; bottom: auto; z-index: auto; min-width: 0; }
+.lobby .card { position: relative; width: auto; max-height: none; overflow: visible; left: auto; right: auto; bottom: auto; z-index: auto; min-width: 0; animation: none; }
 .lobby .form > * { min-width: 0; }
 .lobby .form input, .lobby .form select { max-width: 100%; }
 
-@media (prefers-reduced-motion: reduce) { .card { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .card { animation: none !important; } input[type=checkbox] { transition: none; } }
 
 /* icons in the chrome are glyphs, not colour emoji */
 .hud, .mdl-root, .overlay, .herald-ov, .saga-ov, .uxtip, .toast { font-variant-emoji: text; }
@@ -190,4 +346,5 @@ h2 { color: var(--accent); }
 @media (pointer: coarse) {
   .closex { width: 2.75rem; height: 2.75rem; }
   .dialog .row > button, .dialog > button { min-height: 2.75rem; }
+  input[type=checkbox] { width: 2.9rem; height: 1.5rem; }
 }

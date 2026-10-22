@@ -87,7 +87,7 @@
 .k-btn::before, .k-card::after, .k-sheet::after { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
   background: var(--k-tex, var(--k-brushed)) 0 0 / var(--k-tex-size, 256px); mix-blend-mode: soft-light; opacity: var(--k-tex-a, 0.22); }
 /* the inner engraved line: plates have a second, finer rule inset 3px */
-.k-btn::after { content: ''; position: absolute; inset: 3px; border-radius: 1px; pointer-events: none;
+.k-btn::after { content: ''; position: absolute; inset: 3px; border-radius: 3px; pointer-events: none;
   box-shadow: inset 1px 1px 0 rgba(0, 0, 0, 0.45), inset -1px -1px 0 rgba(255, 230, 170, 0.1); }
 .k-btn:hover { filter: brightness(1.12); --face: var(--k-steel-face-hi); }
 .k-btn:focus-visible { outline: 2px solid var(--k-brass-200); outline-offset: 3px; }
@@ -190,7 +190,7 @@
   box-shadow: var(--k-bevel), var(--k-cast-lift);
   --k-tex-size: 300px; --k-tex-a: 0.16;
 }
-.k-card::before { /* inner engraved rule */ content: ''; position: absolute; inset: 5px; border-radius: 4px; pointer-events: none; z-index: -1;
+.k-card::before { /* inner engraved rule */ content: ''; position: absolute; inset: 5px; border-radius: 3px; pointer-events: none; z-index: -1;
   box-shadow: inset 1px 1px 0 rgba(0, 0, 0, 0.5), inset -1px -1px 0 rgba(255, 230, 170, 0.08), 0 0 0 1px rgba(200, 150, 74, 0.14); }
 /* rivets: four brass domes, light from the upper left */
 .k-card.riveted { background-image: var(--k-grain), linear-gradient(transparent, transparent),
@@ -217,7 +217,7 @@
 .k-slip {
   position: relative; max-width: 18rem; padding: 0.65rem 0.85rem 0.7rem; color: var(--k-ink-text);
   font: 1rem/1.35 var(--k-prose);
-  background: var(--k-grain) 0 0 / 160px, radial-gradient(130% 120% at 30% 20%, #f3e8cc 0%, #e4d3ab 60%, #cdb588 100%);
+  background: var(--k-grain) 0 0 / 160px, radial-gradient(130% 120% at 30% 20%, #f3e8cc 0%, #e4d3ab 60%, #cdb588 100%) #e4d3ab;
   background-blend-mode: multiply, normal; isolation: isolate;
   /* deckled edge */
   clip-path: polygon(0% 3%, 6% 0%, 14% 2%, 23% 0%, 34% 1%, 46% 0%, 58% 2%, 70% 0%, 82% 1%, 93% 0%, 100% 2%, 99% 20%, 100% 42%, 99% 64%, 100% 86%, 98% 100%, 86% 98%, 74% 100%, 61% 99%, 48% 100%, 35% 98%, 22% 100%, 10% 98%, 0% 100%, 1% 78%, 0% 56%, 1% 32%);
@@ -257,7 +257,7 @@
 /* the indicator lamp inside the slot: unlit amber glass → lit */
 .k-toggle .lever::before { content: ''; position: absolute; right: 0.4rem; top: 50%; width: 0.4rem; height: 0.4rem; margin-top: -0.2rem; border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #6b5a40, #2a2016); box-shadow: inset 0 0 1px #000; transition: background var(--k-t-settle), box-shadow var(--k-t-settle); }
-.k-toggle .lever::after { content: ''; position: absolute; left: 2px; top: 2px; width: 1.45rem; height: calc(100% - 4px); border-radius: 2px;
+.k-toggle .lever::after { content: ''; position: absolute; left: 2px; top: 2px; width: 1.45rem; height: calc(100% - 4px); border-radius: 3px;
   background: repeating-linear-gradient(90deg, rgba(60, 35, 5, 0.25) 0 1px, transparent 1px 3px) 50% 50% / 40% 60% no-repeat, linear-gradient(170deg, #f4dc9c, #c8964a 45%, #6b4a1c);
   box-shadow: inset 1px 1px 0 rgba(255, 250, 220, 0.7), inset -1px -1px 0 rgba(60, 35, 5, 0.6), 0.1rem 0.15rem 0.25rem rgba(0, 0, 0, 0.7);
   transition: transform var(--k-t-settle) var(--k-ease-heavy); }
@@ -268,7 +268,7 @@
 /* ------------------------------------------------------------------ segmented: a row of engraved stops */
 .k-seg { display: inline-flex; border-radius: 3px; padding: 2px; gap: 2px; background: linear-gradient(180deg, #060607, #1a1b20);
   box-shadow: inset 1px 1px 3px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 230, 170, 0.1); }
-.k-seg button { min-height: 2.25rem; padding: 0 0.9em; border: 0; border-radius: 2px; background: transparent; cursor: pointer; box-shadow: none;
+.k-seg button { min-height: 2.25rem; padding: 0 0.9em; border: 0; border-radius: 3px; background: transparent; cursor: pointer; box-shadow: none;
   font: 700 0.78rem/1 var(--k-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--k-faded); transition: color var(--k-t-tick); }
 .k-seg button:hover { color: var(--k-parchment); }
 .k-seg button[aria-pressed=true] { color: #2a1a06; text-shadow: 0 1px 0 rgba(255, 245, 210, 0.5);
@@ -279,3 +279,17 @@
   .k-btn, .k-seal, .k-tab, .k-toggle .lever::after { transition: none; }
   .k-seal.stamped { animation: none; }
 }
+
+/* ------------------------------------------------------------ cascade guards: the app's global button rules (theme.css)
+   are (0,2,1) on hover; the kit's own faces must win wherever a .k- class is used */
+.k-seg button:hover:not(:disabled), .k-seg button:active:not(:disabled) { background: transparent; box-shadow: none; filter: none; transform: none; color: var(--k-parchment); }
+.k-seg button[aria-pressed=true]:hover:not(:disabled), .k-seg button[aria-pressed=true]:active:not(:disabled) { color: #2a1a06;
+  background: var(--k-grain) 0 0 / 160px, var(--k-brass-face); background-blend-mode: soft-light, normal; box-shadow: var(--k-bevel-brass); }
+.k-tabs .k-tab:hover:not(:disabled) { background: linear-gradient(180deg, rgba(255, 240, 210, 0.07), transparent); box-shadow: inset 1px 1px 0 rgba(255, 238, 205, 0.05); filter: none; }
+.k-tabs .k-tab[aria-selected=true]:hover:not(:disabled) { background: var(--k-steel-face-hi); box-shadow: var(--k-bevel), 0 -0.5em 1em -0.6em rgba(255, 210, 140, 0.25); }
+.k-tabs .k-tab:active:not(:disabled) { transform: none; }
+.k-btn:hover:not(:disabled) { background: var(--k-grain) 0 0 / 160px, var(--k-steel-face-hi) padding-box, var(--rim) border-box; background-blend-mode: soft-light, normal, normal; }
+.k-btn.primary:hover:not(:disabled) { background: var(--k-grain) 0 0 / 160px, var(--k-brass-face) padding-box, var(--rim) border-box; background-blend-mode: soft-light, normal, normal; }
+.k-btn.ghost:hover:not(:disabled) { background: transparent; box-shadow: none; }
+.k-seal:hover:not(:disabled), .k-seal:active:not(:disabled) { box-shadow: none; }
+.k-token { border-radius: 3px; }

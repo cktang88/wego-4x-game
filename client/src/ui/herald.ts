@@ -10,6 +10,7 @@ import { sigilSvg } from '../art/sigils.ts';
 import { iconizeDom, ic, icFor, glyphHtml } from '../art/icons.ts';
 import '../herald.css';
 import { audio } from '../audio/audio.ts';
+import { ownerHi } from '../art/bible.ts';
 
 const KIND_ICON: Record<string, string> = {
   rout: '⤺', caught: '✝', destroyed: '✝', broken: '✝', death: '✝', vengeance: '⚔', debt: '✠', vow_broken: '✗', vow_kept: '✦',
@@ -134,7 +135,7 @@ function render(g: GameScreen, ed: HeraldEdition) {
   const i = eds.indexOf(ed);
   const nav = `<nav class="hd-nav">${i > 0 ? `<button data-h="ed" data-t="${eds[i - 1].turn}" aria-label="Previous edition, ${T} ${eds[i - 1].turn}">‹ ${T} ${eds[i - 1].turn}</button>` : '<span></span>'}${i < eds.length - 1 ? `<button data-h="ed" data-t="${eds[i + 1].turn}" aria-label="Next edition, ${T} ${eds[i + 1].turn}">${T} ${eds[i + 1].turn} ›</button>` : '<span></span>'}</nav>`;
   const hl = (h: Story, cls: string) => {
-    const by = h.players.filter(p => p >= 0 && st.players[p]).map(p => `<i style="background:${esc(g.color(p))}"></i>`).join('');
+    const by = h.players.filter(p => p >= 0 && st.players[p]).map(p => `<i style="background:${esc(ownerHi(g.color(p)))}"></i>`).join('');
     const reg = h.region !== undefined ? st.regions[h.region] : undefined;
     const go = reg ? ` data-h="region" data-r="${h.region}" title="Show ${esc(reg.name)} on the map"` : '';
     // the headline is the link to the map (a button: reachable by keyboard and touch); the story stays plain text
@@ -146,7 +147,7 @@ function render(g: GameScreen, ed: HeraldEdition) {
       : '';
     return `<section class="hl ${cls} k-${esc(h.kind)}${paras.length ? ' has-body' : ''}"><span class="hl-ic">${headlineIcon(h.kind)}</span>${head}${by ? `<span class="hl-by">${by}</span>` : ''}${body}</section>`;
   };
-  const disp = ed.dispatches.map(d => `<blockquote class="dsp" style="--pc:${esc(g.color(d.player))}"><p>“${esc(d.text)}”</p><cite>— ${esc(d.byline)}</cite></blockquote>`).join('');
+  const disp = ed.dispatches.map(d => `<blockquote class="dsp" style="--pc:${esc(ownerHi(g.color(d.player)))}"><p>“${esc(d.text)}”</p><cite>— ${esc(d.byline)}</cite></blockquote>`).join('');
   const pend = g.you !== null ? pending(g) : null;
   const can = g.you !== null && g.canPlan && st.winner === null;
   const me = g.you !== null ? st.players[g.you] : null;
@@ -154,7 +155,7 @@ function render(g: GameScreen, ed: HeraldEdition) {
     ? `<div class="plant filed"><b>✒ Filed</b><p>“${esc(pend.text)}”</p><small>${pend.as === 'source' ? 'as an unnamed source' : `as ${esc(me?.name ?? '')}`} · prints next edition</small>${!g.live ? '<button class="hb plain" data-h="unfile">↶ Withdraw</button>' : ''}</div>`
     : `<div class="plant"><label>✒ Plant a dispatch</label><textarea data-dispatch maxlength="${max(g)}" rows="2" placeholder="A boast, a threat, a lie…">${esc(draft)}</textarea>
        <div class="plant-row"><span class="seg2" role="group" aria-label="Sign it as"><button class="${asWho === 'house' ? 'on' : ''}" data-h="as" data-v="house">${esc(me?.name.split(' ').slice(-1)[0] ?? 'House')}</button><button class="${asWho === 'source' ? 'on' : ''}" data-h="as" data-v="source">A source</button></span><span class="dsp-count">${draft.length}/${max(g)}</span><button class="hb" data-h="file">File</button></div></div>`;
-  const ink = lead.players.length && st.players[lead.players[0]] ? g.color(lead.players[0]) : '#2a1d10';
+  const ink = lead.players.length && st.players[lead.players[0]] ? ownerHi(g.color(lead.players[0])) : '#2a1d10';
   art.innerHTML = `
     <header class="hd-mast"><div class="hd-ear">${sigilSvg('crown', 26, '#2a1d10')}<span>Late<br>edition</span></div><h1>The Herald</h1><div class="hd-ear r"><span>One<br>credit</span>${sigilSvg('raven', 26, '#2a1d10')}</div></header>
     <div class="hd-date"><span>${T} ${ed.turn}</span><span>of the Three Crowns</span><span>${esc(st.players.filter(p => !p.eliminated).length)} houses stand</span></div>

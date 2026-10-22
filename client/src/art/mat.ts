@@ -1,5 +1,6 @@
-// The tabletop: a deep-space cloth mat with printed nebulae, a fine weave, the warm pool of the lamp above the
-// table and a vignette toward the dark edges of the room.
+// The 2D table (the fallback when the GL stage is off or unavailable, ART-BIBLE §3 Felt, §4): a dark felt mat with
+// the sky printed on it in the bible's pigments (ink, deep blue, umber, oxblood, verdigris; no violet, magenta or
+// cyan), a fine weave, the warm pool of the lamp above the table and a warm vignette toward the dark room.
 import { type RGB, TAU, canvas, fbm2, noise2, rand, css, mix } from './util.ts';
 
 /** Screen-space cloth: base colour under the lamp, lamp pool, vignette (low-res: it's all smooth gradients). */
@@ -9,7 +10,8 @@ export function matBackdrop(w: number, h: number): HTMLCanvasElement {
   g.scale(0.5, 0.5);
   const R = Math.hypot(w, h) * 0.62;
   const bg = g.createRadialGradient(w * 0.5, h * 0.4, 0, w * 0.5, h * 0.45, R);
-  bg.addColorStop(0, '#121a33'); bg.addColorStop(0.45, '#0b1024'); bg.addColorStop(0.8, '#060814'); bg.addColorStop(1, '#030308');
+  // felt lit by the lamp, falling to the room's warm black (never pure #000)
+  bg.addColorStop(0, '#1d2731'); bg.addColorStop(0.42, '#121a22'); bg.addColorStop(0.8, '#0a0d11'); bg.addColorStop(1, '#07080c');
   g.fillStyle = bg; g.fillRect(0, 0, w, h);
   return c;
 }
@@ -21,10 +23,10 @@ export function lampOverlay(w: number, h: number): HTMLCanvasElement {
   g.scale(0.5, 0.5);
   const R = Math.hypot(w, h) * 0.6;
   const lamp = g.createRadialGradient(w * 0.48, h * 0.36, 0, w * 0.48, h * 0.36, R * 0.75);
-  lamp.addColorStop(0, 'rgba(255,214,160,0.075)'); lamp.addColorStop(0.5, 'rgba(255,190,130,0.03)'); lamp.addColorStop(1, 'rgba(255,180,120,0)');
+  lamp.addColorStop(0, 'rgba(255,217,160,0.13)'); lamp.addColorStop(0.5, 'rgba(255,200,140,0.05)'); lamp.addColorStop(1, 'rgba(255,180,120,0)');
   g.fillStyle = lamp; g.fillRect(0, 0, w, h);
   const vg = g.createRadialGradient(w * 0.5, h * 0.45, Math.min(w, h) * 0.38, w * 0.5, h * 0.48, R);
-  vg.addColorStop(0, 'rgba(0,0,6,0)'); vg.addColorStop(0.7, 'rgba(0,0,6,0.28)'); vg.addColorStop(1, 'rgba(0,0,6,0.62)');
+  vg.addColorStop(0, 'rgba(9,6,3,0)'); vg.addColorStop(0.7, 'rgba(9,6,3,0.34)'); vg.addColorStop(1, 'rgba(6,4,2,0.72)');
   g.fillStyle = vg; g.fillRect(0, 0, w, h);
   return c;
 }
@@ -58,7 +60,8 @@ export function nebulaPrint(minX: number, minY: number, maxX: number, maxY: numb
   const g = c.getContext('2d')!;
   const img = g.createImageData(W, H);
   const D = img.data;
-  const pal: RGB[] = [[70, 40, 150], [24, 90, 150], [150, 40, 110], [30, 120, 130], [160, 80, 50]];
+  // the bible's sky pigments (SKY in bible.ts), not light: umber, oxblood, verdigris, deep blue, lamp gold
+  const pal: RGB[] = [[106, 63, 38], [78, 26, 30], [28, 72, 72], [12, 21, 38], [140, 96, 50]];
   const r = rand(seed ^ 0x51ed);
   const A = pal[Math.floor(r() * pal.length)], B = pal[Math.floor(r() * pal.length)], C2 = pal[Math.floor(r() * pal.length)];
   const sc = 1 / 900;
@@ -75,7 +78,7 @@ export function nebulaPrint(minX: number, minY: number, maxX: number, maxY: numb
     const hot = Math.max(0, n2 - 0.62) * 3;
     col = mix(col, C2, hot);
     a *= 1 - Math.max(0, dust - 0.55) * 2.4;
-    a = Math.max(0, Math.min(0.7, a * 1.35));
+    a = Math.max(0, Math.min(0.55, a * 1.2));
     const i = (y * W + x) * 4;
     D[i] = col[0]; D[i + 1] = col[1]; D[i + 2] = col[2]; D[i + 3] = a * 255;
   }
@@ -90,7 +93,8 @@ export function starfield(w: number, h: number, seed: number): HTMLCanvasElement
   const r = rand(seed ^ 0xabcdef);
   for (let i = 0; i < (w * h) / 1100; i++) {
     const a = r();
-    x.fillStyle = `rgba(${200 + Math.floor(r() * 55)},${205 + Math.floor(r() * 50)},255,${0.1 + a * 0.45})`;
+    // warm-biased star tints (even the blue ones), like the GL corona
+    x.fillStyle = `rgba(${225 + Math.floor(r() * 30)},${215 + Math.floor(r() * 30)},${200 + Math.floor(r() * 40)},${0.1 + a * 0.45})`;
     const s = a > 0.975 ? 1.6 : 1;
     x.fillRect(r() * w, r() * h, s, s);
   }

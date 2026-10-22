@@ -3,6 +3,7 @@ import type { GameState } from '../../../shared/sim/types.ts';
 import { type Ctx } from './modal-util.ts';
 import { ic } from '../art/icons.ts';
 import { openSoundSettings, soundIcon } from '../audio/hooks.ts';
+import { openGraphicsSettings } from './graphics.ts';
 
 /** "Reading the map": the board's visual language, first in How to win (and in the lobby's How to play, help.ts). */
 export const MAP_INTRO = 'Everything on the board is either a territory, a star, a fleet piece, a battle, or an order line. Numbers appear only when you point at something: hover (or tap) a star for its defenders, a fleet for its strength, a battle for its odds. Zoom out for who owns what and where the armies are; zoom in for names, then the full tabletop.';
@@ -32,7 +33,7 @@ function cards(st: GameState, tab: string): Card[] {
       { ic: '⚔', t: 'Drag to command', b: ['<b>Drag</b> a fleet onto a world: the target picks the verb.', 'Own or empty: <b>Move</b>. Hostile or neutral: <b>Seize</b>.', 'Drop on your own fleet to <b>merge</b> (free).', 'Or tap a fleet, then tap a lit world.'] },
       { ic: '⟿', t: 'Hyperlanes', b: ['Long lanes have waypoints: the arrow follows the lane.', 'Far moves become routes: fleets keep going each turn.', '<b>■ Halt</b> on the fleet card stops a route (free).'] },
       { ic: '⚒', t: 'Worlds', b: ['Tap your world: <b>Build</b> ships, <b>Develop</b> projects.', 'Build into a fleet here, or raise a <b>new banner</b>.', `A fleet's second order in a turn costs ${R.orders.repeatFleetCredits}¢.`] },
-      { ic: '◉', t: 'The strip', b: ['Five slots at the bottom; flick a chip up to drop it.', 'The big button: idle fleets, research, then <b>Seal</b>.', '<b>Ctrl+Z</b> undoes; 👁 previews against idle rivals.'] },
+      { ic: '◉', t: 'The strip', b: ['Five slots at the bottom; flick a chip up to drop it.', 'The big button: idle fleets, research, then <b>Seal</b>.', `<b>Ctrl+Z</b> undoes; ${ic('eye')} previews against idle rivals.`] },
       { ic: '◎', t: 'Intel', b: ['Rivals see your moves within their sensor range.', '<b>Feint</b> fakes signals; <b>Scan</b> exposes feints and nebulae.', '<b>Conceal</b> hides you, but your capital jams loudly.'] },
       { ic: '✦', t: 'Influence & pacts', b: ['<b>Influence</b> pushes loyalty; at the threshold the world defects.', '<b>Pact</b>: both offer the same turn. Breaking costs ♛.', 'Add <b>sworn words</b>: break them and you are Oathbreaker.'] },
     ];
@@ -97,12 +98,13 @@ export function helpBody(c: Ctx): string {
     <li>Textures by <b>ambientCG</b> (${A('https://ambientcg.com', 'ambientcg.com')}), CC0. Fonts: Google Fonts, SIL OFL 1.1.</li></ul></section>` : '';
   const keys = c.tab === 'win' ? `<section class="hc keys"><h3><span>⌨</span>Keys</h3><div class="kgrid"><kbd>E</kbd><span>Empire</span><kbd>Q</kbd><span>Score</span><kbd>C</kbd><span>Chronicle</span><kbd>?</kbd><span>Help</span><kbd>Esc</kbd><span>Close</span><kbd>1–7</kbd><span>Tabs</span><kbd>Tab</kbd><span>Idle fleet</span><kbd>Enter</kbd><span>Seal</span><kbd>Space</kbd><span>Peek / skip</span><kbd>Shift+M</kbd><span>Mute sound</span></div></section>` : '';
   const restart = c.g.you !== null && (c.g.restartTips || c.g.restartTour) ? `<button class="mbtn m-ghost" data-a="tips">↻ Restart tips</button>` : '';
-  const sound = `<button class="mbtn m-ghost" data-a="sound">${soundIcon(false)} Sound settings</button>`;
+  const sound = `<button class="mbtn m-ghost" data-a="sound">${soundIcon(false)} Sound settings</button><button class="mbtn m-ghost" data-a="gfx">${ic('star')} Graphics</button>`;
   return `<div class="m-help"><div class="hgrid">${c.tab === 'win' ? mapRead() : ''}${cs.map(x => `<section class="hc"><h3><span>${x.ic}</span>${x.t}</h3><ul>${x.b.map(b => `<li>${b}</li>`).join('')}</ul></section>`).join('')}${keys}${credits}</div><div class="help-foot">${sound}${restart}</div></div>`;
 }
 
 export function helpAct(c: Ctx, a: string): boolean {
   if (a === 'sound') { openSoundSettings(); return true; }
+  if (a === 'gfx') { openGraphicsSettings(); return true; }
   if (a !== 'tips') return false;
   c.close();
   if (c.g.restartTips) c.g.restartTips(); else c.g.restartTour?.();

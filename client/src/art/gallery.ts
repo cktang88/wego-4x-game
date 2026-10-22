@@ -1,13 +1,14 @@
 // Dev-only art gallery (scripts/art-gallery.mjs imports this): lays every painter out on one canvas.
+import { FACTION } from './bible.ts';
 import { drawShip } from './ships.ts';
 import { drawPlanet, drawStar, type WorldType, type StarType } from './planets.ts';
 import { drawStarNode, drawTwinkle, drawPulsarBeams, drawAccretionShimmer, drawOrbitLines, drawSpecks, type StarKind } from './stars.ts';
 
-const TEAM = ['#3fd0ff', '#ff4f7b', '#ffd23f', '#8a8aa8'];
+const TEAM = [FACTION.azure.base, FACTION.crimson.base, FACTION.gilded.base, FACTION.neutral.base];
 const CLS = ['scout', 'corvette', 'frigate', 'bombard', 'cruiser', 'dread'];
 
 export async function gallery(g: CanvasRenderingContext2D, section: string, dpr: number) {
-  g.font = '600 13px Rajdhani, sans-serif'; g.fillStyle = '#cfd6ff';
+  g.font = '700 13px "Alegreya Sans", sans-serif'; g.fillStyle = '#ece3cf';
   if (section === 'ships') {
     const owners = [0, 1, 2, -1];
     owners.forEach((o, row) => {

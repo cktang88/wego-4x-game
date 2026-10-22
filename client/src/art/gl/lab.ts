@@ -19,6 +19,7 @@ const TAU = Math.PI * 2;
 type House = 'azure' | 'crimson' | 'gilded';
 interface Sys { id: number; x: number; y: number; name: string; kind: StarKind; owner: House | null }
 const HOUSES: House[] = ['azure', 'crimson', 'gilded'];
+// the retired neons, only for the ?terr=neon before/after comparison
 const NEON: Record<House, string> = { azure: '#3fd0ff', crimson: '#ff4f7b', gilded: '#ffd23f' };
 const SEAT: Record<House, number> = { azure: 0, crimson: 1, gilded: 2 };
 const NAMES = ['Ninefold', 'Dark Ridge', 'Crying Sound', 'Ashfall', 'Widow Rift', 'Kappa Drift', 'Gamma Expanse', 'Sable Narrows', 'Crown of Thorns',
@@ -296,7 +297,6 @@ function kitHtml() {
       <div style="font-family:var(--k-black);font-size:1.7rem;color:${TEXT.ivory}">The Herald</div>
       <div class="k-prose">“Whoever holds the Throne next, it will not be Azure Compact.”</div>
       <div class="num-cmp" style="margin-top:0.6rem">
-        <span class="k-engraved">Rajdhani</span><span style="font-family:Rajdhani,sans-serif;font-weight:700">1 111 · 40 · 8,888</span>
         <span class="k-engraved">Alegreya Sans</span><span class="k-num">1 111 · 40 · 8,888</span>
         <span class="k-engraved">Cinzel</span><span style="font-family:var(--k-display);font-weight:700">1 111 · 40 · 8,888</span>
       </div>
