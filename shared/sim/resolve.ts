@@ -736,7 +736,7 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     if (wegoRoutes) for (const m of movers) {
       const f = m.f;
       if (!s.fleets.includes(f) || !f.route) continue;
-      if (f.limping && f.limping.since === s.turn && m.o.type !== 'move') continue;   // routed mid-move: its new route home stands
+      if (f.limping && f.limping.since === s.turn) continue;   // routed mid-move (or in a clash): its new route home stands
       f.route.overdrive = undefined;
       if (m.stopped || m.idx < m.path.length) { f.route = null; continue; }
       f.route.path = f.route.path.slice(m.path.length);
@@ -1571,8 +1571,8 @@ function maybeWakeWarden(s: GameState, rng: Rng, pulse: number, emit: (e: GameEv
       doctrine: { stance: 'aggressive', retreatAt: 0, target: 'strongest', guard: false },
       fortified: false, fatigued: false, ordersThisTurn: 0, guardUsed: false, history: [], bornTurn: s.turn,
     };
-    for (const c of s.rules.warden.ships) { const sh = newShip(s, rng, c); sh.name = `Warden-${sh.name}`; w.ships.push(sh); }
-    s.fleets.push(w);
+    for (const c of s.rules.warden.ships) { if (!Object.hasOwn(s.rules.ships, c)) continue; const sh = newShip(s, rng, c); sh.name = `Warden-${sh.name}`; w.ships.push(sh); }
+    if (w.ships.length) s.fleets.push(w);   // (tweaked rules with no valid Warden ships: it never takes the field)
     s.chronicle.push({ turn: s.turn, region: throne.id, players: [0, 1, 2], major: true,
       text: `Fragment ${s.loreFound} is spoken aloud and the Hollow Throne wakes. THE WARDEN rises${s.rules.wardenHunt.enabled ? ' and marches on whoever leads in VP, razing what it reaches' : ' to judge whoever sits on the Throne'}. Destroying it is worth ${s.rules.warden.defeatVp} VP.` });
     emit({ k: 'note', pulse, owner: null, text: 'THE WARDEN AWAKENS in the Hollow Throne.', region: throne.id });

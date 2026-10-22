@@ -56,6 +56,7 @@ export function spectatorView(s: GameState): PlayerView {
   }
   if (s.last) v.last = publicResult(s.last);
   v.edictDeck = [];
+  delete v.cycleFought;   // LIVE bookkeeping: which fleets fought this cycle (viewFor drops it too)
   v.rngState = 0;
   return { state: v, you: null, visible: [] };
 }

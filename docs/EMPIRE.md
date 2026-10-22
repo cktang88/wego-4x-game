@@ -20,7 +20,7 @@ Academy steals a technology you lack.
 
 - ⚔ **Warfare**: Railguns (module) · Cruiser Yards · *Siege Doctrine* | *Alpha Strike* (either unlocks Dreadnoughts) · ★ Sunhammer
 - ⛨ **Bulwark**: Deflectors (module) · Orbital Batteries · *Planetary Shields* | *Regenerators* · ★ Citadel Worlds (bigger garrisons, Crowns pay +1 VP)
-- ➤ **Logistics**: Ion Drives (module) · Supply Depots (−25% upkeep; Depot hubs +3 industry) · *Warp Gates* | *Deep Scanners* · ★ Jump Drive
+- ➤ **Logistics**: Ion Drives (module) · Supply Depots (−40% upkeep; Depot hubs +3 industry) · *Warp Gates* | *Deep Scanners* · ★ Jump Drive
 - ✦ **Statecraft**: Trade Compacts · Bureaucracy (+1 law slot) · *Subversion* | *Free Markets* · ★ Imperial Mandate
 
 ## Ship modules

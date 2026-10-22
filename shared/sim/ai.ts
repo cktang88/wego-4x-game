@@ -90,15 +90,20 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
   if (expert) {
     // concentrate force: merge fleets sharing a region (scouts stay separate)
     const byRegion = new Map<number, Fleet[]>();
-    for (const f of myFleets()) if (!isScoutFleet(f)) (byRegion.get(f.region) ?? byRegion.set(f.region, []).get(f.region)!).push(f);
+    // (a limping fleet can't merge or be merged into: soul rules refuse it)
+    for (const f of myFleets()) if (!isScoutFleet(f) && !f.limping) (byRegion.get(f.region) ?? byRegion.set(f.region, []).get(f.region)!).push(f);
     for (const fl of byRegion.values()) {
-      fl.sort((a, b) => b.ships.length - a.ships.length);
+      // soul: only a bannered fleet can take in warships (an unbannered Remnant can't be the one merged into)
+      const canHost = (f: Fleet) => !soulOn(s) || !!f.banner;
+      fl.sort((a, b) => Number(canHost(b)) - Number(canHost(a)) || b.ships.length - a.ships.length);
+      if (!canHost(fl[0])) continue;
       for (let i = 1; i < fl.length; i++) {
         if (fl[0].ships.length + fl[i].ships.length > R.maxShipsPerFleet) continue;
         // keep two real task forces: each fleet gets its own Orders (combined seizes can still mass them)
         if (fl[i].ships.length >= 3 && fl[0].ships.length >= 3) continue;
         sub.free.push({ type: 'merge', fleet: fl[i].id, into: fl[0].id } as FreeAction);
         fl[0].ships.push(...fl[i].ships); fl[i].ships = [];
+        fl[0].fatigued = fl[0].fatigued || fl[i].fatigued;   // as the resolver merges it (no overdrive planned for a tired fleet)
       }
     }
     s.fleets = s.fleets.filter(f => f.ships.length);

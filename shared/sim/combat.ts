@@ -539,6 +539,8 @@ export function fightRounds(
           ...structuredClone(f), id: s.nextId++, name: `Remnant of ${f.name}`, ships: left,
           commander: { ...structuredClone(f.commander), name: `${f.commander.name}'s flag captain` },
           history: [`Left behind at ${region.name} on turn ${s.turn}.`], siege: null, route: null,
+          // Soul: the stranded hulls fly no banner of their own (banners are scarce) and carry no vow or pending honour
+          ...(f.banner !== undefined ? { banner: null } : {}), vow: null, pendingHonour: null,
           fate: null,   // Signature: the Fate spent on the fleet stays with it (one token, one Twist / Last Stand)
         };
         rem.commander.alive = true;

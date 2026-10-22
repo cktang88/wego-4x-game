@@ -736,7 +736,7 @@ export function raze(s: GameState, p: PlayerId, r: Region, pulse: number, emit: 
   const lump = S.razeLump + S.razeLumpPerDev * r.dev;
   s.players[p].res.credits += lump;
   s.players[p].res.industry += lump;
-  r.dev = Math.max(1, r.dev - 1);
+  r.dev = Math.max(Math.min(1, r.dev), r.dev - 1);   // never raises a 0-citizen world
   r.project = null;
   st.calling = null; st.pendingCalling = null; st.captured = null;
   if (st.lost) st.lost.calling = null;   // a razed calling does not wake on liberation

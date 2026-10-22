@@ -82,6 +82,17 @@ const BAD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const FRACTIONAL = new Set(['live.tickMinutes', 'live.orderEveryHours']);
 
 /**
+ * Arrays in a rules override may be at most twice as long as the default (at least 4), nested arrays likewise:
+ * `map.laneDots` with hundreds of entries put hundreds of waypoints on every hyperlane (a 17k-region map that took
+ * seconds per turn), and `start.fleets` / `warden.ships` would hand out fleets of hundreds of ships.
+ */
+function clampArray(v: unknown[], d: unknown[]): unknown[] {
+  const out = v.slice(0, Math.max(4, d.length * 2));
+  const inner = d.find(Array.isArray);
+  return inner ? out.map(x => (Array.isArray(x) ? clampArray(x, inner) : x)) : out;
+}
+
+/**
  * Validate a rules override against the default rules: only keys that exist in
  * the defaults survive, primitives must keep their type, numbers must be finite
  * (and some are clamped), and prototype-polluting keys are dropped. Arrays are
@@ -103,13 +114,19 @@ export function sanitizeRules(over: unknown): Record<string, unknown> {
         out[k] = Math.max(lo, Math.min(hi, Number.isInteger(d) && RULE_CLAMPS[p] && !FRACTIONAL.has(p) ? Math.round(v) : v));
       } else if (typeof d === 'boolean') { if (typeof v === 'boolean') out[k] = v; }
       else if (typeof d === 'string') { if (typeof v === 'string' && v.length <= 200) out[k] = v; }
-      else if (Array.isArray(d)) { if (Array.isArray(v)) out[k] = JSON.parse(JSON.stringify(v), (key, val) => (BAD_KEYS.has(key) ? undefined : val)); }
+      else if (Array.isArray(d)) { if (Array.isArray(v)) out[k] = clampArray(JSON.parse(JSON.stringify(v), (key, val) => (BAD_KEYS.has(key) ? undefined : val)), d); }
       else if (isObj(d)) { if (isObj(v)) out[k] = walk(v, d, p); }
     }
     // return a normal object (mergeRules uses Object.entries; null-proto is fine but keep it plain)
     return { ...out };
   };
-  return walk(over, defaultRules() as unknown as Record<string, unknown>, '');
+  const base = defaultRules();
+  const out = walk(over, base as unknown as Record<string, unknown>, '') as Record<string, any>;
+  // ship-class lists name classes the rules know (an unknown one crashed the AI every turn: the game never resolved)
+  const known = (c: unknown) => typeof c === 'string' && Object.hasOwn(base.ships, c);
+  if (Array.isArray(out.start?.fleets)) out.start.fleets = out.start.fleets.map((f: unknown) => (Array.isArray(f) ? f.filter(known) : [])).filter((f: unknown[]) => f.length);
+  if (Array.isArray(out.warden?.ships)) { out.warden.ships = out.warden.ships.filter(known); if (!out.warden.ships.length) delete out.warden.ships; }
+  return out;
 }
 
 /** Structural check of a submission coming off the wire. The sim does the semantic validation. */
@@ -431,7 +448,11 @@ export class Store {
     const changed: string[] = [];
     for (const g of this.games.values()) {
       if (g.state.live) { if (this.advanceLive(g, now)) changed.push(g.id); continue; }
-      if (g.deadline && now >= g.deadline && g.state.winner === null) {
+      // every human seat has been eliminated: nobody is left to submit, so the AIs play on (a turn per call)
+      // instead of the game waiting forever for a deadline it doesn't have
+      // (games seated with AIs only keep waiting, as before: no free CPU-burning autoplay)
+      const humansOut = g.seats.some(s => s.kind === 'human') && !g.seats.some((s, i) => s.kind === 'human' && !g.state.players[i]?.eliminated);
+      if ((humansOut || (g.deadline && now >= g.deadline)) && g.state.winner === null && !(g.resolveFailures && g.deadline && now < g.deadline)) {
         try {
           const before = g.state.turn;
           this.tryResolve(g, true);

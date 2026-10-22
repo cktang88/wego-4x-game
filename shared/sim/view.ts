@@ -87,6 +87,10 @@ export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
   if (hiddenIds.size) for (const e of v.engagements) {
     e.fleets = e.fleets.filter(id => !hiddenIds.has(id));
     for (const id of hiddenIds) { delete e.startHp[id]; if (e.joined) delete e.joined[id]; }
+    // nor names an unseen fleet's commander
+    const hiddenCmds = new Set(s.fleets.filter(f => hiddenIds.has(f.id)).map(f => f.commander.name));
+    const shownCmds = new Set(v.fleets.map(f => f.commander.name));
+    for (const n of hiddenCmds) if (!shownCmds.has(n)) delete e.cmds[n];
   }
   // last turn's per-player stats would reveal rivals' unseen battles (captures are public anyway)
   if (v.turnStats) {
@@ -223,7 +227,9 @@ function filterResult(s: GameState, r: TurnResult, p: PlayerId, endCov: Set<Regi
   // Ghosts stay hidden in replays too (Conspicuous and limping fleets are seen anyway)
   const ghostOk = (f: Fleet) => !f.banner?.boons.includes('ghosts') || seesFleet(startState, p, f);
   // ambushers stay hidden too, unless p shares their system or scans it
-  const ambushOk = (f: Fleet) => f.posture !== 'ambush' || postureSeenBy({ ...startState, scans: s.scans }, p, f);
+  // (only scans that covered that turn: replaying an old turn under today's scan must not unmask its ambushers)
+  const turnScans = s.scans.filter(sc => sc.until >= r.turn && sc.until <= r.turn + 1);
+  const ambushOk = (f: Fleet) => f.posture !== 'ambush' || postureSeenBy({ ...startState, scans: turnScans }, p, f);
   const startFleets = structuredClone((r.startFleets ?? []).filter(f => f.owner === p || (seesAtStart(f.region) && ghostOk(f) && ambushOk(f))));
   for (const f of startFleets) if (f.owner !== p) maskRivalFleet(f, !!s.live);
   const seen = new Set<RegionId>();

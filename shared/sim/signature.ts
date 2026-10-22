@@ -499,7 +499,7 @@ export function sigEndTurn(s: GameState, pulse: number, emit: Emit) {
         revealWorld(s, r, 'caught', pulse, emit, { private: true, text: `${r.name} called the levies and no assault came: its output is lost this turn and next.` });
       } else if (w.kind === 'scorch') {
         const before = r.dev;
-        r.dev = Math.max(1, r.dev - S.scorchDevLoss);
+        r.dev = Math.max(Math.min(1, r.dev), r.dev - S.scorchDevLoss);   // never raises a 0-citizen world
         revealWorld(s, r, 'caught', pulse, emit, { private: true, text: `${r.name} was readied for the torch and held: development ${before} → ${r.dev} for nothing.` });
       } else revealWorld(s, r, 'none', pulse, emit, { private: true, text: `${r.name} opened its gates; nobody came.` });
     }
