@@ -1,4 +1,4 @@
-// Render sweep 3: the WebGL stage (context loss/restore, quality tiers mid-game, ?gl=0, DPR, GPU memory), the map
+// Render sweep 3: the 2D board's Graphics tiers (no WebGL, tiers mid-game, ?gl=0, bounded ground cache), the map
 // (crossfades, zoomAt, tooltips, fleet placement, names, enamel hatching, lane focus, pan perf) and the battle viewer
 // (decisive slow-mo, crowded / 3-way / garrison-only battles, speeds, scrubbing, phone landscape).
 // node scripts/sweep3-render.mjs [shotsDir=/tmp/claude-0/s3] [baseUrl]   (needs `npm run dev`); ONLY=gl|map|bv
@@ -38,97 +38,46 @@ async function openGame(dev, { gfx = 'high', query = '', lobby = 'start', init =
   await frames(page, 5);
   return { ctx, page, errors };
 }
-/** The game's own instance of art/gl/table.ts (Vite serves it with a ?t= stamp after edits: a bare import would be a second copy). */
-const tableMod = `(() => { const u = performance.getEntriesByType('resource').map(e => e.name).find(n => /\\/src\\/art\\/gl\\/table\\.ts/.test(n)) ?? '/src/art/gl/table.ts'; return import(u); })()`;
-const T = page => page.evaluate(`${tableMod}.then(m => ({ status: m.gfxStatus(), setting: m.gfxSetting() }))`);
-const setGfx = (page, v) => page.evaluate(`${tableMod}.then(m => m.setGfxSetting(${JSON.stringify(v)}))`);
-const layers = page => page.evaluate(() => [...document.querySelectorAll('canvas.artgl')].map(c => ({ cls: c.className, w: c.width, h: c.height, vis: c.style.visibility, disp: c.style.display, lost: c.getContext('webgl2')?.isContextLost() ?? null })));
+/** The game's own instance of art/gfx.ts (Vite serves it with a ?t= stamp after edits: a bare import would be a second copy). */
+const gfxMod = `(() => { const u = performance.getEntriesByType('resource').map(e => e.name).find(n => /\\/src\\/art\\/gfx\\.ts/.test(n)) ?? '/src/art/gfx.ts'; return import(u); })()`;
+const T = page => page.evaluate(`${gfxMod}.then(m => ({ status: m.gfxStatus(), setting: m.gfxSetting(), q: m.gfxQuality() }))`);
+const setGfx = (page, v) => page.evaluate(`${gfxMod}.then(m => m.setGfxSetting(${JSON.stringify(v)}))`);
 
-
-
-// ------------------------------------------------------------------ GL stage
-/** Live WebGL object counts (create minus delete; a lost context frees everything it held). */
-const GLCOUNT = () => {
-  const live = new Map(); window.__glLive = live;
-  const P = WebGL2RenderingContext.prototype;
-  for (const k of ['Texture', 'Framebuffer', 'Buffer', 'Program', 'VertexArray']) {
-    const c = P['create' + k], d = P['delete' + k];
-    P['create' + k] = function (...a) { const o = c.apply(this, a); if (o) { let s = live.get(this); if (!s) { live.set(this, s = {}); const g = this; this.canvas.addEventListener('webglcontextlost', () => live.set(g, {})); } s[k] = (s[k] ?? 0) + 1; } return o; };
-    P['delete' + k] = function (o) { if (o) { const s = live.get(this); if (s) s[k] = (s[k] ?? 0) - 1; } return d.call(this, o); };
-  }
-};
-const glLive = page => page.evaluate(() => { const t = {}; for (const [g, s] of window.__glLive) { if (g.isContextLost()) continue; for (const k in s) t[k] = (t[k] ?? 0) + s[k]; } return t; });
-/** mean luminance of a screenshot region via canvas readback of the composited page is not possible: sample the layers instead */
+// ------------------------------------------------------------------ the board is 2D only (docs/ART-BIBLE.md §13)
+/** No WebGL anywhere on the board; every Graphics tier set mid-game draws, rebakes the ground and keeps it bounded. */
 async function gl(tag, dev) {
-  console.log(`== GL stage (${tag})`);
-  const { ctx, page, errors } = await openGame(dev, { gfx: 'high', init: GLCOUNT });
+  console.log(`== Graphics tiers, 2D board (${tag})`);
+  const { ctx, page, errors } = await openGame(dev, { gfx: 'high', init: () => {
+    window.__glCtx = 0; const o = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (k, ...a) { if (/webgl/.test(k)) window.__glCtx++; return o.call(this, k, ...a); };
+  } });
   await frames(page, 10);
-  const L0 = await layers(page);
-  check(L0.length === 3 && L0.every(l => !l.lost), `${tag}: three live GL layers`);
-  const dpr = dev.deviceScaleFactor ?? 1, vw = dev.viewport.width;
-  check(L0[0].w === Math.round(vw * Math.min(2, dpr)), `${tag}: under layer at min(2, dpr) (${L0[0].w} for ${vw}@${dpr})`);
-  const base0 = await glLive(page);
-  // every quality tier, set mid-game, at this viewport
-  for (const q of ['medium', 'low', 'high', 'auto']) {
-    await setGfx(page, q); await frames(page, 6);
-    const s = await T(page), L = await layers(page);
-    check(q === 'auto' ? /WebGL2|2D/.test(s.status) : s.status === `WebGL2 · ${q}`, `${tag}: Graphics ${q} -> "${s.status}"`);
-    if (q !== 'auto') await page.screenshot({ path: `${out}/gl-${tag}-${q}.png` });
-    if (q === 'low') check(L[2].w === Math.round(vw * 0.5), `${tag}: low shade layer half size (${L[2].w})`);
+  check(await page.evaluate(() => window.__glCtx === 0 && !document.querySelector('canvas.artgl')), `${tag}: no WebGL context on the board`);
+  for (const q of ['low', 'high', 'auto']) {
+    await setGfx(page, q); await frames(page, 12);
+    const s = await T(page), st = await page.evaluate(() => window.tc.screen.map.dialStats);
+    check(s.setting === q && (q !== 'low' || s.q === 'low') && st.missing === 0, `${tag}: Graphics ${q} -> "${s.status}", ground complete (${JSON.stringify(st)})`);
+    await page.screenshot({ path: `${out}/gfx-${tag}-${q}.png` });
   }
-  // the Auto governor: a paced still board (stage drawn every 2nd/3rd frame) at 60 fps is not a slow device, nor is
-  // the lobby's 10 fps timer; a real 30 fps device is
-  const gov = await page.evaluate(() => {
-    const st = window.tc.screen.map.stage, saved = { q: st.quality, fixed: st.fixed };
-    const run = (gap, dt, ms = 6000) => { st.setQuality('high'); st.setFixed(false); st.lastT = 0; st.ema = 16.7; for (let t = 1000; t < 1000 + ms; t += gap) st.govern(t, dt); return st.quality; };
-    const r = { paced: run(33.4, 16.7), paced3: run(50, 16.7), timer: run(100, undefined), slow: run(33.4, 33.4), slowNoDt: run(33.4, undefined) };
-    st.setQuality(saved.q); st.setFixed(saved.fixed);
-    // and the map passes its frame interval
-    let seen = null; const of = st.frame; st.frame = function (f, w, h) { seen = f.dt; return of.call(this, f, w, h); };
-    return new Promise(res => setTimeout(() => { st.frame = of; res({ ...r, mapDt: seen }); }, 600));
-  });
-  check(gov.paced === 'high' && gov.paced3 === 'high' && gov.timer === 'high', `${tag}: Auto keeps its tier on a paced still board / timer-driven caller ${JSON.stringify(gov)}`);
-  check(gov.slow === 'low' && gov.slowNoDt === 'low', `${tag}: Auto still steps down on a real 30 fps device`);
-  check(typeof gov.mapDt === 'number', `${tag}: the map passes its frame interval to the stage (${gov.mapDt})`);
-  await setGfx(page, 'off'); await frames(page, 6);
-  check((await layers(page)).length === 0 && (await T(page)).status === '2D table', `${tag}: Graphics off removes the layers`);
-  await page.screenshot({ path: `${out}/gl-${tag}-off.png` });
-  await setGfx(page, 'high'); await frames(page, 6);
-  check((await layers(page)).length === 3 && (await T(page)).status === 'WebGL2 · high', `${tag}: Graphics back on`);
-  // context loss: one layer, then all three restored one at a time (in both orders)
-  const lose = sel => page.evaluate(sel => { window.__ext = [...document.querySelectorAll(sel)].map(c => c.getContext('webgl2').getExtension('WEBGL_lose_context')); window.__ext.forEach(e => e.loseContext()); }, sel);
-  const restore = i => page.evaluate(i => window.__ext[i].restoreContext(), i);
-  await lose('canvas.artgl-light'); await page.waitForTimeout(200); await frames(page, 3);
-  check((await T(page)).status.startsWith('Graphics context lost') && !(await page.evaluate(() => !!window.tc.screen.map.stage)), `${tag}: a lost layer drops the map to the 2D table`);
-  await page.screenshot({ path: `${out}/gl-${tag}-lost.png` });
-  await restore(0); await page.waitForTimeout(500);
-  check((await T(page)).status === 'WebGL2 · high', `${tag}: restored`);
-  for (const order of [[0, 1, 2], [2, 1, 0]]) {
-    await lose('canvas.artgl'); await page.waitForTimeout(200);
-    for (let k = 0; k < 3; k++) {
-      await restore(order[k]); await page.waitForTimeout(300);
-      const st = (await T(page)).status;
-      check(k < 2 ? st.startsWith('Graphics context lost') : st === 'WebGL2 · high', `${tag}: restore ${order.slice(0, k + 1)} -> "${st}"`);
-    }
+  // the old settings read as the new tiers
+  for (const [old, want] of [['medium', 'high'], ['off', 'low']]) {
+    const r = await page.evaluate(`${gfxMod}.then(m => { m.setGfxSetting(${JSON.stringify(old)}); return m.gfxSetting(); })`);
+    check(r === want, `${tag}: an old "${old}" setting reads as ${want} (${r})`);
   }
-  await frames(page, 6);
-  await page.screenshot({ path: `${out}/gl-${tag}-restored.png` });
-  // GPU objects stay bounded: tier switches, resizes and context cycles leave no extra textures/programs
+  // the ground's tile cache stays bounded while zooming in and out and panning far
+  await setGfx(page, 'high');
   for (let i = 0; i < 4; i++) {
-    for (const q of ['low', 'medium', 'high']) { await setGfx(page, q); await frames(page, 3); }
-    await page.setViewportSize({ width: vw - 37 * (i + 1), height: dev.viewport.height }); await frames(page, 3);
-    await lose('canvas.artgl-under'); await page.waitForTimeout(80); await restore(0); await page.waitForTimeout(200);
+    await page.evaluate(i => { const m = window.tc.screen.map; m.cam.z = [0.2, 0.6, 1.4, 0.4][i]; m.cam.x += 300 * (i % 2 ? 1 : -1); }, i);
+    await frames(page, 30);
   }
-  await page.setViewportSize(dev.viewport); await frames(page, 6);
-  const base1 = await glLive(page);
-  check(JSON.stringify(base1) === JSON.stringify(base0), `${tag}: live GL objects bounded ${JSON.stringify(base0)} -> ${JSON.stringify(base1)}`);
-  // lobby <-> game: one stage, still three contexts
-  for (let i = 0; i < 3; i++) {
+  const tiles = await page.evaluate(() => window.tc.screen.map.dialStats.tiles);
+  check(tiles <= 84, `${tag}: baked ground tiles bounded (${tiles})`);
+  // lobby <-> game: still no GL, no errors
+  for (let i = 0; i < 2; i++) {
     await page.evaluate(() => { location.hash = '#/'; }); await page.waitForTimeout(500);
     await page.evaluate(() => document.querySelector('[data-l=start]').click()); await page.waitForFunction(() => window.tc?.screen?.map?.fitted); await frames(page, 4);
   }
-  const ctxs = await page.evaluate(() => [...window.__glLive.keys()].filter(g => !g.isContextLost()).length);
-  check(ctxs <= 3, `${tag}: live GL contexts after 3 lobby round trips: ${ctxs}`);
+  check(await page.evaluate(() => window.__glCtx === 0), `${tag}: no WebGL after lobby round trips`);
   check(errors.length === 0, `${tag}: no page errors ${JSON.stringify(errors.slice(0, 3))}`);
   await ctx.close();
 }
@@ -136,9 +85,8 @@ async function gl2d(tag, dev) {
   console.log(`== ?gl=0 (${tag})`);
   const { ctx, page, errors } = await openGame(dev, { gfx: null, query: '?gl=0' });
   const s = await T(page);
-  check(s.status === '2D table' && (await layers(page)).length === 0, `${tag} ?gl=0: 2D table (${s.status})`);
+  check(s.q === 'low', `${tag} ?gl=0: the light tier (${s.status})`);
   await page.screenshot({ path: `${out}/gl0-${tag}.png` });
-  // a pan with the 2D table
   await page.evaluate(() => { const m = window.tc.screen.map; m.cam.x += 200; }); await frames(page, 10);
   check(errors.length === 0, `${tag} ?gl=0: no page errors ${JSON.stringify(errors.slice(0, 3))}`);
   await ctx.close();
@@ -251,7 +199,7 @@ async function mapChecks(tag, dev, gfx) {
   check(errors.length === 0, `${tag}: no page errors ${JSON.stringify(errors.slice(0, 3))}`);
   await ctx.close();
 }
-if (!ONLY || ONLY === 'map') for (const [tag, dev] of Object.entries(DEVS)) for (const g of ['high', 'off']) await mapChecks(tag, dev, g);
+if (!ONLY || ONLY === 'map') for (const [tag, dev] of Object.entries(DEVS)) for (const g of ['high', 'low']) await mapChecks(tag, dev, g);
 
 // ------------------------------------------------------------------ battle viewer
 async function bv(tag, dev) {
@@ -333,9 +281,9 @@ const matchMediaReduced = false;
 const BVDEVS = { ...DEVS, landscape: DEVICES.landscape };
 if (!ONLY || ONLY === 'bv') for (const [tag, dev] of Object.entries(process.env.DEV ? DEVS : BVDEVS)) await bv(tag, dev);
 
-// ------------------------------------------------------------------ the viewer keeps the GL table while it is open
+// ------------------------------------------------------------------ the viewer's stage is the orrery (2D), in game
 async function bvTable(tag, dev) {
-  console.log(`== viewer + GL table in game (${tag})`);
+  console.log(`== viewer stage in game (${tag})`);
   const { ctx, page, errors } = await openGame(dev, { gfx: 'high' });
   page.setDefaultTimeout(90000);
   const mod = n => `(() => { const u = performance.getEntriesByType('resource').map(e => e.name).find(x => x.includes('/src/${n}')); return import(u); })()`;
@@ -348,18 +296,13 @@ async function bvTable(tag, dev) {
     B.openBattleViewer(rep, { rules: s.st.rules, playerName: o => 'P' + o, playerColor: o => '#5577ff', regionName: () => 'X', you: 0 });
   })`);
   await page.waitForTimeout(800);
-  const where = () => page.evaluate(() => { const u = document.querySelector('canvas.artgl-under'); return u ? (u.closest('.bv-overlay') ? 'viewer' : 'map') : 'none'; });
-  check(await where() === 'viewer', `${tag}: the open viewer holds the GL table`);
-  await setGfx(page, 'low'); await page.waitForTimeout(600);
-  check(await where() === 'viewer', `${tag}: a tier change mid-battle leaves the table under the viewer (${await where()})`);
-  await page.evaluate(() => { window.__ext = [...document.querySelectorAll('canvas.artgl')].map(c => c.getContext('webgl2').getExtension('WEBGL_lose_context')); window.__ext.forEach(e => e.loseContext()); });
-  await page.waitForTimeout(600);
-  await page.screenshot({ path: `${out}/bvtable-${tag}-lost.png` });
-  await page.evaluate(() => window.__ext.forEach(e => e.restoreContext()));
-  await page.waitForTimeout(800);
-  check(await where() === 'viewer' && (await T(page)).status.startsWith('WebGL2'), `${tag}: context lost and restored mid-battle, table back under the viewer`);
+  // the stage is painted (not black): sample the viewer canvas
+  const lum = await page.evaluate(() => { const c = document.querySelector('.bv-stage canvas'); const g = c.getContext('2d'); const d = g.getImageData(0, 0, c.width, c.height).data; let s = 0, n = 0; for (let i = 0; i < d.length; i += 4 * 97) { s += d[i] + d[i + 1] + d[i + 2]; n++; } return s / n / 3; });
+  check(lum > 4, `${tag}: the viewer's stage is painted (mean ${lum.toFixed(1)})`);
+  await page.screenshot({ path: `${out}/bvtable-${tag}.png` });
+  await setGfx(page, 'low'); await page.waitForTimeout(400);
   await page.keyboard.press('Escape'); await page.waitForTimeout(500); await frames(page, 4);
-  check(await where() === 'map', `${tag}: closing the viewer hands the table back to the map (${await where()})`);
+  check(await page.evaluate(() => !document.querySelector('.bv-overlay') && window.tc.screen.map.dialStats.missing === 0), `${tag}: closing the viewer leaves the board drawn`);
   check(errors.length === 0, `${tag}: no page errors ${JSON.stringify(errors.slice(0, 3))}`);
   await ctx.close();
 }

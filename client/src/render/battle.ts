@@ -8,13 +8,14 @@ type ShipOpts = Parameters<typeof drawShipArt>[9];
 import { scheme } from '../art/palette.ts';
 import { drawBase, drawStand, BASE_SQUASH } from '../art/minis.ts';
 import { drawPlanet, drawBodyShadow, type WorldType } from '../art/planets.ts';
-import { matBackdrop, lampOverlay, weaveTile, starfield } from '../art/mat.ts';
 import { drawGlow, beam, tracer, fireball, smoke, shieldHit } from '../art/fx.ts';
-import { fbm2, rand as artRand, mix as artMix, css as artCss, rgb as artRgb } from '../art/util.ts';
+import { css as artCss, rgb as artRgb } from '../art/util.ts';
 import { drawStructure } from '../art/structures.ts';
 import { uiScale } from '../ui/dom.ts';
 import { iconizeDom, iconizeHtml, ic, drawIcon, fillIconText } from '../art/icons.ts';
-import { tableFor, releaseTable, onTableChange, Pacer } from '../art/gl/table.ts';
+import { orreryBackdrop } from '../art/orrery-bg.ts';
+import { houseOf } from '../art/orrery.ts';
+import { gfxQuality } from '../art/gfx.ts';
 import { enamel, retint, SEMANTIC } from '../art/bible.ts';
 // the art bible's tokens and kit (battle-demo.html loads the viewer without the app's stylesheets)
 import '../art/kit.css';
@@ -595,17 +596,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   let mouse: { x: number; y: number } | null = null;
   const g = canvas.getContext('2d')!;
   let bg: HTMLCanvasElement | null = null;
-  /** the shared GL table (sky, lamp, coronas, grain) moved under this viewer while it is open; null = 2D table */
   const tableSeed = Math.abs(report.id * 131 + report.region * 7) % 100000;
-  let table = tableFor(canvas, tableSeed);
-  // the table can lose its GL context (or get it back, or be switched off) while the viewer is open: re-check it, so
-  // the fight never plays over a hidden sky (black) and a restored sky is not covered by the 2D backdrop
-  const offTable = onTableChange(() => {
-    if (closed) return;
-    const t = tableFor(canvas, tableSeed);
-    if (t !== table) { table = t; if (W) buildBg(); }
-  });
-  const pacer = new Pacer();
   let farDist = 800;
 
   function hpAt(u: Unit, tt: number): number {
@@ -753,53 +744,10 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   }
 
   function buildBg() {
-    // with the GL table under the canvas, the sky, felt, lamp and vignette are the board's own (art/gl/stage.ts)
-    if (table) { bg = null; return; }
-    // the 2D table: a dark felt mat with a printed nebula in the sky pigments (umber, oxblood, verdigris), a fine
-    // weave, printed stars, and the lamp's warm pool with a dark vignette
-    bg = document.createElement('canvas');
-    bg.width = canvas.width; bg.height = canvas.height;
-    const b = bg.getContext('2d')!;
-    b.scale(dpr, dpr);
-    b.drawImage(matBackdrop(W, H), 0, 0, W, H);
-    const rnd = artRand(report.id * 101 + 5);
-    // printed nebula: low-res fbm, coloured from the sides
-    {
-      const S = 5, nw = Math.ceil(W / S), nh = Math.ceil(H / S);
-      const nc = document.createElement('canvas'); nc.width = nw; nc.height = nh;
-      const ng = nc.getContext('2d')!;
-      const img = ng.createImageData(nw, nh);
-      const cols = sides.map(sd => artMix(artRgb(enamel(sd.color).lo), [106, 63, 38], 0.55));
-      while (cols.length < 2) cols.push([28, 72, 72]);
-      const seed = report.id * 13 + 7;
-      for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) {
-        const n = fbm2(x / 46, y / 46, 5, seed), m = fbm2(x / 30 + 9, y / 30, 3, seed + 3), d = fbm2(x / 18, y / 18, 3, seed + 5);
-        const c = artMix(cols[0], cols[1 % cols.length], Math.max(0, Math.min(1, m * 1.6 - 0.3)));
-        let a = Math.max(0, n - 0.42) * 1.9 * (1 - Math.max(0, d - 0.55) * 2.2);
-        a = Math.max(0, Math.min(0.55, a));
-        const i = (y * nw + x) * 4;
-        img.data[i] = c[0]; img.data[i + 1] = c[1]; img.data[i + 2] = c[2]; img.data[i + 3] = a * 255;
-      }
-      ng.putImageData(img, 0, 0);
-      b.imageSmoothingQuality = 'high';
-      b.drawImage(nc, 0, 0, W, H);
-    }
-    b.globalAlpha = 0.85; b.drawImage(starfield(Math.ceil(W), Math.ceil(H), report.id), 0, 0, W, H); b.globalAlpha = 1;
-    for (let i = 0; i < 6; i++) {
-      const x = rnd() * W, y = rnd() * H;
-      b.fillStyle = 'rgba(241,236,223,0.8)'; b.fillRect(x, y, 1.4, 1.4);
-    }
-    // the cloth's weave
-    const pat = b.createPattern(weaveTile(), 'repeat');
-    if (pat) { b.save(); b.globalCompositeOperation = 'overlay'; b.globalAlpha = 0.22; b.fillStyle = pat; b.fillRect(0, 0, W, H); b.restore(); }
-    // a faint printed range grid, engraved in the mat's brass ink
-    b.strokeStyle = 'rgba(220,180,108,0.035)'; b.lineWidth = 1;
-    const step = 56;
-    b.beginPath();
-    for (let x = (W / 2) % step; x < W; x += step) { b.moveTo(x, 0); b.lineTo(x, H); }
-    for (let y = (H / 2) % step; y < H; y += step) { b.moveTo(0, y); b.lineTo(W, y); }
-    b.stroke();
-    b.drawImage(lampOverlay(W, H), 0, 0, W, H);
+    // the orrery, closer: the fight is set on the board's black-enamel dial (cloisonné, guilloché, the gold bezel
+    // round it) with the sides' enamels inlaid inside the bezel; the lamp's reflection and the room's falloff over it
+    const houses = sides.map(sd => houseOf(sd.color));
+    bg = orreryBackdrop(W, H, dpr, tableSeed, { cx: W / 2, cy: H / 2 + H * 0.04, R: Math.max(W, H) * 0.62, houses, sheen: gfxQuality() === 'high', falloff: 0.55 });
   }
 
   // ---------------------------------------------------------------- positions
@@ -1565,8 +1513,6 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     g.clearRect(0, 0, W, H);
     const [sx, sy] = shake(tt);
     if (bg) g.drawImage(bg, sx * 0.3 - 2, sy * 0.3 - 2, W + 4, H + 4);
-    // on the GL table: a breath of felt over the open sky so the pieces read first (the board has its fog for this)
-    else if (table) { g.fillStyle = 'rgba(7,8,12,0.34)'; g.fillRect(0, 0, W, H); }
     // camera: a slow push-in over the fight, a small punch toward each kill
     camera(tt);
     g.save();
@@ -1587,12 +1533,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     g.restore();
     drawHud(tt);
     drawHover(tt);
-    if (table) {
-      // the same table, closer: the board's sky pushed in with the battle's camera; the lamp, motes and grain over it
-      if (pacer.tick(playing)) table.frame({ cam: { x: (report.region % 13) * 90 - camX * 0.4, y: (report.id % 7) * 60 - camY * 0.4, z: 1.1 * camK }, t: performance.now() / 1000, stars: [], bloomSrc: canvas, dt: frameMs }, W, H);
-      return;
-    }
-    // vignette (the 2D table)
+    // vignette
     const vg = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
     vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(6,4,2,0.6)');
     g.fillStyle = vg; g.fillRect(0, 0, W, H);
@@ -1743,8 +1684,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     cancelAnimationFrame(raf);
     ro.disconnect();
     // hand the table back: the map mounts it again on its next frame
-    offTable();
-    releaseTable(canvas);
+
     window.removeEventListener('keydown', onKey, true);
     // fade out (renamed so nothing treats it as an open viewer any more), unless it was already taken out of the page
     if (reduced || !overlay.isConnected) { overlay.remove(); return; }

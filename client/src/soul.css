@@ -10,7 +10,7 @@
 .chev i { display: block; width: 0.625rem; height: 0.25rem; border: solid #e6b54e; border-width: 0.125rem 0.125rem 0 0; transform: rotate(-45deg) skew(10deg, 10deg); margin-top: -1px; filter: drop-shadow(0 1px 0 #000); }
 .chev:not(.legend) { flex-direction: row; gap: 0.125rem; }
 .chev i { transform: rotate(-45deg); width: 0.375rem; height: 0.375rem; }
-.chev.legend { color: var(--gold); font-size: var(--fs-xs); text-shadow: 0 0 0.375rem rgba(255, 200, 90, 0.7); flex-direction: row; align-items: center; width: auto; padding: 0 1px; gap: 0; }
+.chev.legend { color: var(--gold); font-size: var(--fs-xs); text-shadow: 0 1px 0 rgba(2, 2, 4, 0.9); flex-direction: row; align-items: center; width: auto; padding: 0 1px; gap: 0; }
 /* .legend is also the map key (shell.css: 24rem wide): the Legend star must not inherit its width, or it squeezes the fleet name to a letter a line */
 .chev.legend .ic { flex: none; width: 1em; height: 1em; }
 .brand { display: inline-block; font-family: var(--display); font-weight: 800; font-size: var(--fs-xs); letter-spacing: 0.14em; color: #ffe0d8;

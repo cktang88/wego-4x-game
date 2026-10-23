@@ -1,26 +1,28 @@
 // Canvas renderer for the strategic map (UX v2, docs/UX-V2.md §2): semantic zoom in three tiers
 // (strategic / operational / detail), one object per idea (region banner, fleet token per owner per region,
 // battle roundel), lenses, order and drag arrows, plus replay animation overlays and effects.
+// The look is the enamel and gold orrery (docs/ART-BIBLE.md §13): the ground is baked in world-space tiles by
+// render/dial.ts; stars are gems, pieces are lit cast-metal and gold (art/orrery.ts, art/figurine.ts). 2D only.
 import type { GameState, Region, Fleet, Pt, Signal, Order, Engagement } from '../../../shared/sim/types.ts';
 import { NEUTRAL_COLOR, SIGILS, CALLINGS, POSTURES } from '../../../shared/config/content.ts';
 import { tenureTier } from '../../../shared/sim/soul.ts';
 import { drawSigil, goldPaint } from '../art/sigils.ts';
-import { drawShip, drawPlumes, gunPoints } from '../art/ships.ts';
+import { drawShip } from '../art/ships.ts';
 import { scheme } from '../art/palette.ts';
 import { CLASS_RANK, classLen } from '../art/palette.ts';
-import { drawBase, drawStand, formation, BASE_SQUASH } from '../art/minis.ts';
-import { drawBodyShadow, artGeneration } from '../art/planets.ts';
-import { drawStarNode, starKindOf, STAR_NODE, drawOrbitLines, drawSpecks, drawTwinkle, drawPulsarBeams, drawAccretionShimmer } from '../art/stars.ts';
-import { matBackdrop, lampOverlay, weaveTile, nebulaPrint, starfield } from '../art/mat.ts';
-import { tableFor, onTableChange, Pacer, type CoronaStar } from '../art/gl/table.ts';
-import type { ArtStage } from '../art/gl/stage.ts';
-import { enamel as enamelOf, retint, HATCH, CORONA, SEMANTIC, LAMP, type HouseKey } from '../art/bible.ts';
-import { drawGlow, beam, tracer, fireball, smoke, stamp, shieldHit } from '../art/fx.ts';
+import { formation } from '../art/minis.ts';
+import { drawBodyShadow, bodyWorldType } from '../art/planets.ts';
+import { starKindOf } from '../art/stars.ts';
+import { retint, SEMANTIC, enamel as enamelOf } from '../art/bible.ts';
+import { drawGlow, fireball, smoke, stamp } from '../art/fx.ts';
 import { enamel } from '../art/plates.ts';
-import { drawStructure, shieldDome, rockSprite, buoySprite, type Structure } from '../art/structures.ts';
-import { rgb as rgbA, css as cssA, mix as mixA, h2 } from '../art/util.ts';
-import { Rng, hashString } from '../../../shared/sim/rng.ts';
+import { drawStructure, shieldDome, type Structure } from '../art/structures.ts';
+import { rgb as rgbA, h2 } from '../art/util.ts';
 import { pointInPoly } from '../../../shared/sim/mapgen.ts';
+import * as O from '../art/orrery.ts';
+import { drawFigurine, drawPlinth, drawPin, figurineFrame, PLINTH_SQUASH } from '../art/figurine.ts';
+import { gfxQuality, gfxFrame, onGfxChange } from '../art/gfx.ts';
+import { Dial, type DialContent } from './dial.ts';
 import { TRAITS as WORLD_TRAITS, VEINS } from '../../../shared/config/empire.ts';
 import { connected, supplied, maxDevAt } from '../../../shared/sim/empire.ts';
 import { contestOn, systemStatus } from '../../../shared/sim/contest.ts';
@@ -34,8 +36,7 @@ import {
 } from './mapmodel.ts';
 import { fleetSpeed, within, findPath } from '../../../shared/sim/graph.ts';
 import {
-  TAU, numFont, displayFont, PLATE, INK, desat, inkOn, roundRect, shieldPath, chevronPath, swords,
-  planet, haloText, letterSpaced, hatchTile, hexA as hexA0,
+  TAU, numFont, displayFont, desat, inkOn, roundRect, swords, haloText, letterSpaced, hexA as hexA0,
 } from './glyphs.ts';
 
 export type { Tier, Lens } from './mapmodel.ts';
@@ -100,10 +101,12 @@ const easeOutBack = (t: number) => { const c = 1.9; return 1 + (c + 1) * (t - 1)
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const GOLD = SEMANTIC.fate;
 const WARDEN = '#ab95d8';
-const STONE = '#ece3cf';
-const FADE_MS = 150;
-/** GL corona strength by star kind (>0.55 adds the faint lens cross). */
-const CORONA_AMP: Record<string, number> = { throne: 1, blue: 0.8, white: 0.7, yellow: 0.62, binary: 0.7, red: 0.5, pulsar: 0.72, blackhole: 0.32 };
+const BASE_SQUASH = PLINTH_SQUASH;
+/** Body stones at detail zoom, by world type (orrery cabochons on their gold tracks). */
+const BODY_STONE: Record<string, O.Stone> = {
+  gas: O.STONE.gas, ice: O.STONE.ice, lava: O.STONE.lava, ash: O.STONE.lava, ocean: O.STONE.ocean, terran: O.STONE.ocean,
+  garden: O.STONE.garden, thorn: O.STONE.garden, toxic: O.STONE.garden, crystal: O.STONE.ice, desert: O.STONE.gas, barren: O.STONE.rock,
+};
 
 export interface DrawInput {
   state: GameState;
@@ -145,13 +148,10 @@ export class MapRenderer {
   /** UI scale (style.css root font-size / 16): screen-constant map furniture (labels, plates, chips, tokens) is
    *  drawn in design px, `ui` CSS px each, so it grows with the HUD on big screens. 1 on phones and up to 1440x900. */
   ui = 1;
-  private stars: HTMLCanvasElement | null = null;
-  private starPattern: CanvasPattern | null = null;
-  private bgCanvas: HTMLCanvasElement | null = null;
-  private haze: { c: HTMLCanvasElement; x: number; y: number; w: number; h: number } | null = null;
-  private lamp: HTMLCanvasElement | null = null;
-  private weave: CanvasPattern | null = null;
-  private asteroidCache = new Map<number, Pt[]>();
+  /** the ground: the dial, territories and resting lanes, baked in world-space tiles (render/dial.ts) */
+  private dial = new Dial();
+  /** the lamp over the ground: one glaze reflection (High) and the room's falloff, screen space, baked per size */
+  private lamp: { c: HTMLCanvasElement; key: string } | null = null;
   private seed = -1;
   fitted = false;
   /** intel signal markers drawn this frame (world centre), for the tooltip */
@@ -160,21 +160,12 @@ export class MapRenderer {
   private hovStar: number | null = null;
   /** battle markers drawn this frame (world centre, radius in design px), for the tooltip */
   private battleHits: { rid: number; x: number; y: number; r: number }[] = [];
-  private hatch: { cut: CanvasPattern | null; dark: CanvasPattern | null } = { cut: null, dark: null };
-  /** the GL table under and over this canvas (art/gl/table.ts), or null: the 2D mat painters draw the table */
-  private stage: ArtStage | null = null;
-  private pacer = new Pacer();
-  private stageCam = '';
-  /** star coronas for the GL light pass, collected while the stars are drawn (screen px) */
-  private coronas: CoronaStar[] = [];
-  /** engraved hatching per house (pattern cue for colour-blind players), screen-constant */
-  private houseHatch = new Map<string, CanvasPattern | null>();
+  private frameNo = 0;
 
   // ---- semantic zoom
   private _tier: Tier | null = null;
-  private fade: { c: HTMLCanvasElement; cam: Cam; t0: number } | null = null;
-  /** the crossfade snapshot canvas, kept between tier switches (a full-screen canvas per switch was churn) */
-  private fadeSpare: HTMLCanvasElement | null = null;
+  /** non-null while the ground crossfades between two bakes (a new zoom bucket, a capture, the fog moving) */
+  get fade(): { dial: true } | null { return this.dial.fading ? { dial: true } : null; }
   /** read-only: the current semantic-zoom tier */
   get tier(): Tier { return this._tier ?? this.computeTier(null); }
 
@@ -193,7 +184,6 @@ export class MapRenderer {
   private ownFx: Fx[] = [];
   private arrowSeen = new Map<string, number>();
   private arrowFrame = new Set<string>();
-  private twinkles: { x: number; y: number; ph: number; sp: number; s: number; c: string }[] = [];
   private selFleet: string | null = null; private selFleetT0 = 0;
   private selRegion: number | null = null; private selRegionT0 = 0;
   private sparkAcc = 0;
@@ -230,10 +220,10 @@ export class MapRenderer {
     }, { passive: true });
     canvas.addEventListener('pointerleave', () => { this.mouse = null; }, { passive: true });
     canvas.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') this.mouse = null; }, { passive: true });
-    // labels are cached in the static layer: redraw once web fonts arrive
-    document.fonts?.ready.then(() => this.invalidate()).catch(() => { /* */ });
-    // the GL table came, went, or lost its context: the cached layer bakes the 2D table in or out
-    this.offTable = onTableChange(() => this.invalidate());
+    // name widths are measured once: measure again once web fonts arrive
+    document.fonts?.ready.then(() => { this.nameWidth.clear(); this.nameMemo.key = ''; }).catch(() => { /* */ });
+    // the Graphics tier changed: the ground rebakes at its new resolution, the lamp drops or keeps its reflection
+    this.offTable = onGfxChange(() => { this.lamp = null; });
     // sprites painted in idle time (stars, planets) are drawn in the per-frame pass, which picks them up on the next
     // frame: the cached layer holds no such art, so a bake landing must not force a rebuild (it did, every frame,
     // while zooming)
@@ -241,7 +231,7 @@ export class MapRenderer {
   }
 
   private offTable: () => void;
-  /** Stop listening to the shared table (the stage itself is shared and moves to the next board). */
+  /** Stop listening to the Graphics setting. */
   dispose() { this.offTable(); }
 
   resize() {
@@ -255,14 +245,7 @@ export class MapRenderer {
     this.w = r.width; this.h = r.height;
     this.canvas.width = W;
     this.canvas.height = H;
-    this.stars = null;
-    this.bgCanvas = null;
-    this.layerKey = '';
-    this.fade = null;
-    // a few twinkling stars drawn live over the cached starfield (cosmetic randomness)
-    const n = Math.round(Math.min(60, (r.width * r.height) / 24000));
-    const cols = ['#ffffff', '#cfe0ff', '#ffe9c8', '#e2c8ff'];
-    this.twinkles = Array.from({ length: n }, () => ({ x: Math.random() * r.width, y: Math.random() * r.height, ph: Math.random() * TAU, sp: 0.6 + Math.random() * 1.6, s: Math.random() < 0.2 ? 2 : 1.2, c: cols[(Math.random() * cols.length) | 0] }));
+    this.lamp = null;
   }
 
   // ---------------------------------------------------------------- camera flights
@@ -460,31 +443,130 @@ export class MapRenderer {
   /** How much the system art (planets, structures, minis) grows when zoomed in (1 up to operational). */
   private artK() { return artGrow(this.zr); }
 
-  /** Cached static layer (background, regions, borders, banners): redrawn only when its inputs change. */
-  private layer: HTMLCanvasElement | null = null;
-  private layerKey = '';
-  private layerCam: Cam | null = null;
   private lastCam: Cam | null = null;
   private camMovedAt = 0;
+  private drawnOnce = false;
   private ids = new WeakMap<object, number>();
   private nextObjId = 1;
   private objId(o: object): number { let v = this.ids.get(o); if (v === undefined) { v = this.nextObjId++; this.ids.set(o, v); } return v; }
-  /** Force the static layer to be rebuilt on the next draw (e.g. web fonts finished loading). */
-  invalidate() { this.layerKey = ''; this.layerCam = null; }
+  /** Rebake the ground (progressively: the old bake stands in until the new one is ready) and re-measure names. */
+  invalidate() { this.dial.invalidate(); this.nameWidth.clear(); this.nameMemo.key = ''; }
+  /** what the ground holds (tests and the perf harness) */
+  get dialStats() { return { tiles: this.dial.tileCount, missing: this.dial.missing, bakeMs: this.dial.bakeMs, baked: this.dial.baked }; }
+
+  private fogMemo: { vis: Set<number> | null; size: number; you: number | null; st: GameState | null; owners: string; set: Set<number>; key: string } = { vis: null, size: -1, you: null, st: null, owners: '', set: new Set(), key: '' };
+  /** What the ground shows: owners, fog, lens, supply. Its key changes whenever the bake must. */
+  private dialContent(I: DrawInput): DialContent {
+    const st = I.state, lens = I.lens ?? 'political';
+    const ow = I.owners.join(',');
+    const F = this.fogMemo;
+    if (F.vis !== I.visible || F.size !== I.visible.size || F.you !== I.you || F.st !== st || F.owners !== ow) {
+      const set = new Set<number>();
+      if (I.you !== null) for (const r of st.regions) if (!isLane(r) && r.poly.length > 2 && !I.visible.has(r.id) && I.owners[r.id] !== I.you) set.add(r.id);
+      Object.assign(F, { vis: I.visible, size: I.visible.size, you: I.you, st, owners: ow, set, key: [...set].join(',') });
+    }
+    const cut = this.cutOffOf(I);
+    const { sup } = this.supplySets(I);
+    let unsup: Set<number> | null = null;
+    if (lens === 'supply' && sup) { unsup = new Set(st.regions.filter(r => r.kind !== 'void' && !isLane(r) && !sup.has(r.id)).map(r => r.id)); }
+    const key = [this.bare ?? '', this.objId(st.regions), ow, F.key, lens, cut ? [...cut].join('.') : '', unsup ? [...unsup].join('.') : '', st.players.map(p => p.color).join(','), I.you].join('|');
+    return { st, owners: I.owners, fogged: F.set, lens, cutOff: cut, unsup, key, bare: this.bare };
+  }
+
+  // ---- readability probes (scripts/orrery-contrast.mjs): every indicator drawn leaves a box, in css px
+  /** non-null while a measurement frame is drawn */
+  private probes: { kind: string; x: number; y: number; w: number; h: number; bg?: number }[] | null = null;
+  /** draw only the ground (dial, territories, resting lanes, the lamp): the measurement's background frame */
+  private groundOnly = false;
+  private bare: 0 | 1 | undefined = undefined;
+  private syncBake = false;
+  /** the empire lettering drawn this frame (screen boxes): lines under it are not measured there */
+  private letterBoxes: { x0: number; y0: number; x1: number; y1: number }[] = [];
+  private lastInput: DrawInput | null = null;
+  /** A probe on a world point (w, h in design px). */
+  private probe(kind: string, wx: number, wy: number, w: number, h: number, bg = 1) {
+    if (!this.probes) return;
+    const p = this.toScreen({ x: wx, y: wy });
+    this.probeS(kind, p.x, p.y, w * this.ui, h * this.ui, bg);
+  }
+  /** A probe at a screen point (css px). */
+  private probeS(kind: string, x: number, y: number, w: number, h: number, bg = 1) {
+    if (!this.probes) return;
+    const p = { x, y }, k = 1;
+    if (p.x - w * k / 2 < 2 || p.y - h * k / 2 < 2 || p.x + w * k / 2 > this.w - 2 || p.y + h * k / 2 > this.h - 2) return;
+    // only where the map itself shows (not under the HUD)
+    const cr = this.canvas.getBoundingClientRect(), pad = Math.max(w, h) * k * 0.5 + 6;
+    for (const [dx, dy] of [[0, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]]) if (document.elementFromPoint(p.x + dx * pad + cr.left, p.y + dy * pad + cr.top) !== this.canvas) return;
+    this.probes.push({ kind, x: p.x, y: p.y, w: w * k, h: h * k, bg });
+  }
+  /** Draw the last frame twice (every mark, then the ground alone) and measure each indicator's contrast against the
+   *  ground round it (the method of docs/STYLE-EXPLORE.md §2: the light tone against the ground's bright side, or the
+   *  dark tone against its dark side, or a two-tone keyline against both). */
+  measureContrast(): { kind: string; x: number; y: number; contrast: number; n: number }[] {
+    const I = this.lastInput;
+    if (!I) return [];
+    const g = this.ctx, W = this.canvas.width, H = this.canvas.height;
+    this.syncBake = true;
+    this.probes = []; this.letterBoxes = [];
+    this.lastNow = I.now; this.draw(I);
+    const C = g.getImageData(0, 0, W, H).data;
+    // a line under a piece, a star or a name is not that line's reading: those probes are dropped
+    const occ = [...this.tokHits, ...this.bannerHits].map(h => { const c = this.toScreen(h); return { x0: c.x + h.l * this.ui, y0: c.y + h.t * this.ui, x1: c.x + h.r * this.ui, y1: c.y + h.b * this.ui }; });
+    occ.push(...this.letterBoxes);
+    const linear = (k: string) => k.startsWith('lane') || k.startsWith('route') || k === 'territory border';
+    const trS = tokR(this.zr, this.coarse) * this.ui * 1.25;
+    const toks = this.tokHits.map(h => { const c = this.toScreen(h); return { x0: c.x - trS, y0: c.y - trS, x1: c.x + trS, y1: c.y + trS }; });
+    const over = (p: { x: number; y: number; w: number; h: number }, os: typeof occ) => os.some(o => p.x + p.w / 2 > o.x0 && p.x - p.w / 2 < o.x1 && p.y + p.h / 2 > o.y0 && p.y - p.h / 2 < o.y1);
+    const probes = this.probes.filter(p => !((p.kind === 'contested' || p.kind.startsWith('star')) && over(p, toks)) && !(linear(p.kind) && over(p, occ)));
+    this.probes = null;
+    // the backgrounds (docs/STYLE-EXPLORE.md §2): the dial with its territories and walls (for every mark), and the
+    // dial alone (for the walls themselves)
+    this.groundOnly = true;
+    this.bare = 1; this.lastNow = I.now; this.draw(I);
+    const bg = g.getImageData(0, 0, W, H).data;
+    this.bare = 0; this.lastNow = I.now; this.draw(I); this.bare = undefined;
+    const bare = g.getImageData(0, 0, W, H).data;
+    this.groundOnly = false;
+    this.lastNow = I.now; this.draw(I);
+    this.syncBake = false;
+    const lin = (v: number) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    const lum = (D: Uint8ClampedArray, i: number) => 0.2126 * lin(D[i]) + 0.7152 * lin(D[i + 1]) + 0.0722 * lin(D[i + 2]);
+    const pct = (a: number[], q: number) => { const s = a.slice().sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.max(0, Math.floor(q * (s.length - 1))))]; };
+    const ratio = (a: number, b: number) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    const dpr = this.dpr, out: { kind: string; x: number; y: number; contrast: number; n: number }[] = [];
+    for (const p of probes) {
+      const bgd = p.bg === 0 ? bare : bg;
+      const x0 = Math.round((p.x - p.w / 2) * dpr), y0 = Math.round((p.y - p.h / 2) * dpr), x1 = Math.round((p.x + p.w / 2) * dpr), y1 = Math.round((p.y + p.h / 2) * dpr);
+      const pad = Math.round(Math.max(4, Math.min(p.w, p.h) * 0.35) * dpr), step = dpr >= 2 ? 2 : 1;
+      const mk: number[] = [], ring: number[] = [];
+      for (let y = Math.max(0, y0 - pad); y < Math.min(H, y1 + pad); y += step) for (let x = Math.max(0, x0 - pad); x < Math.min(W, x1 + pad); x += step) {
+        const i = (y * W + x) * 4;
+        if (x >= x0 && x < x1 && y >= y0 && y < y1) { if (Math.abs(C[i] - bgd[i]) + Math.abs(C[i + 1] - bgd[i + 1]) + Math.abs(C[i + 2] - bgd[i + 2]) > 36) mk.push(lum(C, i)); }
+        else ring.push(lum(bgd, i));
+      }
+      if (mk.length < 4 || !ring.length) { out.push({ kind: p.kind, x: Math.round(p.x), y: Math.round(p.y), contrast: 0, n: mk.length }); continue; }
+      const light = pct(mk, 0.95), dark = pct(mk, 0.05), hi = pct(ring, 0.85), lo = pct(ring, 0.15);
+      const c1 = light > hi ? ratio(light, hi) : 1, c2 = dark < lo ? ratio(dark, lo) : 1;
+      const c3 = light > lo && dark < hi ? Math.min(ratio(light, lo), ratio(dark, hi)) : 1;
+      out.push({ kind: p.kind, x: Math.round(p.x), y: Math.round(p.y), contrast: +Math.max(c1, c2, c3).toFixed(2), n: mk.length, tones: [light, dark, hi, lo].map(v => +v.toFixed(3)) } as { kind: string; x: number; y: number; contrast: number; n: number });
+    }
+    return out;
+  }
 
   draw(I: DrawInput) {
+    this.lastInput = I;
     const st = I.state;
     if (this.seed !== st.seed) this.prepare(st);
     this.lastState = st;
     const W = this.canvas.width, H = this.canvas.height;
     if (!W || !H) return;
     // the battle viewer covers the whole screen: keep the last frame instead of animating the map underneath it
-    // (also after an invalidate: a redraw here would take the shared GL table back from the open viewer, e.g. when the
-    // governor changes tier mid-battle, leaving the fight on a black stage; the board redraws once the viewer closes)
-    if (battleViewerOpen() && this.layer) return;
+    if (battleViewerOpen() && this.drawnOnce) return;
+    const t0 = performance.now();
     const now = I.now;
     this.dt = this.lastNow ? Math.min(100, Math.max(0, now - this.lastNow)) : 16;
     this.lastNow = now; this.now = now;
+    this.frameNo++;
     this.stepCam(now);
     const prevTier = this._tier;
     this._tier = this.computeTier(prevTier);
@@ -492,93 +574,22 @@ export class MapRenderer {
     setViewer(I.you);
     this.trackOwners(I);
     this.rememberGarrisons(I);
-    const lens = I.lens ?? 'political';
-    this.stage = tableFor(this.canvas, st.seed);
-    // hover & selection live in the dynamic pass (faded), so they don't force a rebuild of the static layer
-    const base = [this.objId(st), this.staticSig(I), this.objId(I.visible), I.visible.size, I.you, I.owners.join(','), W, H, this.dpr, this.ui,
-      I.cutOff ? `${this.objId(I.cutOff)}:${I.cutOff.size}` : 0, lens, I.peek ? 1 : 0, this.coarse ? 1 : 0, this.stage ? 1 : 0].join('|');
     const cam = this.cam;
     if (!this.lastCam || cam.x !== this.lastCam.x || cam.y !== this.lastCam.y || cam.z !== this.lastCam.z) { this.camMovedAt = now; this.lastCam = { ...cam }; }
-    if (!this.layer || this.layer.width !== W || this.layer.height !== H) {
-      this.layer = document.createElement('canvas');
-      this.layer.width = W; this.layer.height = H;
-      this.layerKey = '';
-    }
-    const lc = this.layerCam;
-    const camSame = !!lc && lc.x === cam.x && lc.y === cam.y && lc.z === cam.z;
-    // while the camera is moving (drag, pinch, wheel, flights) the cached layer is blitted with the camera transform
-    // instead of being redrawn every frame; it is rebuilt crisp once the camera settles (cheap frames on phones)
-    const moving = !camSame && (now - this.camMovedAt < 140 || !!this.camAnim);
-    // the cached layer may stand in for a redraw only while it still covers the whole view at the new camera: a flight
-    // that zooms out or pans far would otherwise show it as a rectangle with the empty table around it
-    // (a drag leaves a thin strip uncovered at one edge, which is fine for the few frames until the camera settles;
-    // a zoom-out shrinks the whole layer into a rectangle, which is not)
-    const covers = (c: Cam | null, slack = 0.22) => {
-      if (!c) return false;
-      const k = cam.z / c.z, ox = (this.w / 2) * (1 - k) + (c.x - cam.x) * cam.z, oy = (this.h / 2) * (1 - k) + (c.y - cam.y) * cam.z;
-      const sx = this.w * slack, sy = this.h * slack;
-      return k >= 0.985 && ox <= sx && oy <= sy && ox + this.w * k >= this.w - sx && oy + this.h * k >= this.h - sy;
-    };
-    const fast = base === this.layerKey && moving && !!lc && (!!this.bgCanvas || !!this.stage) && Math.abs(Math.log(cam.z / lc.z)) < 1.2 && covers(lc);
-    if (!fast && (base !== this.layerKey || !camSame)) {
-      // tier switch: keep a snapshot of the old layer and crossfade it out (text never scales; the content swaps)
-      if (this.layerKey && lc && !reducedMotion() && (prevTier !== this._tier || Math.abs(Math.log(cam.z / lc.z)) > 0.02)) {
-        const spare = this.fade?.c ?? this.fadeSpare;
-        const c = spare && spare.width === W && spare.height === H ? spare : document.createElement('canvas');
-        this.fadeSpare = c;
-        if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
-        const x = c.getContext('2d')!;
-        x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, W, H); x.drawImage(this.layer, 0, 0);
-        // feather its edges: zooming out shrinks the snapshot inside the view, and a hard rectangle showed there
-        x.globalCompositeOperation = 'destination-out';
-        const fw = Math.round(Math.min(W, H) * 0.12);
-        for (const [x0, y0, x1, y1, rx, ry, rw, rh] of [[0, 0, fw, 0, 0, 0, fw, H], [W, 0, W - fw, 0, W - fw, 0, fw, H], [0, 0, 0, fw, 0, 0, W, fw], [0, H, 0, H - fw, 0, H - fw, W, fw]]) {
-          const gr = x.createLinearGradient(x0, y0, x1, y1); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
-          x.fillStyle = gr; x.fillRect(rx, ry, rw, rh);
-        }
-        x.globalCompositeOperation = 'source-over';
-        this.fade = { c, cam: { ...lc }, t0: now };
-      }
-      const main = this.ctx;
-      this.ctx = this.layer.getContext('2d')!;
-      artGeneration();
-      try { this.drawStatic(I); } finally { this.ctx = main; }
-      this.layerKey = base;
-      this.layerCam = { ...cam };
-    }
+    const q = gfxQuality();
+    figurineFrame(this.frameNo, q === 'high' ? 6 : 3);
     const { ctx } = this;
-    if (fast && lc && this.stage) {
-      // the GL table draws the sky under this canvas: the board is transparent around its inlays
-      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
-      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-      this.blitAt(this.layer, lc, 1);
-    } else if (fast && lc) {
-      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-      ctx.drawImage(this.bgCanvas!, 0, 0, this.w, this.h);
-      // stars under the strip the shifted layer uncovers at the edge
-      if (this.starPattern) {
-        const px = -cam.x * cam.z * 0.05, py = -cam.y * cam.z * 0.05;
-        ctx.save(); ctx.translate(((px % this.w) + this.w) % this.w, ((py % this.h) + this.h) % this.h);
-        ctx.fillStyle = this.starPattern; ctx.fillRect(-this.w, -this.h, this.w * 2, this.h * 2); ctx.restore();
-      }
-      this.blitAt(this.layer, lc, 1);
-    } else {
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      if (this.stage) ctx.clearRect(0, 0, W, H);
-      ctx.drawImage(this.layer, 0, 0);
-    }
-    if (this.fade) {
-      const t = (now - this.fade.t0) / FADE_MS;
-      // the snapshot was rendered at its own camera: zooming out, it no longer covers the view (dropping it there
-      // meant no crossfade at all on a zoom-out tier switch); its feathered edges let it fade in place instead.
-      // A snapshot shrunk under half the view (a long flight) is dropped.
-      if (t >= 1 || cam.z / this.fade.cam.z < 0.5) this.fade = null;
-      else { ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0); this.blitAt(this.fade.c, this.fade.cam, 1 - easeOutCubic(clamp01(t))); }
-    }
+    // ---- the ground: the room's velvet, then the dial's baked tiles, then the lamp over them (under every mark)
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#060608'; ctx.fillRect(0, 0, W, H);
+    this.dial.draw(ctx, this.dialContent(I), { cx: cam.x, cy: cam.y, z: cam.z, w: this.w, h: this.h, dpr: this.dpr, ui: this.ui, coarse: this.coarse, now, reduced: reducedMotion(), sync: this.syncBake }, q,
+      // a still camera has the frame to spare: bake ahead (the ring just off screen) faster than while moving
+      now - this.camMovedAt > 150 && !this.camAnim && !this.zoomAnim ? (this.coarse ? 9 : 12) : (this.coarse ? 4 : 5));
+    this.drawLamp(q);
+    this.drawnOnce = true;
+    if (this.groundOnly) return;
+    if (this.probes) this.probeGround(I);
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    // the GL coronas twinkle the stars; the 2D table keeps its few live twinkles
-    if (!this.stage) this.drawTwinkles(now);
-    this.coronas = [];
     ctx.save();
     ctx.translate(this.w / 2, this.h / 2);
     ctx.scale(this.cam.z, this.cam.z);
@@ -587,68 +598,75 @@ export class MapRenderer {
     this.drawHover(I);
     this.drawTargeting(I);
     if (I.unsupplied?.size) {
-      for (const rid of I.unsupplied) { const r = st.regions[rid]; if (!r || r.kind === 'void') continue; path(ctx, r.poly); ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fill(); }
+      for (const rid of I.unsupplied) { const r = st.regions[rid]; if (!r || r.kind === 'void') continue; path(ctx, r.poly); ctx.fillStyle = 'rgba(0,0,0,0.14)'; ctx.fill(); }
     }
     this.drawRegionSelection(I);
+    this.drawLensMarks(I);
     this.hovStar = this.hoverStar(I);
     this.drawLaneFocus(I);
-    // the board: empire names, stars, their animated parts, names in space (culled with a wide margin: nothing pops)
+    // the board: empire names, stars, names in space (culled with a wide margin: nothing pops)
     { const a = this.toWorld(-200, -200), b = this.toWorld(this.w + 200, this.h + 200); this.view = { x0: a.x, y0: a.y, x1: b.x, y1: b.y }; }
     this.reticleLast = this.reticleNow; this.reticleNow = new Set();
     this.drawEmpireNames(I);
     this.drawStars(I);
-    for (const r of st.regions) this.drawSiteAnim(r, I, this.colorOf(st, I.owners[r.id]));
     this.drawNames(I);
     this.drawDynamic(I);
     ctx.restore();
     this.updateTip(I);
-    if (this.stage) {
-      // the light: drawn every frame while the camera or the board moves, at a gentler pace on a still board
-      const ck = `${cam.x},${cam.y},${cam.z},${this.w},${this.h}`;
-      const busy = ck !== this.stageCam || moving || !!this.fade || this.particles.length > 0 || I.fx.length > 0 || !!I.drag;
-      this.stageCam = ck;
-      if (this.pacer.tick(busy)) this.stage.frame({ cam, t: now / 1000, stars: this.coronas, bloomSrc: this.canvas, dt: this.dt }, this.w, this.h);
+    // the Auto governor sees the frame's own cost (the ground's bakes are budgeted separately)
+    gfxFrame(performance.now() - t0 - this.dial.bakeMs);
+  }
+
+  /** Probes on what the ground carries: each house's wall (its longest outer edge) and the resting lanes. */
+  private probeGround(I: DrawInput) {
+    const st = I.state, edges = regionEdges(st);
+    // walls right by the bezel read against the bezel's gold, not the dial: probe the inland walls
+    const rim: Pt[] = [];
+    for (const r of st.regions) if (!isLane(r) && r.poly.length > 2) for (const e of edges[r.id]) if (e.other < 0) rim.push({ x: (e.a.x + e.b.x) / 2, y: (e.a.y + e.b.y) / 2 });
+    const nearRim = (m: Pt) => rim.some(q => Math.hypot(q.x - m.x, q.y - m.y) * this.cam.z < 30 * this.ui);
+    for (const pl of st.players) {
+      let best = 0, mid: Pt | null = null;
+      for (const r of st.regions) {
+        if (I.owners[r.id] !== pl.id || isLane(r) || r.poly.length < 3) continue;
+        for (const e of edges[r.id]) {
+          // a wall between two lands or against unclaimed space (the board's rim is the bezel's, not a wall)
+          if (e.other < 0 || I.owners[e.other] === pl.id || isLane(st.regions[e.other])) continue;
+          const L = Math.hypot(e.b.x - e.a.x, e.b.y - e.a.y), m = { x: (e.a.x + e.b.x) / 2, y: (e.a.y + e.b.y) / 2 };
+          const s = this.toScreen(m);
+          if (L > best && !nearRim(m) && s.x > 20 && s.y > 60 && s.x < this.w - 20 && s.y < this.h - 120) { best = L; mid = m; }
+        }
+      }
+      if (mid) this.probe('territory border', mid.x, mid.y, 8, 8, 0);
+    }
+    for (const L of hyperlanes(st)) {
+      const a = L.pts[0], b = L.pts[L.pts.length - 1];
+      this.probe('lane (rest)', a.x * 0.6 + b.x * 0.4, a.y * 0.6 + b.y * 0.4, 6, 6);
     }
   }
 
-  /** Draw a cached full-canvas layer rendered at camera `lc` under the current camera (dpr transform already set). */
-  private blitAt(img: HTMLCanvasElement, lc: Cam, alpha: number) {
-    const cam = this.cam, ctx = this.ctx;
-    const k = cam.z / lc.z;
-    const ox = (this.w / 2) * (1 - k) + (lc.x - cam.x) * cam.z, oy = (this.h / 2) * (1 - k) + (lc.y - cam.y) * cam.z;
-    ctx.globalAlpha = alpha;
-    ctx.drawImage(img, ox, oy, this.w * k, this.h * k);
-    ctx.globalAlpha = 1;
-  }
-
-  /** Hash of every region field the static layer draws, so an in-place change (a battery, a vein, a garrison, a
-   *  project, loyalty, a renamed region, a siege…) rebuilds the cache even when the state object is the same one. */
-  private staticSig(I: DrawInput): number {
-    let h = 17;
-    const mix = (v: number) => { h = (Math.imul(h, 31) + (v | 0)) | 0; };
-    const str = (t: string | null | undefined) => { if (!t) { mix(0); return; } for (let i = 0; i < t.length; i++) mix(t.charCodeAt(i)); mix(t.length); };
-    const st = I.state;
-    for (const r of st.regions) {
-      mix(r.owner ?? -9); mix(r.garrison); mix(r.dev); str(r.kind); str(r.relic as string | undefined); str(r.name);
-      str(r.trait as string | undefined); str(r.vein as string | undefined); str(r.project?.key); mix(Math.round((r.project?.progress ?? 0) * 100)); mix(r.memorials.length);
-      if (I.you !== null) mix(Math.round((r.loyalty[I.you] ?? 0) * 100));
-      const b = r.buildings as Record<string, number | undefined>;
-      for (const k in b) { str(k); mix(b[k] ?? 0); }
+  /** The lamp over the ground (screen space, under the marks): on High the glaze catches one broad soft reflection;
+   *  always, the room falls off toward the edges. Baked at half size per viewport and tier. */
+  private drawLamp(q: 'high' | 'low') {
+    const key = `${this.w}x${this.h}|${q}`;
+    if (!this.lamp || this.lamp.key !== key) {
+      const w = this.w, h = this.h;
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.ceil(w / 2)); c.height = Math.max(1, Math.ceil(h / 2));
+      const g = c.getContext('2d')!;
+      g.scale(0.5, 0.5);
+      const R = Math.hypot(w, h);
+      if (q === 'high') {
+        const sh = g.createLinearGradient(w * 0.15, 0, w * 0.55, h * 0.6);
+        sh.addColorStop(0, 'rgba(255,240,210,0)'); sh.addColorStop(0.5, 'rgba(255,240,210,0.035)'); sh.addColorStop(1, 'rgba(255,240,210,0)');
+        g.fillStyle = sh; g.fillRect(0, 0, w, h);
+      }
+      const gr = g.createRadialGradient(w * 0.42, h * 0.32, R * 0.05, w * 0.42, h * 0.32, R * 0.8);
+      gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.55, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.42)');
+      g.fillStyle = gr; g.fillRect(0, 0, w, h);
+      this.lamp = { c, key };
     }
-    for (const p of st.players) { str(p.color); str(p.name); }
-    for (const e of st.engagements ?? []) { mix(e.region); mix(e.garrisonStart); }
-    for (const f of st.fleets) if (f.siege !== null && f.siege !== undefined) { mix(f.siege); mix(f.region); }
-    // every token's parking slot (name plates step aside for them), and your own fleets (supply)
-    for (const f of st.fleets) if (f.ships.length) { mix(f.region); mix(f.owner); }
-    // the Soul layer's world marks: calling (+ dormant), tenure tier, deeds
-    for (const r of st.regions) {
-      const so = r.story;
-      if (!so) continue;
-      str(so.calling?.id); mix((so.calling?.dormantUntil ?? 0) > st.turn ? 1 : 0); mix(so.calling ? tenureTier(st, r) : 0);
-      for (const d of so.deeds) { str(d.id); mix(d.engraved ? 1 : 0); }
-    }
-    mix(st.rules.empire?.enabled === false ? 1 : 0);
-    return h;
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.ctx.drawImage(this.lamp.c, 0, 0, this.w, this.h);
   }
 
   /** An owner's colour on the board: the house enamel's lit tone (`hi`), whatever the state carries (old saves and
@@ -696,154 +714,29 @@ export class MapRenderer {
     return F.m.get(id) ?? F.last.get(id);
   }
 
-  // ================================================================ static layer
-  private drawStatic(I: DrawInput) {
+  // ================================================================ lens marks over the ground
+  /** What the lenses (and Space-peek) add over the baked ground: your supply network, warp-gate links (detail or the
+   *  supply lens) and, on the economy lens, veins and traits beside each world. Gilt and enamel, flat. */
+  private drawLensMarks(I: DrawInput) {
     const { ctx } = this;
     const st = I.state;
-    const tier = this.tier;
     const lens = I.lens ?? 'political';
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    // ---------------------------------------------------------------- background (pre-rendered gradient + one star-pattern pass)
-    const gl = !!this.stage;
-    if (!this.hatch.cut) this.hatch = { cut: ctx.createPattern(hatchTile('rgba(239,213,154,0.5)', 8, 1.6), 'repeat'), dark: ctx.createPattern(hatchTile('rgba(0,0,0,0.55)', 6, 2), 'repeat') };
-    if (!gl && (!this.stars || !this.bgCanvas)) {
-      this.stars = starfield(this.w, this.h, st.seed);
-      this.starPattern = ctx.createPattern(this.stars, 'repeat');
-      this.bgCanvas = matBackdrop(this.w, this.h);
-      this.lamp = lampOverlay(this.w, this.h);
-      this.weave = ctx.createPattern(weaveTile(), 'repeat');
-    }
-    // the GL table paints sky, felt, lamp and vignette around this canvas: the layer stays transparent
-    if (gl) ctx.clearRect(0, 0, this.w, this.h);
-    else if (this.bgCanvas) ctx.drawImage(this.bgCanvas, 0, 0, this.w, this.h);
-    if (!gl && this.starPattern) {
-      const par = { x: -this.cam.x * this.cam.z * 0.05, y: -this.cam.y * this.cam.z * 0.05 };
-      ctx.save();
-      ctx.globalAlpha = 0.8;
-      ctx.translate(((par.x % this.w) + this.w) % this.w, ((par.y % this.h) + this.h) % this.h);
-      ctx.fillStyle = this.starPattern;
-      ctx.fillRect(-this.w, -this.h, this.w * 2, this.h * 2);
-      ctx.restore();
-    }
-
-    // ---------------------------------------------------------------- world
-    ctx.save();
-    ctx.translate(this.w / 2, this.h / 2);
-    ctx.scale(this.cam.z, this.cam.z);
-    ctx.translate(-this.cam.x, -this.cam.y);
     const S = this.px(1);
-    // screen-constant hatch patterns
-    const pm = new DOMMatrix().scale(S, S);
-    this.hatch.cut?.setTransform(pm); this.hatch.dark?.setTransform(pm);
-
-    // deep-space nebula haze: soft, so a low-resolution bake scaled up looks the same and costs one blit
-    if (!gl && this.haze) ctx.drawImage(this.haze.c, this.haze.x, this.haze.y, this.haze.w, this.haze.h);
-    // the cloth's weave, anchored to the mat (screen-constant scale)
-    if (!gl && this.weave) {
-      ctx.save();
-      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-      const ox = -this.cam.x * this.cam.z, oy = -this.cam.y * this.cam.z;
-      ctx.translate(((ox % 96) + 96) % 96 - 96, ((oy % 96) + 96) % 96 - 96);
-      ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.22;
-      ctx.fillStyle = this.weave; ctx.fillRect(0, 0, this.w + 192, this.h + 192);
-      ctx.restore();
-    }
-
-    const political = lens === 'political';
     const W = this.zw;
-    const { conn, sup } = this.supplySets(I);
-    // territories: cloisonne enamel inlays (wash, engraved hatching, a bevel lit from the lamp); the wires come later
-    const terr = this.territories(I, political);
-    for (const t of terr) this.inlay(t, political);
-    // ---------------------------------------------------------------- region fills + terrain textures
-    for (const r of st.regions) {
-      if (isLane(r) || r.poly.length < 3) continue;
-      const owner = I.owners[r.id];
-      path(ctx, r.poly);
-      // unclaimed space is the printed sky itself (a breath of ink on the 2D table)
-      if ((owner === null || owner === undefined) && !gl) { ctx.fillStyle = 'rgba(7,8,12,0.18)'; ctx.fill(); }
-      // terrain by texture only: void is black and starless, a nebula a soft haze, an asteroid field speckle
-      if (r.kind === 'void') { ctx.fillStyle = 'rgba(5,6,10,0.86)'; ctx.fill(); }
-      if (r.feature === 'nebula') {
-        // pigment, not light: an umber and verdigris haze (no violet)
-        const g = ctx.createRadialGradient(r.centroid.x, r.centroid.y, 0, r.centroid.x, r.centroid.y, 260);
-        g.addColorStop(0, 'rgba(106,63,38,0.30)'); g.addColorStop(0.6, 'rgba(28,72,72,0.12)'); g.addColorStop(1, 'rgba(28,72,72,0.0)');
-        ctx.fillStyle = g; ctx.fill();
-      }
-      if (r.feature === 'asteroids') {
-        // a rendered rock field: lit lumps with tiny shadows (screen-constant size, fixed on the mat)
-        const pts = this.asteroidCache.get(r.id) ?? [];
-        const big = W.s < 0.5;
-        pts.forEach((p, i) => {
-          if (i % (big ? 2 : 3)) return;
-          const sz = ((big ? 1.8 : 1.2) + ((i * 7) % 5) * (big ? 0.55 : 0.3)) * Math.pow(this.artK(), 0.5);
-          const spr = rockSprite(i, sz * this.rdpr);
-          const w = (spr.width / this.rdpr) * S;
-          ctx.drawImage(spr, p.x - w / 2, p.y - w / 2, w, w);
-        });
-      }
-      if (lens === 'economy' && r.kind !== 'void') {
-        // development tint: richer worlds glow warmer
-        const d = owner !== null && owner !== undefined ? r.dev : 0;
-        const v = r.vein ? 1 : 0;
-        if (d || v) { path(ctx, r.poly); ctx.fillStyle = `rgba(255,200,110,${0.05 + 0.05 * d + 0.04 * v})`; ctx.fill(); }
-      }
-      if (lens === 'supply' && sup && r.kind !== 'void' && !sup.has(r.id)) { path(ctx, r.poly); ctx.fillStyle = 'rgba(0,0,0,0.38)'; ctx.fill(); if (this.hatch.dark) { ctx.fillStyle = this.hatch.dark; ctx.fill(); } }
-      if (I.you !== null && !I.visible.has(r.id)) { path(ctx, r.poly); ctx.fillStyle = 'rgba(7,8,12,0.42)'; ctx.fill(); }
-    }
-
-    // ---------------------------------------------------------------- borders: engraved region seams, cloisonne wires
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = 'rgba(220,180,108,0.07)'; ctx.lineWidth = S;
-    for (const r of st.regions) { if (r.poly.length > 2) { path(ctx, r.poly); ctx.stroke(); } }
-    for (const t of terr) this.wires(t, political);
-
-    // ---------------------------------------------------------------- hyperlanes: a quiet etched thread on the mat
-    {
-      ctx.save();
-      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-      ctx.beginPath();
-      for (const L of hyperlanes(st)) { L.pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); }
-      // lanes touching a hovered/selected star, your selected fleet's reach and routes are lit in the dynamic pass
-      // (drawLaneFocus); waypoint buoys only show there, or faintly up close
-      // an engraved groove: a dark under-stroke and a thin brass inlay set toward the lamp
-      const lw = W.s * 1 + (1 - W.s) * 1.1;
-      ctx.strokeStyle = 'rgba(0,0,0,0.42)'; ctx.lineWidth = (lw + 2) * S; ctx.stroke();
-      ctx.save(); ctx.translate(-0.4 * S, -0.5 * S);
-      ctx.strokeStyle = 'rgba(214,170,98,0.3)'; ctx.lineWidth = lw * S; ctx.stroke();
-      ctx.restore();
-      if (W.d > 0.02) {
-        const buoy = buoySprite(3 * this.rdpr, false);
-        const bwd = (buoy.width / this.rdpr) * S;
-        ctx.globalAlpha = 0.3 * W.d;
-        for (const r of st.regions) if (isLane(r)) ctx.drawImage(buoy, r.site.x - bwd / 2, r.site.y - bwd / 2, bwd, bwd);
-      }
-      ctx.restore();
-    }
-
-    // ---------------------------------------------------------------- supply: cut-off hatch (every tier), network lines (lens / peek)
-    const cut = this.cutOffOf(I);
-    if (cut?.size) {
-      for (const rid of cut) {
-        const r = st.regions[rid];
-        if (!r) continue;
-        path(ctx, r.poly);
-        if (this.hatch.cut) { ctx.globalAlpha = lens === 'supply' ? 1 : 0.55; ctx.fillStyle = this.hatch.cut; ctx.fill(); ctx.globalAlpha = 1; }
-        ctx.save(); ctx.setLineDash([7 * S, 5 * S]); ctx.strokeStyle = 'rgba(239,213,154,0.6)'; ctx.lineWidth = 1.4 * S; ctx.stroke(); ctx.restore();
-      }
-    }
+    const { conn } = this.supplySets(I);
     if ((lens === 'supply' || I.peek) && conn && I.you !== null) {
-      const c = this.regionColor(st, I.you);
+      const c = O.hiOf(this.regionColor(st, I.you));
       ctx.save();
-      ctx.strokeStyle = hexA(c, lens === 'supply' ? 0.85 : 0.45); ctx.lineWidth = (lens === 'supply' ? 3 : 2) * S; ctx.lineCap = 'round';
-      ctx.setLineDash([2 * S, 6 * S]);
+      ctx.lineCap = 'round';
       ctx.beginPath();
       for (const rid of conn) {
         const r = st.regions[rid];
         if (!r || isLane(r)) continue;
         for (const n of r.neighbors) if (n > rid && conn.has(n)) { ctx.moveTo(r.site.x, r.site.y); ctx.lineTo(st.regions[n].site.x, st.regions[n].site.y); }
       }
-      ctx.stroke();
+      ctx.setLineDash([2 * S, 6 * S]);
+      ctx.strokeStyle = O.GROOVE; ctx.lineWidth = ((lens === 'supply' ? 3 : 2) + 2.4) * S; ctx.stroke();
+      ctx.strokeStyle = hexA(c, lens === 'supply' ? 0.95 : 0.7); ctx.lineWidth = (lens === 'supply' ? 3 : 2) * S; ctx.stroke();
       ctx.restore();
     }
     if (W.d > 0.5 || lens === 'supply') {
@@ -852,110 +745,12 @@ export class MapRenderer {
       ctx.save();
       ctx.setLineDash([2 * S, 6 * S]); ctx.lineCap = 'round';
       for (const [o, gs] of gates) {
-        ctx.strokeStyle = hexA(this.regionColor(st, o), o === I.you ? 0.55 : 0.3); ctx.lineWidth = (o === I.you ? 2 : 1.4) * S;
+        ctx.strokeStyle = hexA(O.hiOf(this.regionColor(st, o)), o === I.you ? 0.75 : 0.45); ctx.lineWidth = (o === I.you ? 2 : 1.4) * S;
         for (let i = 0; i < gs.length; i++) for (let j = i + 1; j < gs.length; j++) { ctx.beginPath(); ctx.moveTo(gs[i].site.x, gs[i].site.y); ctx.lineTo(gs[j].site.x, gs[j].site.y); ctx.stroke(); }
       }
       ctx.restore();
     }
     if (lens === 'economy') for (const r of st.regions) if (!isLane(r)) this.drawEconomyIcons(r, I);
-    ctx.restore();
-    // the table: lamp pool and vignette over the board (screen space, static)
-    if (this.lamp) ctx.drawImage(this.lamp, 0, 0, this.w, this.h);
-  }
-
-  // ---------------------------------------------------------------- territories as cloisonne enamel (ART-BIBLE §3)
-  /** Each house's territory this frame: its regions, the union path, and its outer edges with the outward normal. */
-  private territories(I: DrawInput, _political: boolean) {
-    const st = I.state;
-    const edges = regionEdges(st);
-    const out: { owner: number; E: ReturnType<typeof enamelOf>; P: Path2D; outer: { a: Pt; b: Pt; nx: number; ny: number }[] }[] = [];
-    for (const pl of st.players) {
-      const mine = st.regions.filter(r => I.owners[r.id] === pl.id && r.poly.length > 2 && !isLane(r));
-      if (!mine.length) continue;
-      const P = new Path2D();
-      for (const r of mine) { r.poly.forEach((q, i) => (i ? P.lineTo(q.x, q.y) : P.moveTo(q.x, q.y))); P.closePath(); }
-      const outer: { a: Pt; b: Pt; nx: number; ny: number }[] = [];
-      for (const r of mine) for (const e of edges[r.id]) {
-        if (e.other >= 0 && I.owners[e.other] === pl.id) continue;
-        const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y, L = Math.hypot(dx, dy) || 1;
-        let nx = dy / L, ny = -dx / L;
-        // outward: away from the region's own site
-        if (nx * ((e.a.x + e.b.x) / 2 - r.site.x) + ny * ((e.a.y + e.b.y) / 2 - r.site.y) < 0) { nx = -nx; ny = -ny; }
-        outer.push({ a: e.a, b: e.b, nx, ny });
-      }
-      out.push({ owner: pl.id, E: enamelOf(pl.color), P, outer });
-    }
-    return out;
-  }
-  /** Screen-constant engraved hatching for a house: lines at the house's own angle (a pattern cue beside colour). */
-  private hatchFor(key: HouseKey, col: string): CanvasPattern | null {
-    const k = `${key}|${col}|${this.dpr}`;
-    if (this.houseHatch.has(k)) return this.houseHatch.get(k)!;
-    const { a, cross } = HATCH[key];
-    const n = Math.round(9 * this.dpr), c = document.createElement('canvas');
-    c.width = c.height = n;
-    const g = c.getContext('2d')!;
-    g.strokeStyle = col; g.lineWidth = Math.max(1, 0.9 * this.dpr); g.lineCap = 'square';
-    const line = (ang: number) => {
-      g.beginPath();
-      if (Math.abs(Math.sin(ang)) < 0.01) { g.moveTo(-1, n / 2); g.lineTo(n + 1, n / 2); }
-      else if (Math.abs(Math.cos(ang)) < 0.01) { g.moveTo(n / 2, -1); g.lineTo(n / 2, n + 1); }
-      else if (Math.sin(ang) * Math.cos(ang) < 0) { for (const o of [-n, 0, n]) { g.moveTo(o - 1, n + 1); g.lineTo(o + n + 1, -1); } }
-      else { for (const o of [-n, 0, n]) { g.moveTo(o - 1, -1); g.lineTo(o + n + 1, n + 1); } }
-      g.stroke();
-    };
-    line(a); if (cross) line(a + Math.PI / 2);
-    const pat = this.ctx.createPattern(c, 'repeat');
-    this.houseHatch.set(k, pat);
-    return pat;
-  }
-  /** The enamel itself: a translucent wash, engraved hatching in the lit enamel, and the inlay's bevel (a lit inner
-   *  edge on the sides that face the lamp, a dark one on the far sides). Cut fills come from regions, so two houses
-   *  meet edge to edge and never overlap. */
-  private inlay(t: ReturnType<MapRenderer['territories']>[number], political: boolean) {
-    const { ctx } = this;
-    const S = this.px(1), W = this.zw;
-    const { E, P } = t;
-    // the wash: strongest zoomed out (territory is the story there), quiet up close where the minis are
-    const wash = political ? W.s * 0.34 + W.o * 0.24 + W.d * 0.17 : 0.07;
-    ctx.save();
-    ctx.fillStyle = hexA(E.base, wash); ctx.fill(P);
-    const pat = this.hatchFor(E.house ?? 'neutral', E.hi);
-    if (pat) {
-      pat.setTransform(new DOMMatrix().scale(S / this.dpr, S / this.dpr));
-      ctx.globalAlpha = (political ? 0.16 + 0.08 * W.s : 0.07) * (HATCH[E.house ?? 'neutral'].cross ? 0.6 : 1);
-      ctx.fillStyle = pat; ctx.fill(P);
-      ctx.globalAlpha = 1;
-    }
-    // the bevel, clipped inside: each outer edge lit by how squarely it faces the lamp
-    ctx.clip(P);
-    const lx = LAMP.dir[0], ly = LAMP.dir[1], ll = Math.hypot(lx, ly);
-    ctx.lineCap = 'round';
-    const bw = (W.s * 9 + W.o * 7 + W.d * 6) * S;
-    ctx.lineWidth = bw;
-    for (const e of t.outer) {
-      const d = (e.nx * lx + e.ny * ly) / ll;
-      if (Math.abs(d) < 0.12) continue;
-      ctx.strokeStyle = d > 0 ? hexA(E.hi, (political ? 0.3 : 0.14) * d) : `rgba(0,0,0,${((political ? 0.38 : 0.2) * -d).toFixed(3)})`;
-      ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y); ctx.stroke();
-    }
-    ctx.restore();
-  }
-  /** The cloisonne wire: a thin lit enamel line just inside, then the ink wire on the border with a cast shadow. */
-  private wires(t: ReturnType<MapRenderer['territories']>[number], political: boolean) {
-    const { ctx } = this;
-    const S = this.px(1), W = this.zw;
-    const wp = new Path2D();
-    for (const e of t.outer) { wp.moveTo(e.a.x, e.a.y); wp.lineTo(e.b.x, e.b.y); }
-    const k = political ? 1 : 0.6;
-    ctx.save();
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.save(); ctx.clip(t.P);
-    ctx.strokeStyle = hexA(t.E.hi, political ? 0.9 : 0.5); ctx.lineWidth = (W.s * 7 + (1 - W.s) * 6) * S * k; ctx.stroke(wp);
-    ctx.restore();
-    ctx.shadowColor = 'rgba(0,0,0,0.7)'; ctx.shadowBlur = 3 * this.dpr; ctx.shadowOffsetX = 1.5 * this.dpr; ctx.shadowOffsetY = 2.5 * this.dpr;
-    ctx.strokeStyle = 'rgba(6,5,4,0.92)'; ctx.lineWidth = (W.s * 2.6 + (1 - W.s) * 2.1) * S; ctx.stroke(wp);
-    ctx.restore();
   }
 
   /** Kept for callers: banners no longer change with selection (the art never jumps in size). */
@@ -987,15 +782,18 @@ export class MapRenderer {
   }
 
   // ================================================================ the board: stars, objectives, names in space
-  /** Every system as its star (a small glowing point zoomed out, the painted star up close), objectives ringed in
-   *  gold, a contested system's blockade ring, and at detail zoom its orbits and orbital structures. Drawn every
-   *  frame (cheap sprite blits), so sizes follow the zoom continuously and nothing pops as the cached layer rebuilds. */
+  /** Every system as its gem in a gold collet (the stone tells the kind), objectives in their gold settings, a
+   *  contested system's ring, occupied and tribute marks, and at detail zoom its orbits (bodies as small cabochons on
+   *  engraved gold tracks) and orbital structures. Drawn every frame, so sizes follow the zoom continuously. No glow,
+   *  bloom or corona: the stones are lit by the lamp like everything else. */
   private drawStars(I: DrawInput) {
     const { ctx } = this;
     const st = I.state;
     const S = this.px(1);
     const W = this.zw;
     const v = this.view;
+    const t = reducedMotion() ? 0 : I.now / 1000;
+    const cOn = contestOn(st);
     this.bannerHits = [];
     for (const r of st.regions) {
       if (isLane(r)) continue;
@@ -1005,51 +803,46 @@ export class MapRenderer {
       if (p.x + m < v.x0 || p.x - m > v.x1 || p.y + m < v.y0 || p.y - m > v.y1) continue;
       const hr = Math.max(R + 5, this.coarse ? 16 : 12);
       this.bannerHits.push({ rid: r.id, x: p.x, y: p.y, l: -hr, t: -hr, r: hr, b: hr });
-      if (r.kind === 'void') { ctx.fillStyle = 'rgba(200,200,255,0.3)'; ctx.beginPath(); ctx.arc(p.x, p.y, 2 * S, 0, TAU); ctx.fill(); continue; }
+      if (r.kind === 'void') { ctx.fillStyle = 'rgba(150,140,120,0.5)'; ctx.beginPath(); ctx.arc(p.x, p.y, 2 * S, 0, TAU); ctx.fill(); continue; }
       const fog = this.starFogged(r, I);
       const kind = starKindOf(r);
       const pr = R * S;
-      // up close the star draws back a little so its orbiting bodies have room
-      const core = STAR_NODE[kind].core * (1 - 0.38 * W.d);
-      const nb = Math.min(3, (r.bodies?.length ?? 0) + ((r.buildings.station ?? 0) > 0 ? 1 : 0));
-      if (W.d > 0.02 && nb) { ctx.save(); ctx.globalAlpha = W.d; drawOrbitLines(ctx, p.x, p.y, pr, nb, 0.8 * S, fog); ctx.restore(); }
-      // tenure (DELIGHT #26): a star held without a break burns brighter, with a faint ring for each tier it has
-      // reached (3, 6, 10 turns); public, from the world's own story, so every house sees how long it has been held
-      const ten = !fog && r.owner !== null && r.owner >= 0 && r.story ? tenureTier(st, r) : 0;
-      if (ten) drawGlow(ctx, p.x, p.y, pr * core * (2.2 + ten * 0.5), [255, 214, 150], 0.1 + ten * 0.06);
-      // a blockaded world's light dims to match its blockaded output (DELIGHT #34)
+      // ---- detail: the system as an orrery (tracks, arms and its bodies as small cabochons), under the gem
+      if (W.d > 0.02) { ctx.save(); ctx.globalAlpha = W.d; this.drawBodies(r, p, pr, S, t, fog); ctx.restore(); }
+      // a blockaded world's stone clouds over to match its blockaded output (DELIGHT #34)
       const dim = !fog ? this.blockadeDim(st, r) : 1;
-      if (dim < 1) { ctx.save(); ctx.globalAlpha *= dim; }
-      drawStarNode(ctx, p.x, p.y, pr * core, R * core * this.rdpr, kind, fog);
-      if (dim < 1) ctx.restore();
-      if (ten) this.tenureRings(p, pr * core, ten, this.colorOf(st, r.owner));
-      // the GL corona: light on the painted sprite (fogged stars are pewter and get none)
-      if (this.stage && !fog) {
-        const sp = this.toScreen(p);
-        if (sp.x > -80 && sp.y > -80 && sp.x < this.w + 80 && sp.y < this.h + 80)
-          this.coronas.push({ x: sp.x, y: sp.y, r: pr * core * this.cam.z * (1 + ten * 0.08), amp: Math.min(1, (CORONA_AMP[kind] ?? 0.55) * (1 + ten * 0.14)) * dim, color: r.kind === 'throne' && r.owner !== null && r.owner >= 0 ? this.throneLight(st, r.owner) : CORONA[kind] ?? LAMP.color, seed: r.id * 37 + 11 });
+      const holder = r.kind === 'throne' && r.owner !== null && r.owner >= 0 ? this.colorOf(st, r.owner) : null;
+      O.gem(ctx, kind, p.x, p.y, pr, S, { fog, dim: dim < 1 ? Math.min(1, (1 - dim) * 1.3) : 0, t, holder });
+      if (this.probes) this.probe(fog ? 'star (fogged)' : `star: ${kind}`, p.x, p.y, R * 2, R * 2);
+      // tenure (DELIGHT #26): a thin ring of the holder's enamel round the collet for each tier held (3, 6, 10 turns)
+      const ten = !fog && r.owner !== null && r.owner >= 0 && r.story ? tenureTier(st, r) : 0;
+      if (ten && r.kind !== 'throne') O.tenure(ctx, p.x, p.y, this.colletR(kind, pr, S), ten, this.colorOf(st, r.owner), S);
+      // objectives: a Crown in a gold ring with pearl milgrain and a crown on top, the Throne in its grand bezel
+      if (r.kind === 'crown' || r.kind === 'throne') {
+        O.objective(ctx, p.x, p.y, pr, S, r.kind === 'throne', fog, holder, t);
+        if (this.probes) { const rr = O.objR(R, r.kind === 'throne', 1); this.probe(r.kind === 'throne' ? 'throne ring' : 'crown ring', p.x + rr * 0.71 * S, p.y + rr * 0.71 * S, 5, 5); }
+        if (ten && r.kind === 'throne') O.tenure(ctx, p.x, p.y, O.objR(pr, true, S) + 8 * S, ten, this.colorOf(st, r.owner), S);
       }
-      if (reducedMotion() && kind === 'pulsar') drawPulsarBeams(ctx, p.x, p.y, pr * core, 0.6, r.id, fog ? 0.35 : 1);
-      // objectives: a Crown wears a gold ring, the Throne a larger double ring (hover says what they are worth)
-      if (r.kind === 'crown' || r.kind === 'throne') this.goldRing(r, R, fog, st);
       if (r.kind === 'relic' && r.relic && W.d > 0.02) {
         // an unexcavated relic: a glinting monolith drifting by the star (detail only)
         const mx = p.x + pr * 1.1, my = p.y + pr * 0.5;
         ctx.save(); ctx.globalAlpha = W.d; ctx.translate(mx, my); ctx.rotate(0.35);
         const mg = ctx.createLinearGradient(-3 * S, 0, 3 * S, 0); mg.addColorStop(0, '#f4f7ff'); mg.addColorStop(0.5, '#7d86a8'); mg.addColorStop(1, '#1a1c28');
+        ctx.fillStyle = O.GROOVE; ctx.fillRect(-3.4 * S, -6.9 * S, 6.8 * S, 13.8 * S);
         ctx.fillStyle = mg; ctx.fillRect(-2.5 * S, -6 * S, 5 * S, 12 * S);
         ctx.restore();
       }
-      // a contested system: a dashed blockade ring in the colour of whoever holds space (grey: nobody)
-      if (W.s < 0.98 && contestOn(st) && r.owner !== null && r.bodies) {
-        const cs = systemStatus(st, r);
-        if (cs.contested) {
-          const hc = cs.holder === null ? '#a9abb3' : this.colorOf(st, cs.holder);
-          const rr = pr * 1.5 + 4 * S;
+      // contested, occupied, tribute (operational and closer: no marks at the strategic tier)
+      if (W.s < 0.98 && cOn && r.owner !== null && r.bodies) {
+        let cs: ReturnType<typeof systemStatus> | null = null;
+        try { cs = systemStatus(st, r); } catch { cs = null; }
+        if (cs) {
           ctx.save(); ctx.globalAlpha = 1 - W.s;
-          ctx.setLineDash([3.2 * S, 2.4 * S]);
-          ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, TAU); ctx.strokeStyle = 'rgba(6,5,4,0.85)'; ctx.lineWidth = 2.6 * S; ctx.stroke();
-          ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, TAU); ctx.strokeStyle = hc; ctx.lineWidth = 1.3 * S; ctx.stroke();
+          const full = W.s < 0.1;
+          const kingly = r.kind === 'crown' || r.kind === 'throne';
+          if (cs.contested) { O.contested(ctx, p.x, p.y, O.contestR(pr, kingly, S), cs.holder === null ? null : this.colorOf(st, cs.holder), S); const rc = O.contestR(R, kingly, 1); if (full) this.probe('contested', p.x - rc * 0.906 * S, p.y + rc * 0.423 * S, 6, 6); }
+          if (cs.occupiedLeft > 0 && r.owner !== null && r.owner >= 0) { O.occupied(ctx, p.x, p.y, pr, this.colorOf(st, r.owner), S); if (full) this.probe('occupied', p.x + R * 1.25 * S, p.y + R * 0.95 * S, O.markSz(R, 1) * 0.8, O.markSz(R, 1) * 0.8); }
+          if (cs.tribute) { O.tribute(ctx, p.x, p.y, pr, this.colorOf(st, cs.tribute.to), S); if (full) this.probe('tribute', p.x - R * 1.25 * S, p.y + R * 0.95 * S, O.markSz(R, 1) * 0.8, O.markSz(R, 1) * 0.8); }
           ctx.restore();
         }
       }
@@ -1079,26 +872,47 @@ export class MapRenderer {
       }
     }
   }
-
-  /** Tenure rings: thin enamel-coloured rings in the owner's colour, one per tier, each catching the lamp on its
-   *  upper-left arc. Cheap (three arcs), drawn with the star each frame. */
-  private tenureRings(p: Pt, core: number, tier: number, color: string) {
-    const { ctx } = this;
-    const S = this.px(1);
-    const c = rgbA(color);
-    ctx.save();
-    ctx.lineCap = 'round';
-    for (let i = 0; i < tier; i++) {
-      const rad = core * 1.85 + (5 + i * 3.6) * S;
-      ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, TAU);
-      ctx.strokeStyle = 'rgba(8,6,4,0.55)'; ctx.lineWidth = 2.1 * S; ctx.stroke();
-      ctx.strokeStyle = cssA(c, 0.42 + i * 0.1); ctx.lineWidth = 0.9 * S; ctx.stroke();
-      // the lamp catches the upper-left of each ring
-      ctx.beginPath(); ctx.arc(p.x, p.y, rad, Math.PI * 1.02, Math.PI * 1.55);
-      ctx.strokeStyle = cssA(mixA(c, [255, 236, 200], 0.55), 0.75); ctx.lineWidth = 0.9 * S; ctx.stroke();
-    }
-    ctx.restore();
+  /** The outer radius of a star's collet (ctx units), where tenure rings start. */
+  private colletR(kind: string, pr: number, S: number) {
+    const k = kind === 'red' ? 0.74 : kind === 'blue' ? 0.52 : kind === 'white' ? 0.56 : kind === 'pulsar' ? 0.5 : kind === 'blackhole' ? 0.48 : kind === 'binary' ? 0.62 : 0.62;
+    return Math.max(2.4 * S, pr * k) * 1.18 + 2.4 * S;
   }
+  /** The orrery up close: each body on an engraved gold track, an arm from the hub, the body a small cabochon (a belt
+   *  as gold granules, a station a gold lozenge); they turn slowly (frozen with reduced motion). */
+  private drawBodies(r: Region, p: Pt, pr: number, S: number, t: number, fog: boolean) {
+    const { ctx } = this;
+    const list: { kind: string; q?: string; adj?: string; name?: string }[] = (r.bodies ?? []).slice(0, 3);
+    if ((r.buildings.station ?? 0) > 0) list.push({ kind: 'station' });
+    const seed = r.id * 37 + 11;
+    list.slice(0, 4).forEach((b, i) => {
+      const rx = pr * (1.85 + i * 0.62), ry = rx * 0.42;
+      const a = ((seed * 0.6180339 + i * 0.37) % 1) * TAU + t * (0.05 / (1 + i));
+      ctx.beginPath(); ctx.ellipse(p.x, p.y, rx, ry, 0, 0, TAU);
+      ctx.lineWidth = 2.6 * S; ctx.strokeStyle = 'rgba(2,2,4,0.6)'; ctx.stroke();
+      ctx.lineWidth = 1 * S; ctx.strokeStyle = fog ? 'rgba(190,190,198,0.5)' : 'rgba(220,180,100,0.55)'; ctx.stroke();
+      if (b.kind === 'belt') {
+        let q = (seed * 7 + i) >>> 0; const rnd = () => ((q = (Math.imul(q, 1664525) + 1013904223) >>> 0) / 4294967296);
+        ctx.fillStyle = fog ? '#9a9aa2' : '#c9a45a';
+        ctx.beginPath();
+        for (let k = 0; k < 44; k++) { const aa = rnd() * TAU, j = 1 + (rnd() - 0.5) * 0.1, rr = (0.9 + rnd() * 0.8) * S; const bx = p.x + Math.cos(aa) * rx * j, by = p.y + Math.sin(aa) * ry * j; ctx.moveTo(bx + rr, by); ctx.arc(bx, by, rr, 0, TAU); }
+        ctx.fill();
+        return;
+      }
+      const px = p.x + Math.cos(a) * rx, py = p.y + Math.sin(a) * ry;
+      const br = Math.max(2.5 * S, pr * (b.kind === 'gas' ? 0.4 : b.kind === 'station' ? 0.24 : b.kind === 'moon' ? 0.22 : 0.28));
+      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(px, py); ctx.lineWidth = 1 * S; ctx.strokeStyle = fog ? 'rgba(190,190,198,0.35)' : 'rgba(220,180,100,0.35)'; ctx.stroke();
+      if (b.kind === 'station' || b.kind === 'ruin') {
+        ctx.save(); ctx.translate(px, py); ctx.rotate(0.785);
+        ctx.fillStyle = O.GROOVE; ctx.fillRect(-br - 1.2 * S, -br - 1.2 * S, (br + 1.2 * S) * 2, (br + 1.2 * S) * 2);
+        ctx.fillStyle = O.goldBox(ctx, 0, 0, br, fog); ctx.fillRect(-br, -br, br * 2, br * 2);
+        ctx.restore();
+        return;
+      }
+      const wt = bodyWorldType(b, r.kind, r.name) ?? 'barren';
+      O.cabochon(ctx, px, py, br, fog ? O.STONE.pewter : BODY_STONE[wt] ?? O.STONE.rock, S, fog, true);
+    });
+  }
+
   /** Blockaded worlds (memoized per state): the light factor is the rules' blockaded industry share, never below 0.35. */
   private blockMemo: { st: GameState | null; m: Map<number, number> } = { st: null, m: new Map() };
   private blockadeDim(st: GameState, r: Region): number {
@@ -1111,44 +925,6 @@ export class MapRenderer {
       }
     }
     return B.m.get(r.id) ?? 1;
-  }
-  /** The Throne burns in its holder's colour (DELIGHT #32): its corona and glow lean to the holder's enamel. */
-  private throneLight(st: GameState, owner: number): string {
-    return cssA(mixA(rgbA('#ffe2a0'), rgbA(this.colorOf(st, owner)), 0.55));
-  }
-
-  /** A Crown's gold ring / the Throne's double ring and broken Ring Ruin, with a faint regal glow. */
-  private goldRing(r: Region, R: number, fog: boolean, st: GameState) {
-    const { ctx } = this;
-    const S = this.px(1), W = this.zw, p = r.site;
-    const throne = r.kind === 'throne';
-    const rr = Math.max(R * (throne ? 1.45 : 1.32), throne ? 10 : 7.5) * S;
-    ctx.save();
-    if (fog) ctx.globalAlpha = 0.6;
-    const holder = throne && !fog && r.owner !== null && r.owner >= 0 ? rgbA(this.colorOf(st, r.owner)) : null;
-    drawGlow(ctx, p.x, p.y, rr * 2, holder ? mixA([255, 206, 120], holder, 0.6) as [number, number, number] : [255, 206, 120], (throne ? (holder ? 0.42 : 0.3) : 0.2) * (fog ? 0.5 : 1));
-    const g = ctx.createLinearGradient(p.x, p.y - rr, p.x, p.y + rr);
-    g.addColorStop(0, '#fff3b8'); g.addColorStop(0.5, '#e2aa3a'); g.addColorStop(1, '#9a6618');
-    const ring = (rad: number, w: number) => {
-      ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, TAU); ctx.strokeStyle = 'rgba(20,12,4,0.8)'; ctx.lineWidth = (w + 1.8) * S; ctx.stroke();
-      ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, TAU); ctx.strokeStyle = g; ctx.lineWidth = w * S; ctx.stroke();
-    };
-    ring(rr, throne ? 2.2 : 1.6);
-    if (throne) ring(rr + 4 * S, 1.1);
-    // the holder's enamel set inside the Throne's gold ring
-    if (holder) { ctx.beginPath(); ctx.arc(p.x, p.y, rr - 2.4 * S, 0, TAU); ctx.strokeStyle = cssA(holder, 0.85); ctx.lineWidth = 1.6 * S; ctx.stroke(); }
-    if (throne && W.s < 0.98) {
-      // the Ring Ruin: broken golden arcs around the throne star (operational and closer)
-      ctx.globalAlpha *= 1 - W.s;
-      ctx.translate(p.x, p.y); ctx.rotate(-0.3);
-      ctx.lineCap = 'butt';
-      for (let i = 0; i < 7; i++) {
-        const a0 = (i / 7) * TAU + 0.15, a1 = a0 + TAU / 7 - 0.32;
-        ctx.strokeStyle = 'rgba(20,12,4,0.85)'; ctx.lineWidth = 3.4 * S; ctx.beginPath(); ctx.ellipse(0, 0, rr * 1.35, rr * 0.55, 0, a0, a1); ctx.stroke();
-        ctx.strokeStyle = i % 2 ? '#e0aa3c' : '#ffe08a'; ctx.lineWidth = 2 * S; ctx.beginPath(); ctx.ellipse(0, 0, rr * 1.35, rr * 0.55, 0, a0, a1); ctx.stroke();
-      }
-    }
-    ctx.restore();
   }
 
   /** Empire names: large letter-spaced lettering across each territory, zoomed out only (fades as you zoom in). */
@@ -1189,11 +965,17 @@ export class MapRenderer {
       ctx.save();
       ctx.font = displayFont(fs * S);
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.globalAlpha = a0 * (political ? 0.62 : 0.3);
-      ctx.lineWidth = 2.4 * S; ctx.strokeStyle = 'rgba(6,5,4,0.55)'; ctx.lineJoin = 'round';
-      ctx.fillStyle = hexA(pl.color, 1);
+      // engraved in the glaze: a dark cut under each letter, the house's lifted enamel as the face (fogged
+      // or not, the house name is public)
+      ctx.globalAlpha = a0 * (political ? 1 : 0.45);
+      ctx.lineWidth = 4 * S; ctx.strokeStyle = O.GROOVE; ctx.lineJoin = 'round';
+      ctx.fillStyle = O.inkOf(pl.color);
       const lh = fs * 1.15 * S;
-      lines.forEach((l, i) => letterSpaced(ctx, l, L.p.x, L.p.y + (i - (lines.length - 1) / 2) * lh, fs * 0.3 * S, true));
+      if (this.probes) for (let i = 0; i < lines.length; i++) {
+        const c = this.toScreen({ x: L.p.x, y: L.p.y + (i - (lines.length - 1) / 2) * lh }), hw = (ctx.measureText(lines[i]).width + fs * 0.3 * S * lines[i].length) * this.cam.z / 2, hh = fs * this.ui * 0.7;
+        this.letterBoxes.push({ x0: c.x - hw, y0: c.y - hh, x1: c.x + hw, y1: c.y + hh });
+      }
+      lines.forEach((l, i) => { letterSpaced(ctx, l, L.p.x, L.p.y + (i - (lines.length - 1) / 2) * lh, fs * 0.3 * S, true); if (a0 > 0.92 && political) this.probe('empire name', L.p.x, L.p.y + (i - (lines.length - 1) / 2) * lh, Math.min(40, fs * 2), fs * 0.6); });
       ctx.restore();
     }
   }
@@ -1225,6 +1007,8 @@ export class MapRenderer {
   private nameVis(_r: Region): number { return 1 - this.zw.s; }
   private nameBox(r: Region, cand: number, R: number): { x: number; y: number; w: number; h: number } {
     const w = this.nameW(r), h = this.nameFs(r) * 1.2;
+    // an objective's name clears its gold setting (ring and pearl milgrain; the crown above)
+    if (r.kind === 'crown' || r.kind === 'throne') R = R * (r.kind === 'throne' ? 1.5 : 1.36) + (cand === 3 ? 12 : 5.5);
     return cand === 1 ? { x: R + 5, y: -h / 2, w, h } : cand === 2 ? { x: -R - 5 - w, y: -h / 2, w, h } : cand === 3 ? { x: -w / 2, y: -R - 3 - h, w, h } : { x: -w / 2, y: R + 3, w, h };
   }
   private layoutNames(I: DrawInput): Map<number, number> {
@@ -1310,23 +1094,28 @@ export class MapRenderer {
         const sp = this.toScreen(p);
         ctx.save();
         ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-        ctx.globalAlpha = a * (fog ? 0.55 : 1);
+        // fog takes the colour, never the contrast: a fogged name is uncoloured ink at full value
+        ctx.globalAlpha = a;
         ctx.font = displayFont(fs);
         ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
         const x = sp.x + b.x * this.ui, y = sp.y + (b.y + b.h / 2) * this.ui;
         const c = ctx as CanvasRenderingContext2D & { letterSpacing?: string };
         const ls = typeof c.letterSpacing === 'string';
         if (ls) c.letterSpacing = `${(fs * 0.12).toFixed(1)}px`;
-        ctx.lineJoin = 'round'; ctx.lineWidth = 3.2 * this.ui; ctx.strokeStyle = 'rgba(6,5,4,0.72)';
+        // cut in the glaze: a dark groove under the letters, then the face (gilt for objectives, the owner's lifted
+        // enamel for held worlds, pale gold for the unclaimed)
+        ctx.lineJoin = 'round'; ctx.lineWidth = 3.6 * this.ui; ctx.strokeStyle = O.GROOVE;
         if (ls) ctx.strokeText(r.name, x, y);
-        ctx.fillStyle = fog ? '#a9abb3' : kingly ? '#f1d488' : r.kind === 'home' ? '#f3ead6' : '#ece3cf';
+        const own = I.owners[r.id];
+        ctx.fillStyle = O.nameFill(ctx, kingly ? 'kingly' : 'owned', own !== null && own !== undefined ? this.colorOf(st, own) : null, fog, x, y, fs);
         if (ls) ctx.fillText(r.name, x, y); else spacedText(ctx, r.name, x, y, fs * 0.12);
         if (ls) c.letterSpacing = '0px';
         ctx.restore();
+        if (this.probes && a > 0.92) this.probeS(fog ? 'name (fogged)' : kingly ? 'name (objective)' : 'name', x + b.w * this.ui / 2, y, Math.min(b.w * this.ui, 60), fs * 0.62);
         if (pick >= 0 || focus) this.bannerHits.push({ rid: r.id, x: p.x, y: p.y, l: b.x, t: b.y, r: b.x + b.w, b: b.y + b.h });
       }
       // the garrison figure
-      const ga = focus || I.peek ? 1 : W.d * 0.75 * (pick >= 0 ? 1 : 0);
+      const ga = focus || I.peek ? 1 : W.d * 0.95 * (pick >= 0 ? 1 : 0);
       if (ga < 0.02) continue;
       const g = this.garrisonText(r, I);
       if (!g.known && !focus) continue;
@@ -1334,15 +1123,15 @@ export class MapRenderer {
       const u = this.ui, sp = this.toScreen(p);
       ctx.save();
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-      ctx.globalAlpha = ga * (g.fog ? 0.7 : 1);
+      ctx.globalAlpha = ga;
       ctx.font = numFont(12.5 * u); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
       const tw = ctx.measureText(g.txt).width;
-      const sw = 7.5 * u, gap = 3 * u, w = sw + gap + tw;
+      const sw = 10 * u, gap = 1.5 * u, w = sw + gap + tw;
       const x0 = sp.x - w / 2, yc = sp.y + (gy + 8) * u;
-      shieldPath(ctx, x0 + sw / 2, yc, sw, 9 * u);
-      ctx.lineWidth = 2.6 * u; ctx.strokeStyle = 'rgba(6,5,4,0.7)'; ctx.stroke();
-      ctx.lineWidth = 1.2 * u; ctx.strokeStyle = '#c4b89c'; ctx.stroke();
-      haloText(ctx, g.txt, x0 + sw + gap, yc + 0.5 * u, '#ece3cf', 'rgba(6,5,4,0.75)', 3 * u);
+      // a gold garrison shield and an ivory figure, cut in the glaze (silver and uncoloured ink when fogged)
+      drawIcon(ctx, 'garrison', x0 + sw / 2, yc, 11 * u, O.gold(ctx, x0, yc - 6 * u, x0 + sw, yc + 6 * u, g.fog), { halo: O.GROOVE, haloWidth: 2 * u });
+      haloText(ctx, g.txt, x0 + sw + gap, yc + 0.5 * u, g.fog ? O.FOG_INK : O.IVORY, O.GROOVE, 3.4 * u);
+      if (this.probes && ga > 0.9) this.probeS('garrison', x0 + w / 2, yc, Math.min(w, 24 * u), 9 * u);
       ctx.restore();
     }
   }
@@ -1360,16 +1149,18 @@ export class MapRenderer {
       const mined = (r.buildings.extractor ?? 0) > 0;
       ctx.save();
       const x = r.site.x + off * S, y = r.site.y + 3 * S;
-      ctx.beginPath(); ctx.arc(x, y, 13 * S, 0, TAU); ctx.fillStyle = PLATE; ctx.fill();
-      ctx.strokeStyle = hexA0(V.color, mined ? 1 : 0.5); ctx.lineWidth = (mined ? 2.2 : 1.2) * S; ctx.stroke();
-      if (mined) { ctx.shadowColor = V.color; ctx.shadowBlur = 10 * S; }
+      // a black-enamel stud in a gold rim; a mined vein's rim is its own colour
+      ctx.beginPath(); ctx.arc(x, y, 14.4 * S, 0, TAU); ctx.fillStyle = O.GROOVE; ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, 13 * S, 0, TAU); ctx.fillStyle = '#0c0d12'; ctx.fill();
+      ctx.strokeStyle = mined ? V.color : O.goldBox(ctx, x, y, 13 * S); ctx.lineWidth = (mined ? 2.4 : 1.4) * S; ctx.stroke();
       drawIcon(ctx, icFor('vein', r.vein!, V.icon), x, y, 17 * S, V.color);
       ctx.restore();
     }
     if (T) {
       const x = r.site.x - off * S, y = r.site.y + 3 * S;
-      ctx.beginPath(); ctx.arc(x, y, 12 * S, 0, TAU); ctx.fillStyle = PLATE; ctx.fill();
-      ctx.strokeStyle = 'rgba(255,220,150,0.6)'; ctx.lineWidth = 1.2 * S; ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, 13.4 * S, 0, TAU); ctx.fillStyle = O.GROOVE; ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, 12 * S, 0, TAU); ctx.fillStyle = '#0c0d12'; ctx.fill();
+      ctx.strokeStyle = O.goldBox(ctx, x, y, 12 * S); ctx.lineWidth = 1.4 * S; ctx.stroke();
       drawIcon(ctx, icFor('trait', r.trait!, T.icon), x, y, 15 * S, '#ffe2a8');
     }
     ctx.textBaseline = 'alphabetic';
@@ -1398,9 +1189,10 @@ export class MapRenderer {
         }
         const S = this.px(1), x = r.site.x + (this.siteR(r) + 12) * S, y = r.site.y + 4 * S;
         this.signalHits.push({ x, y, text: sg.text });
-        roundRect(ctx, x - 10 * S, y - 9 * S, 20 * S, 18 * S, 5 * S); ctx.fillStyle = PLATE; ctx.fill();
-        ctx.strokeStyle = c; ctx.lineWidth = 1.5 * S; ctx.stroke();
-        drawIcon(ctx, 'scan', x, y, 14 * S, c);
+        roundRect(ctx, x - 11 * S, y - 10 * S, 22 * S, 20 * S, 6 * S); ctx.fillStyle = O.GROOVE; ctx.fill();
+        roundRect(ctx, x - 10 * S, y - 9 * S, 20 * S, 18 * S, 5 * S); ctx.fillStyle = '#0c0d12'; ctx.fill();
+        ctx.strokeStyle = O.hiOf(c); ctx.lineWidth = 1.5 * S; ctx.stroke();
+        drawIcon(ctx, 'scan', x, y, 14 * S, O.hiOf(c));
       }
     }
 
@@ -1411,7 +1203,10 @@ export class MapRenderer {
     for (const k of this.arrowSeen.keys()) if (!this.arrowFrame.has(k)) this.arrowSeen.delete(k);
     this.arrowFrame.clear();
     if (I.pathPreview && I.pathPreview.pts.length > 1) {
-      ctx.strokeStyle = I.pathPreview.ok ? 'rgba(235,235,255,0.9)' : 'rgba(200,200,215,0.7)';
+      ctx.lineCap = 'round';
+      ctx.beginPath(); I.pathPreview.pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.strokeStyle = O.GROOVE; ctx.lineWidth = this.px(5.4); ctx.stroke();
+      ctx.strokeStyle = I.pathPreview.ok ? '#ffe7a8' : 'rgba(200,200,215,0.8)';
       ctx.lineWidth = this.px(3); ctx.setLineDash(I.pathPreview.ok ? [this.px(8), this.px(6)] : [this.px(1), this.px(7)]); ctx.lineDashOffset = -I.now / 40;
       ctx.lineCap = 'round';
       ctx.beginPath(); I.pathPreview.pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.stroke();
@@ -1465,12 +1260,13 @@ export class MapRenderer {
         path(ctx, r.poly); ctx.save(); ctx.setLineDash([2 * S, 6 * S]); ctx.strokeStyle = hexA(col, 0.22); ctx.lineWidth = 1.2 * S; ctx.stroke(); ctx.restore();
         continue;
       }
-      const R = (30 + 16 * k) * S;
-      const g = ctx.createRadialGradient(r.site.x, r.site.y, R * 0.2, r.site.x, r.site.y, R * 1.6);
-      g.addColorStop(0, hexA(col, 0.22 * k * pulse)); g.addColorStop(1, hexA(col, 0));
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(r.site.x, r.site.y, R * 1.6, 0, TAU); ctx.fill();
+      // the region's enamel lifts a little (a flat tint, no light under the marks) and its wall is gilt
       path(ctx, r.poly);
-      ctx.strokeStyle = hexA(col, (0.25 + 0.55 * k) * pulse); ctx.lineWidth = (1.2 + 1.2 * k) * S; ctx.stroke();
+      ctx.fillStyle = hexA(col, 0.1 * k * pulse); ctx.fill();
+      ctx.save(); ctx.clip();
+      ctx.strokeStyle = O.GROOVE; ctx.lineWidth = (4 + 2 * k) * S; ctx.stroke();
+      ctx.strokeStyle = hexA(O.mixHex(col, '#fff4e0', 0.25), (0.78 + 0.22 * k) * pulse); ctx.lineWidth = (1.6 + 1.4 * k) * S; ctx.stroke();
+      ctx.restore();
     }
   }
 
@@ -1599,9 +1395,8 @@ export class MapRenderer {
       for (const t of toks) if (t.owner === I.you && t.rest && isLane(st.regions[t.region])) hot.add(t.region);
       for (const f of st.fleets) if (f.owner === I.you) for (const rid of f.route?.path ?? []) if (isLane(st.regions[rid])) hot.add(rid);
       if (hot.size) {
-        ctx.fillStyle = 'rgba(245,242,255,0.8)';
-        const dr = (2.2 + 1.2 * (1 - W.s)) * S;
-        for (const rid of hot) { const q = st.regions[rid].site; ctx.beginPath(); ctx.arc(q.x, q.y, dr, 0, TAU); ctx.fill(); }
+        const dr = 2.1 + 1.1 * (1 - W.s);
+        for (const rid of hot) { const q = st.regions[rid].site; O.waypoint(ctx, q.x, q.y, S, dr); }
       }
     }
     // ---- multi-turn routes (WEGO; LIVE routes come in as planned arrows): one dashed line along the lane dots
@@ -1634,21 +1429,20 @@ export class MapRenderer {
       }
     }
 
-    // ---- engine trails under every piece in flight: an additive streak in the house's engine colour
+    // ---- the wake under every piece in flight: a fading line of the house's lifted enamel (flat, not light)
     ctx.save();
     ctx.lineCap = 'round';
-    ctx.globalCompositeOperation = 'lighter';
     for (const t of drawList) {
       if (t.rest) continue;
       const trk = this.tracks.get(t.fleets[0].id);
       if (!trk || trk.trail.length < 2) continue;
-      const eng = cssA(scheme(t.owner, trk.color).engine);
+      const eng = O.hiOf(trk.color);
       const pts = trk.trail;
       const lift = -this.miniGeom().stand * S * W.d;
       for (let i = 1; i < pts.length; i++) {
         const kk = i / pts.length;
         const age = clamp01(1 - (now - pts[i].t) / 700);
-        ctx.globalAlpha = 0.6 * kk * age;
+        ctx.globalAlpha = 0.45 * kk * age;
         ctx.strokeStyle = eng;
         ctx.lineWidth = S * (1.2 + 3.5 * kk);
         ctx.beginPath(); ctx.moveTo(pts[i - 1].x, pts[i - 1].y + lift); ctx.lineTo(pts[i].x, pts[i].y + lift); ctx.stroke();
@@ -1719,8 +1513,8 @@ export class MapRenderer {
       if (!f.ghost) continue;
       const c = this.colorOf(st, f.owner);
       ctx.save(); ctx.globalAlpha = 0.4 * f.alpha;
-      if (W.d > 0.5) drawShip(ctx, f.pos.x, f.pos.y - this.miniGeom().stand * S, this.miniGeom().len * S, this.miniGeom().len * this.rdpr, (f.cls?.[0]) ?? 'frigate', f.owner, c, 0);
-      else { ctx.translate(f.pos.x, f.pos.y); chevronPath(ctx, tr * 0.8 * S); ctx.fillStyle = c; ctx.fill(); }
+      if (W.d > 0.5) drawFigurine(ctx, f.pos.x, f.pos.y - this.miniGeom().stand * S, this.miniGeom().len * S, this.miniGeom().len * this.rdpr, (f.cls?.[0]) ?? 'frigate', f.owner, c, 0);
+      else O.pip(ctx, f.pos.x, f.pos.y, -Math.PI / 2, tr * 0.8 * S, c, false, S);
       ctx.restore();
     }
 
@@ -1794,96 +1588,78 @@ export class MapRenderer {
     const fated = sfl.some(f => f.fate && f.fate.turn === turnNow);
     const lurking = tPost === 'ambush' && mine;
     const A = clamp01(alpha * lensDim * (lurking ? 0.62 : 1));
-    // the tether: a short line from the star's edge to the piece (it belongs to that system)
+    // the tether: a fine gold wire from the star's collet to the piece (it belongs to that system)
     const reg = t.rest ? I.state.regions[t.region] : undefined;
-    if (reg && !isLane(reg) && hit) {
-      const R = (this.siteR(reg) + 1.5) * S;
+    if (reg && !isLane(reg) && hit && W.s < 0.95) {
+      const R = (this.siteR(reg) * 0.75 + 2) * S;
       const dx = d.x - reg.site.x, dy = d.y - reg.site.y, L = Math.hypot(dx, dy) || 1;
-      const end = L - tr * S * 0.85;
+      const end = L - tr * S * 0.9;
       if (end > R + 2 * S) {
-        ctx.save(); ctx.globalAlpha = A * 0.6; ctx.lineCap = 'round';
-        ctx.beginPath(); ctx.moveTo(reg.site.x + dx / L * R, reg.site.y + dy / L * R); ctx.lineTo(reg.site.x + dx / L * end, reg.site.y + dy / L * end);
-        ctx.strokeStyle = 'rgba(6,5,4,0.6)'; ctx.lineWidth = 2.6 * S; ctx.stroke();
-        ctx.strokeStyle = fill; ctx.lineWidth = 1.2 * S; ctx.stroke();
+        ctx.save(); ctx.globalAlpha = A * (1 - W.s);
+        O.tether(ctx, reg.site.x + dx / L * R, reg.site.y + dy / L * R, reg.site.x + dx / L * end, reg.site.y + dy / L * end, S);
         ctx.restore();
       }
     }
     ctx.save();
     ctx.translate(d.x, d.y);
     if (scale !== 1) ctx.scale(scale, scale);
-    // picked up: the piece rises 4 px off the felt and its shadow widens and softens beneath it
+    // picked up: the piece rises 4 px off the dial and its shadow widens and softens beneath it
     const lk = hit ? this.liftOf(I, t, now) : 0;
     if (lk > 0.001) {
       const sr = tr * S * (1.05 + 0.4 * lk);
       const sg = ctx.createRadialGradient(1.5 * S * lk, 3 * S * lk, 0, 1.5 * S * lk, 3 * S * lk, sr);
-      sg.addColorStop(0, `rgba(6,4,2,${(0.42 - 0.12 * lk).toFixed(3)})`); sg.addColorStop(1, 'rgba(6,4,2,0)');
+      sg.addColorStop(0, `rgba(0,0,0,${(0.5 - 0.14 * lk).toFixed(3)})`); sg.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.save(); ctx.globalAlpha = A; ctx.fillStyle = sg; ctx.beginPath(); ctx.ellipse(1.5 * S * lk, 3 * S * lk, sr, sr * 0.7, 0, 0, TAU); ctx.fill(); ctx.restore();
       ctx.translate(0, -4 * S * lk);
     }
-    if (fated && !reduced && W.d > 0.02) {
-      const k = 0.5 + 0.5 * Math.sin(now / 420);
+    if (fated && W.d > 0.02) {
+      // a fleet under a Fate: a slowly turning ring of pale violet milgrain round its plinth (no glow)
       ctx.globalAlpha = A * W.d;
-      drawGlow(ctx, 0, 0, tr * S * 1.7, [220, 180, 255], 0.35 + 0.2 * k);
+      O.beads(ctx, 0, 0, tr * S * 1.62, 22, 1.3 * S, '#e2d2ff', reduced ? 0 : now / 2600);
     }
     if (W.d > 0.01) { ctx.globalAlpha = A * W.d; this.drawMinis(t, d, fill, now, I); }
-    if (W.o > 0.01) { ctx.globalAlpha = A * W.o; this.drawCounter(d.ang, fill, sel, tr, S); }
-    if (W.s > 0.01) {
-      ctx.globalAlpha = A * W.s;
-      ctx.save(); ctx.rotate(d.ang); chevronPath(ctx, tr * 1.25 * S);
-      // an enamel arrowhead in an ink wire, lit from the lamp
-      ctx.lineJoin = 'round'; ctx.strokeStyle = sel ? '#f1d488' : 'rgba(6,5,4,0.92)'; ctx.lineWidth = (sel ? 2.6 : 2) * S; ctx.stroke();
-      const E = enamelOf(fill), R = tr * 1.25 * S;
-      const eg = ctx.createLinearGradient(-R, -R, R, R); eg.addColorStop(0, E.hi); eg.addColorStop(0.55, E.base); eg.addColorStop(1, E.lo);
-      ctx.fillStyle = eg; ctx.fill();
-      ctx.restore();
-    }
+    if (W.o > 0.01) { ctx.globalAlpha = A * W.o; O.counter(ctx, 0, 0, d.ang - Math.PI / 2, tr * S, fill, sel, S); }
+    if (W.s > 0.01) { ctx.globalAlpha = A * W.s; O.pip(ctx, 0, 0, d.ang - Math.PI / 2, tr * S, fill, sel, S); }
     ctx.globalAlpha = A;
     const ry = tr * (W.d > 0 ? 1 - 0.54 * W.d : 1);
-    // status on the piece: idle (yours, while you plan) breathes softly; out of supply: amber dashed rim; exposed: red
-    const rim = (col: string, dash: number[], w: number, k = 1.18) => {
-      ctx.save(); ctx.setLineDash(dash.map(x => x * S)); ctx.strokeStyle = col; ctx.lineWidth = w * S;
-      ctx.beginPath(); ctx.ellipse(0, 0, tr * S * k, ry * S * k, 0, 0, TAU); ctx.stroke(); ctx.restore();
-    };
+    // status on the piece: idle (yours, while you plan) a slowly turning milgrain ring; out of supply an amber dashed
+    // rim; exposed a cinnabar rim; lurking a pale dashed rim. Each sits in a groove, so it reads on any ground.
     if (mine && t.idle && !sel && W.s < 0.98) {
-      const br = reduced ? 0.5 : 0.5 + 0.5 * Math.sin(now / 520);
-      ctx.save(); ctx.globalAlpha = A * (1 - W.s) * (0.2 + 0.35 * br); rim('#ffffff', [], 1.6, 1.3); ctx.restore();
+      ctx.save(); ctx.globalAlpha = A * (1 - W.s);
+      O.idle(ctx, 0, 0, tr * S * 1.42, ry * S * 1.42, reduced ? 0 : now / 1900, S);
+      ctx.restore();
     }
-    if (t.oos) rim('rgba(255,196,90,0.95)', [3, 2.5], 1.8, 1.24);
-    if (exposed) rim('rgba(255,90,80,0.9)', [], 2, 1.3);
-    if (lurking) rim('rgba(230,220,255,0.85)', [3, 3], 1.4, 1.36);
-    // a stack of 2+ fleets: a small count chip under the piece
-    let below = tr + 3;
-    if (t.fleets.length > 1) {
-      const txt = String(t.fleets.length);
-      ctx.font = numFont(12 * S); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      if (W.s > 0.6) haloText(ctx, txt, (tr + 5) * S, (tr * 0.6) * S, '#ffffff', 'rgba(6,5,4,0.85)', 3 * S);
-      else {
-        const cw = ctx.measureText(txt).width + 8 * S, ch = 15 * S, cy = (ry + 2) * S;
-        roundRect(ctx, -cw / 2, cy, cw, ch, 4 * S); ctx.fillStyle = 'rgba(14,15,19,0.94)'; ctx.fill();
-        ctx.strokeStyle = hexA(fill, 0.9); ctx.lineWidth = 1.2 * S; ctx.stroke();
-        ctx.fillStyle = '#ffffff'; ctx.fillText(txt, 0, cy + ch / 2 + 0.5 * S);
-        below = ry + 2 + 15 + 2;
-      }
+    if (t.oos) O.rim(ctx, 0, 0, tr * S * 1.26, ry * S * 1.26, O.AMBER, [3.2, 2.4], 2.2, S);
+    if (exposed) O.rim(ctx, 0, 0, tr * S * 1.34, ry * S * 1.34, O.CINNABAR, [], 2.2, S);
+    if (lurking) O.rim(ctx, 0, 0, tr * S * 1.4, ry * S * 1.4, 'rgba(236,228,255,0.95)', [3, 3], 1.6, S);
+    // a stack of 2+ fleets: a black-enamel stud with the count, lower right of the piece
+    if (t.fleets.length > 1) O.stack(ctx, t.fleets.length, tr * 0.95 * S, ry * 0.95 * S, S);
+    if (this.probes && hit && scale === 1 && A > 0.9) {
+      const lift = -4 * S * lk, who = O.houseOf(fill);
+      this.probe(`${W.d > 0.5 ? 'miniature' : W.o > 0.5 ? 'fleet counter' : 'fleet pip'} (${who})`, d.x, d.y + lift, tr * 2.2, tr * 2.2);
+      if (mine && t.idle && !sel && W.s < 0.1) this.probe('idle rim', d.x - tr * 1.42 * S, d.y + lift, 7, 7);
+      if (t.oos) this.probe('out-of-supply rim', d.x + tr * 1.26 * S, d.y + lift, 5, 5);
+      if (t.fleets.length > 1) this.probe('stack count', d.x + tr * 0.95 * S, d.y + ry * 0.95 * S + lift, 9, 9);
+      if (sel && W.s < 0.5) this.probe('strength', d.x + 4 * S, d.y + lift - (tr + 10 + W.d * (this.miniGeom().stand + this.miniGeom().len * 0.7)) * S, 12, 10);
     }
-    // selected: its strength (attack power) under it, and its posture if it has one
-    if (sel) {
-      const txt = String(Math.max(0, Math.round(t.power)));
-      ctx.font = numFont(13 * S); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      const w = 14 * S + ctx.measureText(txt).width, y = -(tr + 9 + W.d * (this.miniGeom().stand + this.miniGeom().len * 0.7)) * S;
-      drawIcon(ctx, 'attack', -w / 2 + 6 * S, y, 13 * S, '#ffe6b0', { halo: 'rgba(6,5,4,0.9)', haloWidth: 2.5 * S });
-      haloText(ctx, txt, -w / 2 + 14 * S, y + 0.5 * S, '#ffffff', 'rgba(6,5,4,0.85)', 3 * S);
+    // selected: its strength (attack power) over it
+    if (sel && W.s < 0.98) {
+      ctx.save(); ctx.globalAlpha = A * (1 - W.s);
+      O.strength(ctx, Math.max(0, Math.round(t.power)), 0, -(tr + 10 + W.d * (this.miniGeom().stand + this.miniGeom().len * 0.7)) * S, S);
+      ctx.restore();
     }
     if (tPost && tPost !== 'steady' && (sel || W.d > 0.5) || (dug && W.d > 0.5)) {
-      const marks: { t: IconName; fill: string; ink: string }[] = [];
-      if (tPost && tPost !== 'steady') marks.push({ t: icFor('posture', tPost, POSTURES[tPost]?.icon), fill: mine ? '#1d1f26' : '#3a1418', ink: mine ? '#ffe2a0' : '#ffb0a0' });
-      if (dug && W.d > 0.5) marks.push({ t: icFor('state', 'dug'), fill: '#2a2a30', ink: '#d8dbe6' });
+      const marks: { t: IconName; ink: string }[] = [];
+      if (tPost && tPost !== 'steady') marks.push({ t: icFor('posture', tPost, POSTURES[tPost]?.icon), ink: mine ? '#ffe2a0' : '#ffb0a0' });
+      if (dug && W.d > 0.5) marks.push({ t: icFor('state', 'dug'), ink: '#d8dbe6' });
       const R = 9 * S;
       let x = -tr * S - R * 0.6;
       for (const m of marks) {
-        ctx.beginPath(); ctx.arc(x, ry * S, R, 0, TAU); ctx.fillStyle = m.fill; ctx.fill();
-        ctx.strokeStyle = '#c9a35c'; ctx.lineWidth = 1.1 * S; ctx.stroke();
+        ctx.beginPath(); ctx.arc(x, ry * S, R + 1.3 * S, 0, TAU); ctx.fillStyle = O.GROOVE; ctx.fill();
+        ctx.beginPath(); ctx.arc(x, ry * S, R, 0, TAU); ctx.fillStyle = '#0c0d12'; ctx.fill();
+        ctx.strokeStyle = O.goldBox(ctx, x, ry * S, R); ctx.lineWidth = 1.3 * S; ctx.stroke();
         drawIcon(ctx, m.t, x, ry * S, R * 1.35, m.ink);
-        x -= R * 2 + 2 * S;
+        x -= R * 2 + 3 * S;
       }
     }
     ctx.textBaseline = 'alphabetic';
@@ -1895,42 +1671,15 @@ export class MapRenderer {
     this.tokHits.push({ x: d.x, y: d.y, l: -hr, t: -top - 4, r: hr, b: tr + 6, cr: Math.max(this.hitR(), tr + 5), hit: { region: t.region, owner: t.owner, fleetIds: t.fleets.map(f => f.id) } });
   }
 
-  /** The operational counter: an enamel token (ART-BIBLE §8): a domed coin of the house enamel lit from the lamp,
-   *  set in a brass bezel, with the heading struck into it as an ivory chevron. Never a flat circle. */
-  private drawCounter(ang: number, fill: string, sel: boolean, tr: number, S: number) {
-    const { ctx } = this;
-    const R = tr * S;
-    const E = enamelOf(fill);
-    // cast shadow down and right
-    ctx.beginPath(); ctx.arc(1.2 * S, 2.2 * S, R + 1.2 * S, 0, TAU); ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fill();
-    // the bezel: brass, lit at the upper left
-    ctx.beginPath(); ctx.arc(0, 0, R + 1.4 * S, 0, TAU);
-    const bz = ctx.createLinearGradient(-R, -R, R, R);
-    bz.addColorStop(0, sel ? '#fbedc8' : '#efd59a'); bz.addColorStop(0.5, '#a87a35'); bz.addColorStop(1, '#3a2810');
-    ctx.fillStyle = bz; ctx.fill();
-    ctx.lineWidth = 0.9 * S; ctx.strokeStyle = 'rgba(6,5,4,0.9)'; ctx.stroke();
-    // the domed enamel
-    ctx.beginPath(); ctx.arc(0, 0, R - 0.6 * S, 0, TAU);
-    const g = ctx.createRadialGradient(-R * 0.3, -R * 0.4, R * 0.08, 0, 0, R);
-    g.addColorStop(0, cssA(mixA(rgbA(E.hi), [255, 255, 255], 0.25))); g.addColorStop(0.5, E.base); g.addColorStop(1, E.lo);
-    ctx.fillStyle = g; ctx.fill();
-    ctx.lineWidth = 0.8 * S; ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.stroke();
-    // the glaze's specular, toward the lamp
-    ctx.beginPath(); ctx.ellipse(-R * 0.32, -R * 0.42, R * 0.34, R * 0.18, -0.5, 0, TAU); ctx.fillStyle = 'rgba(255,245,225,0.28)'; ctx.fill();
-    ctx.save(); ctx.rotate(ang); chevronPath(ctx, R * 0.56);
-    ctx.lineJoin = 'round'; ctx.lineWidth = 1.4 * S; ctx.strokeStyle = 'rgba(6,5,4,0.55)'; ctx.stroke();
-    ctx.fillStyle = '#f3ead6'; ctx.fill();
-    ctx.restore();
-    if (sel) { ctx.beginPath(); ctx.arc(0, 0, R + 4 * S, 0, TAU); ctx.strokeStyle = 'rgba(241,212,136,0.9)'; ctx.lineWidth = 1.4 * S; ctx.stroke(); }
-  }
-
-  /** Detail zoom: miniatures on clear flight stands over one enamel base (the base rim is the owner colour), and the
-   *  fleet's pennant with its sigil and rank (a limping fleet's pennant droops and it trails smoke). */
+  /** Detail zoom: cast-metal figurines on gold pins over one black-enamel plinth (gold rim, house-enamel band), and
+   *  the fleet's pennant with its sigil and rank (a limping fleet lists on its pins, its pennant droops and it trails
+   *  smoke). */
   private drawMinis(t: Tok, d: { x: number; y: number; ang: number; bank?: number }, fill: string, now: number, I: DrawInput) {
     const { ctx } = this;
     const S = this.px(1);
     const G = this.miniGeom();
     const reduced = reducedMotion();
+    const high = gfxQuality() === 'high';
     const owner = t.owner;
     const cls = this.classesOf(I, t.fleets);
     const n = Math.min(G.max, cls.length);
@@ -1940,23 +1689,21 @@ export class MapRenderer {
     let mx = 0, my = 0; for (const f of F) { mx += f.x / n; my += f.y / n; }
     const flip = Math.cos(d.ang) < -0.2 ? -1 : 1;
     const pos = F.map((f, i) => ({ x: (f.x - mx) * len0 * 0.72 * 1.05, y: (f.y - my) * len0 * 0.72 * flip, s: f.s, cls: cls[i] }));
-    let ext = 0; for (const q of pos) ext = Math.max(ext, Math.hypot(q.x, q.y));
     const rb = G.rb * (n > 2 ? 1.18 : n > 1 ? 1.08 : 1);
-    void ext;
-    drawBase(ctx, 0, 0, rb * S, rb * this.rdpr, fill, { sel: t.selected, oos: t.oos, big: n > 2 });
+    drawPlinth(ctx, 0, 0, rb * S, fill, S, { sel: t.selected, oos: t.oos, soft: high });
     const bob = reduced || t.moving ? 0 : Math.sin(now / 850 + (t.fleets[0]?.id ?? 0) * 1.7) * 1.3;
     const order = pos.map((q, i) => ({ ...q, i })).sort((a, b) => a.y - b.y);
-    const eng = t.moving ? 1.1 : 0.3;
-    // a limping fleet lists 8° on its stands (DELIGHT #40)
+    // a limping fleet lists 8° on its pins (DELIGHT #40)
     const listing = t.fleets.some(f => !!this.fleetById(I.state, f.id)?.limping);
+    const devK = high ? this.rdpr : Math.min(this.rdpr, 1.5);
     for (const q of order) {
       const gx = q.x * S, gy = q.y * BASE_SQUASH * S;
       const L = len0 * q.s * (0.78 + 0.22 * classLen(q.cls) / classLen(lead));
       const stH = (G.stand + (q.i === 0 ? 2 : 0)) * S;
       const sy = gy - stH + bob * S * (q.i % 2 ? 0.7 : 1);
-      drawStand(ctx, gx, gy, sy + L * S * 0.05, Math.max(1.2, L * 0.07) * S);
+      drawPin(ctx, gx, gy, sy + L * S * 0.05, Math.max(1.1, L * 0.055) * S);
       if (listing) { ctx.save(); ctx.translate(gx, sy); ctx.rotate(0.14 * -t.side || 0.14); ctx.translate(-gx, -sy); }
-      drawShip(ctx, gx, sy, L * S, L * this.rdpr, q.cls, owner, fill, d.ang, { shadow: { dx: stH * 0.3, dy: stH * 0.95, alpha: 0.42 }, engine: eng * (listing ? 0.4 : 1), bank: d.bank ?? 0 });
+      drawFigurine(ctx, gx, sy, L * S, L * devK, q.cls, owner, fill, d.ang, { shadow: { dx: stH * 0.3, dy: stH * 0.95, alpha: high ? 0.5 : 0.4 }, engine: t.moving ? (listing ? 0.4 : 0.8) : 0, bank: d.bank ?? 0 });
       if (listing) ctx.restore();
     }
     if (owner < 0) return;
@@ -1975,9 +1722,8 @@ export class MapRenderer {
     const ry = rb * BASE_SQUASH;
     const bx = dir * rb * 0.78 * S, by = ry * 0.2 * S;
     const top = by - (G.stand * 0.9 + len0 * 0.5 + 10) * S;
-    ctx.strokeStyle = 'rgba(8,8,14,0.9)'; ctx.lineWidth = 2.6 * S; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx, top - 2 * S); ctx.stroke();
-    const pg = ctx.createLinearGradient(bx - 1.2 * S, 0, bx + 1.2 * S, 0); pg.addColorStop(0, '#fff0c0'); pg.addColorStop(1, '#8a6420');
-    ctx.strokeStyle = pg; ctx.lineWidth = 1.2 * S; ctx.stroke();
+    ctx.strokeStyle = O.GROOVE; ctx.lineWidth = 2.8 * S; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx, top - 2 * S); ctx.stroke();
+    ctx.strokeStyle = O.gold(ctx, bx - 1.2 * S, 0, bx + 1.2 * S, 0); ctx.lineWidth = 1.3 * S; ctx.stroke();
     const fw = 22 * S * pk, fh = 15 * S * pk;
     const wv = reduced || ld.limping ? 0 : Math.sin(now / 300 + ld.id) * 1.4 * S;
     ctx.save();
@@ -1989,7 +1735,7 @@ export class MapRenderer {
     ctx.lineTo(dir * fw, fh + wv * 0.3);
     ctx.quadraticCurveTo(dir * fw * 0.5, fh + wv * 0.6, 0, fh);
     ctx.closePath();
-    enamel(ctx, ld.limping ? desat(fill, 0.45) : fill, 0, fh, ld.commander.rank >= 4 ? 'gold' : 'iron', 0.9 * S);
+    enamel(ctx, ld.limping ? desat(O.enamelBase(fill), 0.45) : O.enamelBase(fill), 0, fh, ld.commander.rank >= 4 ? 'gold' : 'iron', 0.9 * S);
     drawSigil(ctx, ld.banner.sigil, dir * fw * 0.4, fh * 0.48 + wv * 0.5, 10.5 * S * pk, goldPaint(ctx, 0, fh), true);
     if (ld.oathbreaker) {
       ctx.strokeStyle = '#ff4a3a'; ctx.lineWidth = 1.3 * S; ctx.beginPath();
@@ -2014,14 +1760,16 @@ export class MapRenderer {
     const reduced = reducedMotion();
     const lane = isLane(r);
     const R = lane ? 0 : this.siteR(r);
-    const D = W.s * 8.5 + (1 - W.s) * 11 + (this.coarse ? 1.5 : 0);
-    const lift = lane ? 0 : (1 - W.s) * (R + D + 4);
+    const D = W.s * 8.5 + (1 - W.s) * 11 + (this.coarse ? 1.5 : 0) + (lane ? 0 : W.d * Math.max(4, R * 0.35));
+    // over the star's setting (a Crown's ring and crown, the Throne's bezel) rather than on it
+    const kingly = r.kind === 'crown' || r.kind === 'throne';
+    const top = lane ? 0 : kingly ? O.objR(R, r.kind === 'throne', 1) + (r.kind === 'throne' ? 10 : 6) : R;
+    const lift = lane ? 0 : (1 - W.s) * (top + D + 4);
     const P = { x: r.site.x, y: r.site.y - lift * S };
     const beat = reduced ? 0 : Math.max(0, Math.sin((now / 700) * Math.PI)) ** 4;
-    drawGlow(ctx, P.x, P.y, D * 2.4 * S, [255, 140, 70], 0.22 + 0.2 * beat);
-    ctx.beginPath(); ctx.arc(P.x, P.y, D * S, 0, TAU); ctx.fillStyle = '#1b0d14'; ctx.fill();
-    ctx.lineWidth = 1.7 * S; ctx.strokeStyle = 'rgba(255,214,176,0.92)'; ctx.stroke();
-    swords(ctx, P.x, P.y, D * 0.6 * S, '#ffe7c2', Math.max(1.4, D * 0.17) * S);
+    // a gold coin with cinnabar enamel and gold crossed swords, standing on the dial
+    O.battleCoin(ctx, P.x, P.y, D * S, S, beat);
+    this.probe('battle mark', P.x, P.y, D * 1.5, D * 1.5);
     this.battleHits.push({ rid: r.id, x: P.x, y: P.y, r: D + 5 });
     if (W.d < 0.3 || reduced || lane) return;
     // ---- the exchange of fire (detail)
@@ -2057,38 +1805,21 @@ export class MapRenderer {
     if (this.shotSeen.size > 400) this.shotSeen.clear();
   }
 
-  /** One weapon discharge in the shooter's house style, `age` ms after it fired; spawns sparks on impact once. */
+  /** One discharge `age` ms after it fired, in the orrery's flat language: an enamel bolt in the shooter's house
+   *  colour (ivory head) flying to its target, gold beads where it lands. A lance (Azure, the Warden) arrives at once. */
   private weaponShot(owner: number, planet: boolean, from: Pt, to: Pt, age: number, S: number, key: string, targetR: number, targetC: Pt | null) {
     const { ctx } = this;
     if (age < 0 || age > 1200) return;
     const st = this.lastState;
-    const col = planet ? '#ffcf8a' : this.colorOf(st!, owner);
-    const sch = scheme(owner, col);
-    const fac = planet ? 'battery' : sch.faction;
-    const travel = fac === 'azure' || fac === 'warden' || fac === 'neutral' ? 0 : fac === 'crimson' || fac === 'battery' ? 300 : 420;
-    const hitT = travel;
-    // muzzle flash
-    if (age < 120) drawGlow(ctx, from.x, from.y, (6 + (planet ? 2 : 0)) * S, sch.weapon, 1 - age / 120);
-    if (travel === 0) {
-      // lance: instantaneous beam that fades
-      if (age < 260) beam(ctx, from.x, from.y, to.x, to.y, sch.weapon, 1.4 * S, 1 - age / 260);
-    } else if (age < travel) {
-      const k = age / travel, k0 = Math.max(0, k - (fac === 'gilded' ? 0.08 : 0.22));
-      const hx = from.x + (to.x - from.x) * k, hy = from.y + (to.y - from.y) * k;
-      const tx = from.x + (to.x - from.x) * k0, ty = from.y + (to.y - from.y) * k0;
-      if (fac === 'gilded') drawGlow(ctx, hx, hy, 5 * S, sch.weapon, 1);
-      else tracer(ctx, tx, ty, hx, hy, sch.weapon, 1.6 * S, 1);
-    }
-    const ia = age - hitT;
+    const col = planet ? '#f1d488' : this.colorOf(st!, owner);
+    const fac = planet ? 'battery' : scheme(owner, col).faction;
+    const travel = fac === 'azure' || fac === 'warden' || fac === 'neutral' ? 160 : fac === 'crimson' || fac === 'battery' ? 300 : 420;
+    if (age < travel) O.shot(ctx, from.x, from.y, to.x, to.y, col, Math.min(1, age / travel), S);
+    const ia = age - travel;
     if (ia >= 0 && ia < 420) {
-      if (targetC && targetR > 0) {
-        // impact on the planet's surface: clipped to the disc, a flash and a scorch
-        ctx.save(); ctx.beginPath(); ctx.arc(targetC.x, targetC.y, targetR, 0, TAU); ctx.clip();
-        fireball(ctx, to.x, to.y, 4.5 * S, ia / 420, 1);
-        ctx.restore();
-        drawGlow(ctx, to.x, to.y, 7 * S, [255, 200, 120], (1 - ia / 420) * 0.6);
-      } else fireball(ctx, to.x, to.y, 4 * S, ia / 420, 0.9);
-      if (!this.shotSeen.has(key)) { this.shotSeen.add(key); this.spark(to.x, to.y, '#ffd27a', this.compact ? 2 : 4, 0.12, 380); }
+      O.impact(ctx, to.x, to.y, ia / 420, S);
+      if (targetC && targetR > 0 && ia < 160) { ctx.beginPath(); ctx.arc(to.x, to.y, 2.6 * S, 0, TAU); ctx.fillStyle = '#fff4d6'; ctx.fill(); }
+      if (!this.shotSeen.has(key)) { this.shotSeen.add(key); this.spark(to.x, to.y, '#ffd27a', this.compact ? 2 : 3, 0.1, 340); }
     }
   }
 
@@ -2138,9 +1869,9 @@ export class MapRenderer {
       ctx.save();
       ctx.globalAlpha = a;
       ctx.lineCap = 'round';
-      ctx.strokeStyle = 'rgba(6,5,4,0.9)'; ctx.lineWidth = 4 * S;
+      ctx.strokeStyle = O.GROOVE; ctx.lineWidth = 4 * S;
       ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(base.x, top); ctx.stroke();
-      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2 * S; ctx.stroke();
+      ctx.strokeStyle = O.gold(ctx, base.x - 1, top, base.x + 1, base.y); ctx.lineWidth = 2 * S; ctx.stroke();
       ctx.beginPath(); ctx.moveTo(base.x + 1 * S, top); ctx.lineTo(base.x + 17 * S, top + 5 * S); ctx.lineTo(base.x + 1 * S, top + 11 * S); ctx.closePath();
       ctx.fillStyle = c; ctx.fill(); ctx.strokeStyle = 'rgba(6,5,4,0.9)'; ctx.lineWidth = 1.2 * S; ctx.stroke();
       swords(ctx, base.x + 7 * S, top + 5.5 * S, 3.5 * S, inkOn(c), 1.1 * S);
@@ -2149,26 +1880,6 @@ export class MapRenderer {
   }
 
   // ================================================================ animated layers
-  private drawTwinkles(now: number) {
-    if (!this.twinkles.length || reducedMotion()) return;
-    const { ctx } = this;
-    const ox = -this.cam.x * this.cam.z * 0.09, oy = -this.cam.y * this.cam.z * 0.09;
-    const t = now / 1000;
-    for (const s of this.twinkles) {
-      const a = 0.5 + 0.5 * Math.sin(t * s.sp + s.ph);
-      if (a < 0.15) continue;
-      const x = (((s.x + ox) % this.w) + this.w) % this.w, y = (((s.y + oy) % this.h) + this.h) % this.h;
-      ctx.globalAlpha = a * 0.85;
-      ctx.fillStyle = s.c;
-      ctx.fillRect(x - s.s / 2, y - s.s / 2, s.s, s.s);
-      if (s.s > 1.5 && a > 0.75) {
-        ctx.globalAlpha = (a - 0.75) * 1.6;
-        ctx.fillRect(x - 4, y - 0.5, 8, 1); ctx.fillRect(x - 0.5, y - 4, 1, 8);
-      }
-    }
-    ctx.globalAlpha = 1;
-  }
-
   /** Detect region owner changes between frames (captures, defections) and animate them. */
   private trackOwners(I: DrawInput) {
     const prev = this.prevOwners;
@@ -2316,20 +2027,20 @@ export class MapRenderer {
       if (ra + rb >= L) continue;
       const ux = (g.b.x - g.a.x) / L, uy = (g.b.y - g.a.y) / L;
       const x0 = g.a.x + ux * ra, y0 = g.a.y + uy * ra, x1 = g.b.x - ux * rb, y1 = g.b.y - uy * rb;
-      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
-      ctx.strokeStyle = `rgba(255,190,90,${0.22 * a})`; ctx.lineWidth = (strat ? 4 : 5.5) * S; ctx.stroke();
-      ctx.strokeStyle = `rgba(255,226,160,${0.85 * a})`; ctx.lineWidth = (strat ? 1.3 : 1.7) * S; ctx.stroke();
+      // lit: polished gold wire in its groove (brighter along a route)
+      // eased in and out, but at full value once lit (a half-transparent wire loses to the field under it)
+      ctx.globalAlpha = target ? Math.min(1, a / target) : Math.min(1, a * 3);
+      O.litLane(ctx, x0, y0, x1, y1, target || a, S, strat);
+      if (this.probes && target >= 0.3 && target < 1 && a >= target * 0.95) this.probe('lane (lit)', x0 * 0.6 + x1 * 0.4, y0 * 0.6 + y1 * 0.4, 6, 6);
+      ctx.globalAlpha = 1;
       for (const id of [g.u, g.v]) if (isLane(st.regions[id])) dots.set(id, Math.max(dots.get(id) ?? 0, a));
     }
     if (dots.size) {
-      const dr = strat ? 2.2 : 3.4;
-      const buoy = buoySprite(dr * this.rdpr, true);
-      const bw = (buoy.width / this.rdpr) * S;
+      const dr = strat ? 2.1 : 2.8;
       for (const [id, a] of dots) {
         const q = st.regions[id].site;
-        ctx.globalAlpha = Math.min(1, a * 1.1);
-        ctx.drawImage(buoy, q.x - bw / 2, q.y - bw / 2, bw, bw);
-        ctx.beginPath(); ctx.arc(q.x, q.y, dr * 0.45 * S, 0, TAU); ctx.fillStyle = 'rgba(255,214,140,0.9)'; ctx.fill();
+        ctx.globalAlpha = Math.min(1, a * 1.6);
+        O.waypoint(ctx, q.x, q.y, S, dr);
       }
     }
     ctx.restore();
@@ -2352,8 +2063,8 @@ export class MapRenderer {
       const r = I.state.regions[rid];
       if (!r) continue;
       path(ctx, r.poly);
-      ctx.fillStyle = `rgba(255,255,255,${0.055 * a})`; ctx.fill();
-      ctx.strokeStyle = `rgba(220,205,255,${0.35 * a})`; ctx.lineWidth = this.px(1.5); ctx.stroke();
+      ctx.fillStyle = `rgba(255,236,190,${0.04 * a})`; ctx.fill();
+      ctx.strokeStyle = `rgba(232,196,120,${0.45 * a})`; ctx.lineWidth = this.px(1.4); ctx.stroke();
     }
   }
   private drawRegionSelection(I: DrawInput) {
@@ -2369,53 +2080,16 @@ export class MapRenderer {
     if (r.poly.length < 3) return;
     // a clear, solid highlight: the region lights up and gets a bright border (no moving outlines)
     path(ctx, r.poly);
-    ctx.fillStyle = `rgba(255,255,255,${0.07 * e + (k < 1 ? 0.1 * (1 - k) : 0)})`; ctx.fill();
+    ctx.fillStyle = `rgba(255,236,190,${0.06 * e + (k < 1 ? 0.08 * (1 - k) : 0)})`; ctx.fill();
     ctx.save(); ctx.clip();
     ctx.lineJoin = 'round';
-    ctx.strokeStyle = `rgba(255,255,255,${0.9 * e})`; ctx.lineWidth = this.px(6); ctx.stroke();
+    // a polished gold wall just inside the selected region, in its groove
+    ctx.strokeStyle = O.GROOVE; ctx.lineWidth = this.px(8); ctx.globalAlpha = e; ctx.stroke();
+    ctx.strokeStyle = '#fff0bd'; ctx.lineWidth = this.px(3.2); ctx.stroke();
     ctx.restore();
     void c;
   }
 
-  /** The animated parts of a site (the Throne's breath, crown shimmer, capital ring): over the cached layer. */
-  private drawSiteAnim(r: Region, I: DrawInput, c: string) {
-    const reduced = reducedMotion();
-    const { ctx } = this;
-    const p = r.site;
-    const t = I.now / 1000;
-    const S = this.px(1);
-    if (r.kind === 'void' || isLane(r)) return;
-    const W = this.zw;
-    const pr = this.siteR(r) * S;
-    // off screen: nothing to animate (the map has many stars; phones must stay smooth)
-    const v = this.view;
-    const m = pr * 5;
-    if (p.x + m < v.x0 || p.x - m > v.x1 || p.y + m < v.y0 || p.y - m > v.y1) return;
-    const kind = starKindOf(r);
-    const core = pr * STAR_NODE[kind].core * (1 - 0.38 * W.d);
-    const fog = this.starFogged(r, I);
-    if (!reduced) {
-      if (r.kind === 'throne') {
-        const br = 0.5 + 0.5 * Math.sin(t * 1.4);
-        const gr = Math.max(pr * 4.5, 30 * S);
-        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, gr);
-        const hc = r.owner !== null && r.owner >= 0 && !fog ? mixA([255, 236, 170], rgbA(this.colorOf(I.state, r.owner)), 0.5) : [255, 236, 170] as [number, number, number];
-        g.addColorStop(0, cssA(hc, 0.2 + 0.14 * br)); g.addColorStop(1, cssA(hc, 0));
-        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, gr, 0, TAU); ctx.fill();
-      } else if (kind === 'pulsar') drawPulsarBeams(ctx, p.x, p.y, core, t, r.id, fog ? 0.35 : 1);
-      else if (kind === 'blackhole') drawAccretionShimmer(ctx, p.x, p.y, core, t, r.id, fog ? 0.4 : 1);
-      else if (!fog && !this.stage) drawTwinkle(ctx, p.x, p.y, core, kind, t, r.id);
-    }
-    // detail zoom: the bodies as tiny specks riding their orbits (frozen with reduced motion)
-    if (W.d > 0.02 && r.bodies) {
-      const bodies: { kind: string; q?: string; adj?: string }[] = r.bodies.slice(0, 3);
-      if ((r.buildings.station ?? 0) > 0) bodies.push({ kind: 'station' });
-      ctx.save(); ctx.globalAlpha = W.d;
-      if (bodies.length) drawSpecks(ctx, p.x, p.y, pr, bodies.slice(0, 3), reduced ? 0 : t, r.id * 7919 + 13, S * Math.sqrt(this.artK()), this.rdpr / S, r.kind, r.name, fog);
-      ctx.restore();
-    }
-    void c;
-  }
   /** The visible world rectangle this frame (with a margin), for culling animated parts (set in draw). */
   private view = { x0: -1e9, y0: -1e9, x1: 1e9, y1: 1e9 };
 
@@ -2442,12 +2116,8 @@ export class MapRenderer {
     ctx.save();
     ctx.globalAlpha *= alpha;
     ctx.lineCap = 'round';
-    const draw = () => {
-      ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, TAU);
-      for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + Math.PI / 4; ctx.moveTo(p.x + Math.cos(a) * (R - 5 * S), p.y + Math.sin(a) * (R - 5 * S)); ctx.lineTo(p.x + Math.cos(a) * (R + 2 * S), p.y + Math.sin(a) * (R + 2 * S)); }
-    };
-    draw(); ctx.strokeStyle = 'rgba(6,5,4,0.75)'; ctx.lineWidth = 4.4 * S; ctx.stroke();
-    draw(); ctx.strokeStyle = color; ctx.lineWidth = 2 * S; ctx.stroke();
+    O.reticle(ctx, p.x, p.y, R, color, S);
+    this.probe('seize reticle', p.x, p.y - R, 7, 7);
     ctx.restore();
     return R / S;
   }
@@ -2483,27 +2153,18 @@ export class MapRenderer {
     ctx.save();
     ctx.globalAlpha = alpha;
     const trace = () => { ctx.beginPath(); pts.forEach((pp, i) => (i ? ctx.lineTo(pp.x, pp.y) : ctx.moveTo(pp.x, pp.y))); };
-    ctx.lineCap = 'round';
-    trace(); ctx.strokeStyle = 'rgba(6,5,4,0.5)'; ctx.lineWidth = 5.5 * s; ctx.stroke();
-    ctx.strokeStyle = color; ctx.lineWidth = 2.6 * s;
-    ctx.setLineDash([8 * s, 6 * s]); ctx.lineDashOffset = reducedMotion() ? 0 : -(this.now / 60) * s;
-    trace(); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
+    // printed, flat: the house's enamel dashes inlaid in a groove, a gilt-keyed head (hollow for a join)
+    O.routeStroke(ctx, trace, color, s, reducedMotion() ? 0 : -(this.now / 60) * s);
+    if (this.probes && alpha >= 0.9) { const q = pts[Math.floor(pts.length / 2)]; this.probe('route (planned)', q.x, q.y, 12, 12); }
     const ang = Math.atan2(p2.y - pb.y, p2.x - pb.x);
     if (seize && grow >= 0.9 && to >= 0) this.reticle(b, to, color);
-    else {
-      ctx.beginPath(); ctx.moveTo(p2.x + Math.cos(ang) * 10 * s, p2.y + Math.sin(ang) * 10 * s);
-      ctx.lineTo(p2.x + Math.cos(ang + 2.5) * 10 * s, p2.y + Math.sin(ang + 2.5) * 10 * s);
-      ctx.lineTo(p2.x + Math.cos(ang - 2.5) * 10 * s, p2.y + Math.sin(ang - 2.5) * 10 * s); ctx.closePath();
-      ctx.strokeStyle = 'rgba(6,5,4,0.8)'; ctx.lineWidth = 1.6 * s; ctx.stroke();
-      if (dashed && kind !== 'move' && !seize) { ctx.fillStyle = 'rgba(6,5,4,0.9)'; ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = 1.6 * s; ctx.stroke(); }
-      else { ctx.fillStyle = color; ctx.fill(); }
-    }
+    else O.routeHead(ctx, p2.x, p2.y, ang, color, s, dashed && kind !== 'move' && !seize);
     // only a LIVE ETA ("3h") or the join "+" is spelled out on the map; order slots live in the strip
     if (label && !/^[IVX]+$/.test(label) && grow > 0.5) {
       ctx.font = numFont(13 * s); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
       const w = measureIconText(ctx, label);
       const hx = p2.x + (Math.cos(ang) >= 0 ? 10 * s : -10 * s - w), hy = p2.y - 14 * s;
-      haloText(ctx, label, hx, hy, '#ffffff', 'rgba(6,5,4,0.85)', 3 * s);
+      haloText(ctx, label, hx, hy, O.IVORY, O.GROOVE, 3.4 * s);
       ctx.textBaseline = 'alphabetic';
     }
     ctx.restore();
@@ -2522,21 +2183,18 @@ export class MapRenderer {
     const tip = { x: end.x - ((end.x - prev.x) / L) * back, y: end.y - ((end.y - prev.y) / L) * back };
     const ang = Math.atan2(end.y - prev.y, end.x - prev.x);
     ctx.save();
-    ctx.globalAlpha = mine ? 1 : 0.6;
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     const trace = () => { ctx.beginPath(); pts.slice(0, -1).forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.lineTo(tip.x, tip.y); };
-    trace(); ctx.strokeStyle = 'rgba(6,5,4,0.5)'; ctx.lineWidth = 5.5 * s; ctx.stroke();
-    ctx.setLineDash([8 * s, 6 * s]); ctx.lineDashOffset = reducedMotion() ? 0 : -(this.now / 60) * s;
-    trace(); ctx.strokeStyle = color; ctx.lineWidth = 2.6 * s; ctx.stroke();
-    ctx.setLineDash([]); ctx.lineDashOffset = 0;
+    // rivals' routes: the groove at full value, the enamel a little quieter (never below the 4.5:1 line)
+    O.routeStroke(ctx, trace, color, s, reducedMotion() ? 0 : -(this.now / 60) * s, mine ? 1 : 0.8);
+    if (this.probes) {
+      // the middle of its longest leg (clear of the stars at either end)
+      const legs = [...pts.slice(0, -1), tip];
+      let q0 = legs[0], q1 = legs[1], best = 0;
+      for (let i = 1; i < legs.length; i++) { const L = Math.hypot(legs[i].x - legs[i - 1].x, legs[i].y - legs[i - 1].y); if (L > best) { best = L; q0 = legs[i - 1]; q1 = legs[i]; } }
+      this.probe(seize ? 'route (seize)' : 'route (move)', (q0.x + q1.x) / 2, (q0.y + q1.y) / 2, 12, 12); }
     if (seize) this.reticle(end, dest, color);
-    else {
-      ctx.beginPath(); ctx.moveTo(tip.x + Math.cos(ang) * 10 * s, tip.y + Math.sin(ang) * 10 * s);
-      ctx.lineTo(tip.x + Math.cos(ang + 2.5) * 10 * s, tip.y + Math.sin(ang + 2.5) * 10 * s);
-      ctx.lineTo(tip.x + Math.cos(ang - 2.5) * 10 * s, tip.y + Math.sin(ang - 2.5) * 10 * s); ctx.closePath();
-      ctx.strokeStyle = 'rgba(6,5,4,0.8)'; ctx.lineWidth = 1.6 * s; ctx.stroke();
-      ctx.fillStyle = color; ctx.fill();
-    }
+    else O.routeHead(ctx, tip.x, tip.y, ang, color, s);
     ctx.restore();
   }
 
@@ -3060,24 +2718,8 @@ export class MapRenderer {
 
   private prepare(st: GameState) {
     this.seed = st.seed;
-    this.asteroidCache.clear();
     this.lastKnownBy.clear(); this.lastKnown = new Map();
     this.tokDisp.clear();
-    for (const r of st.regions) {
-      if (r.feature !== 'asteroids') continue;
-      const rng = new Rng(hashString(`ast${st.seed}:${r.id}`));
-      const pts: Pt[] = [];
-      for (let i = 0; i < 400 && pts.length < 70; i++) {
-        const p = { x: r.centroid.x + (rng.next() - 0.5) * 420, y: r.centroid.y + (rng.next() - 0.5) * 420 };
-        if (pointInPoly(p, r.poly) && Math.hypot(p.x - r.site.x, p.y - r.site.y) > 40) pts.push(p);
-      }
-      this.asteroidCache.set(r.id, pts);
-    }
-    this.stars = null;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const r of st.regions) for (const p of r.poly) { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); }
-    if (!Number.isFinite(minX)) { minX = minY = -1000; maxX = maxY = 1000; }
-    this.haze = nebulaPrint(minX, minY, maxX, maxY, st.seed);
   }
 }
 

@@ -19,7 +19,7 @@ import { audio } from './audio/audio.ts';
 import { installAudioHooks, openSoundSettings, soundIcon } from './audio/hooks.ts';
 import { openGraphicsSettings } from './ui/graphics.ts';
 import { enhanceSelects } from './ui/kselect.ts';
-import { tableFor, onTableChange } from './art/gl/table.ts';
+import { orreryBackdrop } from './art/orrery-bg.ts';
 import { enamel } from './art/bible.ts';
 import type { GameMeta } from '../../shared/protocol.ts';
 import { LIVE_SPEEDS } from '../../shared/sim/live.ts';
@@ -192,38 +192,29 @@ function notice(kind: 'wait' | 'bad', title: string, body: string) {
 /** A seat's colour in the lobby: the house enamel's lit tone (the state may still carry the retired neons). */
 const seatColor = (seat: number) => enamel(PLAYER_COLORS[seat] ?? NEUTRAL_COLOR).hi;
 
-/** The war table under the lobby: the same GL sky, lamp and grain as the board (art/gl/table.ts), slowly drifting.
- *  Without WebGL2 (or Graphics: off) the CSS felt and lamp pool in lobby.css are the table. */
+/** The war table under the lobby: the board's orrery (art/orrery-bg.ts), the black-enamel dial in its gold bezel on
+ *  velvet, baked once per window size. A still page: no frames at all. */
 function lobbyTable(host: HTMLElement) {
   const c = document.createElement('canvas');
   c.className = 'lb-sky';
   c.setAttribute('aria-hidden', 'true');
   host.appendChild(c);
-  const seed = 4471;
-  const t0 = performance.now();
-  // the lobby is a still page: the sky drifts at ~10 fps on a timer (no animation-frame loop, idle CPU stays low),
-  // pauses while the tab is hidden, and stops altogether on the 2D table (the CSS felt needs no frames)
-  let timer = 0;
-  const step = () => {
-    timer = 0;
-    if (!c.isConnected) { off(); return; }
-    const st = tableFor(c, seed);
-    host.classList.toggle('gl', !!st);
-    if (!st) return;
-    if (!document.hidden) {
-      const t = (performance.now() - t0) / 1000;
-      st.frame({ cam: { x: Math.sin(t * 0.013) * 160, y: Math.cos(t * 0.011) * 90, z: 0.55 }, t, stars: [] }, host.clientWidth, host.clientHeight);
-    }
-    timer = window.setTimeout(step, 100);
+  host.classList.add('orrery');
+  let key = '';
+  const paint = () => {
+    if (!c.isConnected) { removeEventListener('resize', onResize); return; }
+    const W = Math.max(1, host.clientWidth), H = Math.max(1, host.clientHeight), dpr = Math.min(2, devicePixelRatio || 1);
+    const k = `${W}x${H}@${dpr}`;
+    if (k === key) return;
+    key = k;
+    const bg = orreryBackdrop(W, H, dpr, 4471, { cx: W * 0.5, cy: H * 0.56, R: Math.hypot(W, H) * 0.43, sheen: true, falloff: 0.6 });
+    c.width = bg.width; c.height = bg.height;
+    c.getContext('2d')!.drawImage(bg, 0, 0);
   };
-  // the player switched Graphics on (or the context came back): start again
-  const off = onTableChange(() => { if (!c.isConnected) off(); else if (!timer) step(); });
-  step();
-  // leaving the lobby on the 2D table never steps again, so drop the listener when the canvas leaves the page
-  if (!host.classList.contains('gl')) {
-    const mo = new MutationObserver(() => { if (!c.isConnected) { off(); mo.disconnect(); } });
-    mo.observe(document.body, { childList: true, subtree: true });
-  }
+  let t = 0;
+  const onResize = () => { clearTimeout(t); t = window.setTimeout(paint, 120); };
+  addEventListener('resize', onResize);
+  requestAnimationFrame(paint);
 }
 
 function joinDialog(meta: GameMeta) {

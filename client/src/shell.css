@@ -268,9 +268,10 @@
 /* the bar shrinks its chips before it would run off the screen (touch tablets: 44px undo / preview make it wider) */
 .lay-mid .hud-bc > .strip, .lay-narrow .hud-bc > .strip { flex: 0 1 auto; min-width: 0; }
 .lay-mid .strip .slots, .lay-narrow .strip .slots { flex: 1 1 auto; min-width: 0; }
-.lay-mid .chip { flex: 0 1 auto; width: 6.5rem; min-width: 4.5rem; }
+.lay-mid .chip { flex: 0 1 auto; width: 6.5rem; min-width: 3.5rem; }
+/* (min-width 3.5rem, was 4.5: on iPad landscape the five slots no longer run under the free-changes chip) */
 .lay-narrow .chip { flex: 1 1 auto; width: 5.375rem; min-width: 3.25rem; }
-.lay-mid .chip.freec, .lay-narrow .chip.freec { flex: none; }
+.lay-mid .chip.freec, .lay-narrow .chip.freec { flex: none; min-width: 0; }
 .lay-mid .hud-bc > .prim, .lay-narrow .hud-bc > .prim { flex: none; }
 /* narrow chips stack icon over a two-line target ("Cryin / g…" side by side was unreadable) */
 .lay-narrow .chip, .lay-mid.touch .chip { height: 3.25rem; }

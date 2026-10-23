@@ -7,16 +7,18 @@ import { openGraphicsSettings } from './graphics.ts';
 import { CR } from '../../../shared/sim/court.ts';
 
 /** "Reading the map": the board's visual language, first in How to win (and in the lobby's How to play, help.ts). */
-export const MAP_INTRO = 'Everything on the board is either a territory, a star, a fleet piece, a battle, or an order line. Numbers appear only when you point at something: hover (or tap) a star for its defenders, a fleet for its strength, a battle for its odds. Zoom out for who owns what and where the armies are; zoom in for names, then the full tabletop.';
+export const MAP_INTRO = 'The board is an orrery: a black-enamel dial in a gold bezel. Everything on it is a territory, a star, a fleet piece, a battle, or an order line. Numbers appear only when you point at something: hover (or tap) a star for its defenders, a fleet for its strength, a battle for its odds. Zoom out for who owns what and where the armies are; zoom in for names, then the full tabletop.';
 export const MAP_LEGEND: [string, string][] = [
-  ['Coloured territory', 'who holds it.'],
-  ['Gold ring', 'a Crown, worth victory points each turn. <b>Double ring</b>: the Throne.'],
-  ['A counter or chevron beside a star', 'a fleet there; yours sit on the left.'],
-  ['A piece on a lane', 'a fleet travelling.'],
-  ['Crossed swords', 'a battle.'],
-  ['Dashed line with arrowhead', 'a planned move. <b>Reticle</b>: a planned attack.'],
-  ['Breathing rim', 'no orders. <b>Amber dashed rim</b>: out of supply.'],
-  ['Hatching', 'cut off. <b>Dashed ring</b>: contested.'],
+  ['House enamel inside a bronze wall', 'who holds it; the engraved hatch along the wall tells the house too (Azure slants down, Crimson up, Gilded crossed, the Warden upright).'],
+  ['A gem in a gold setting', 'a star; the stone tells the kind (citrine yellow, garnet red, sapphire blue, moonstone white, two stones a binary, a star sapphire a pulsar, onyx in a ring a black hole). <b>Grey pewter</b>: under fog.'],
+  ['Gold ring with pearls and a crown', 'a Crown, worth victory points each turn. <b>Grand double bezel</b>: the Throne, its centre in the holder\'s enamel.'],
+  ['Thin enamel rings round a gem', 'held unbroken for 3, 6 or 10 turns. <b>A clouded stone</b>: blockaded.'],
+  ['A chevron, a gold token or a figurine beside a star', 'a fleet there; yours sit on the left. <b>A black stud with a number</b>: fleets in the stack.'],
+  ['A piece on a lane', 'a fleet travelling. <b>Bright gold wire</b>: a lane that matters now.'],
+  ['A gold coin with crossed swords', 'a battle.'],
+  ['Enamel dashes with a head', 'a move. <b>Gold reticle</b>: an attack.'],
+  ['A turning ring of pearls', 'no orders. <b>Amber dashed rim</b>: out of supply.'],
+  ['Pale gold hatching', 'cut off. <b>A ring of gold and enamel segments</b>: contested. <b>A small flag</b>: occupied. <b>A coin with scales</b>: paying tribute.'],
 ];
 const mapRead = () => `<section class="hc map-read"><h3><span>◎</span>Reading the map</h3><p class="mr-intro">${MAP_INTRO}</p><ul class="mr-legend">${MAP_LEGEND.map(([k, v]) => `<li><b>${k}</b>: ${v}</li>`).join('')}</ul></section>`;
 

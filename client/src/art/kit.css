@@ -123,7 +123,7 @@
 }
 .k-btn.ghost { --rim: linear-gradient(transparent, transparent); background: transparent; box-shadow: none; color: var(--k-brass-300); }
 .k-btn.ghost::after, .k-btn.ghost::before { display: none; }
-.k-btn.ghost:hover { color: var(--k-brass-100); text-shadow: 0 0 0.6em rgba(255, 210, 140, 0.4); }
+.k-btn.ghost:hover { color: var(--k-brass-100); text-shadow: 0 1px 0 rgba(2, 2, 4, 0.85); }
 
 /* ------------------------------------------------------------------ the wax seal (Seal the turn) */
 .k-seal {

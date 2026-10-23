@@ -10,7 +10,9 @@ Living references in the repo:
 |---|---|
 | tokens in code | `client/src/art/bible.ts` |
 | tokens and the component kit in CSS | `client/src/art/kit.css` (the `.k-` classes) |
-| GL sky, coronas and post | `client/src/art/gl/` (`stage.ts`, `shaders.ts`, `core.ts`) |
+| **the board: the enamel and gold orrery (§13)** | `client/src/art/orrery.ts` (materials), `client/src/render/dial.ts` (the baked ground), `client/src/art/figurine.ts` (cast-metal minis), `client/src/art/orrery-bg.ts` (battle viewer and lobby) |
+| the Graphics tier | `client/src/art/gfx.ts` |
+| ~~GL sky, coronas and post~~ (retired from the game, §13.9; kept for the art lab only) | `client/src/art/gl/` (`stage.ts`, `shaders.ts`, `core.ts`) |
 | the lab: every recipe running | `client/art-lab.html` (`npm run dev`, then `/art-lab.html`; `?kit=1`, `?gl=0`, `?terr=neon`) |
 | audit screenshots, annotated | `/tmp/claude-0/art-audit/*.png` (raw captures in `raw/`) |
 | lab screenshots | `/tmp/claude-0/art-lab/*.png` |
@@ -128,7 +130,9 @@ They retire `#3fd0ff`, `#ff4f7b` and `#ffd23f`. `art/palette.ts` derives hull pa
 
 Deltas ("+18") use the semantic **text** colour at 80% size beside an ivory number. Never colour the number itself.
 
-### 2.5 Sky pigments (GL nebula)
+### 2.5 Sky pigments (GL nebula): RETIRED
+
+> Retired with the GL nebula (§13.9). The board's ground is now the orrery dial; its enamels are listed in §13.2.
 
 ink `#05060a`, deep `#0c1526`, umber `#6a3f26`, oxblood `#4e1a1e`, verdigris `#1c4848`, lamp-gold `#d9a256`.
 
@@ -192,7 +196,7 @@ The recipes below hold across media: CSS (chrome), Canvas2D (map, minis) and GLS
 - **Coronas, beams, bloom.** Only in GL or as additive sprites.
 - **Glass fill.** No `backdrop-filter`, no translucent white panels.
 
-### Starlight
+### Starlight (RETIRED on the board: stars are gems, §13.4)
 
 The painted sprite (`stars.ts`) is the body. The GL corona (`CORONA_FS`) adds:
 
@@ -207,6 +211,10 @@ It never adds hard 4-point toon sparkles.
 ---
 
 ## 4. Light and VFX
+
+> **The sky, star, corona, bloom and shade rows below are retired on the board** (§13.9). The map, the battle viewer
+> and the lobby draw no WebGL at all: the 2D renderer is the only renderer, and "light" on the board is the lamp's one
+> reflection and falloff over the glaze plus the pieces' cast shadows. The table stays for the art lab.
 
 | layer | what | how | cost (iPhone budget) |
 |---|---|---|---|
@@ -422,3 +430,128 @@ Other agents are editing the client now. Each wave is a separate PR touching the
 - `scripts/art-lab-shots.mjs`.
 - Re-capture `/tmp/claude-0/art-audit` and compare against §0.
 - On a real iPhone: `/art-lab.html` shows fps and ms. Target: ≤ 12 ms at medium.
+
+---
+
+## 13. The board: the enamel and gold orrery
+
+Chosen from the style exploration (`docs/STYLE-EXPLORE.md`, direction C) with three rules taken from A. It replaces
+the near-photoreal board (GL nebula, coronas, bloom, painted star sprites). The problem it fixes is value structure:
+the old sky spent the contrast the marks needed (Y up to 0.13 under the names, names at 1.1 to 2.3:1). The orrery's
+ground lives in a narrow, dark value band, and every mark owns the values above it.
+
+### 13.1 The three rules (from A)
+
+1. **Printed is flat, pieces are lit.** Names, lanes, routes, reticles, walls and hatching are cut in the glaze: flat
+   ink or gilt in a dark groove (`GROOVE`), no shadow. Only things that stand *on* the dial cast shadows down and to the
+   right from the one lamp (upper left): fleet tokens, figurines and their plinths, the battle coin, the tribute coin.
+2. **The hatch lives in the border band.** Each house's hatch (`HATCH` angle) is engraved under the enamel, faint over
+   the whole field and strong in a band along the wall (8 / 14 / 20 px at strategic / operational / detail). Spacing is
+   screen-constant (4.5 px), so the colour-blind cue reads at every tier.
+3. **Fog removes colour, never contrast.** A fogged region's enamel is desaturated (`saturation` blend, value kept);
+   a fogged star is a pewter stone in a silver collet; a fogged name is uncoloured ink (`FOG_INK`) at full value, never
+   faded.
+
+### 13.2 The ground (`render/dial.ts`)
+
+| layer | how |
+|---|---|
+| the room | black velvet `#060608`, the felt's tooth at 0.16 soft-light |
+| the dial | black enamel `#0a0b10` over the union of the regions, its shadow cast on the velvet |
+| nebulae | cloisonné fields: indigo `#10142c`, oxblood `#280e16`, verdigris `#0d2428`, umber `#2c1e10`, from an fbm density field (raised inside the map's real nebulae) contoured at three levels by marching squares, smoothed, filled even-odd; fine bronze wire (`rgba(150,116,60,.5)`, 0.9 px) where two enamels meet. **Vector, so edges never step.** |
+| guilloché | the crests of an engine-turned wave round the Throne, `rgba(112,94,64,.15)` |
+| brilliants | 700 pin-head stars set in the glaze |
+| territories | champlevé: the house `FIELD` enamel at 0.72 / 0.62 / 0.52 (strategic / operational / detail), a glaze gradient, the hatch (rule 2) |
+| walls | antique **bronze** `#d4b47a`, 2.4 px, in a cut groove, the house's lifted enamel catching inside. Never the bright gold. |
+| resting lanes | inlaid gold wire, `rgba(214,170,90,.42)` 1 px in a groove; dotted where an end is fogged |
+| lenses | economy tint, supply darkening, pale-gold cut-off hatching |
+| the bezel | polished gold round the dial with its degree scale engraved outside |
+
+Measured value range of the ground: Y 0.002 to 0.08.
+
+**Baking.** The ground is baked in world space in 512 px tiles, three zoom buckets an octave (a tile is never drawn
+more than ~12% off its baked scale, so the hatch stays within a hair of 4.5 px). A frame blits the visible tiles of the
+bucket it has. A new bucket (zoom) or new content (a capture, the fog moving, a lens) bakes a few tiles a frame inside
+a time budget (5 ms moving, 12 ms still, which also bakes the ring just off screen) and crossfades in (170 ms) once its
+view is complete. A small overview bake of the whole board stands under any tile not baked yet. A tile only touches the
+geometry whose bounding box reaches it, so its cost does not grow with the map. No zoom stalls.
+
+**The lamp** over the ground (under every mark): one broad soft reflection across the glaze (High only) and the room's
+falloff toward the edges, baked per viewport size.
+
+### 13.3 Gold is rationed
+
+Bright polished gold (`gold()` in `art/orrery.ts`, darkest stop Y 0.5) is for **objectives, lit lanes and pieces**
+only: crown and Throne settings, collets, the lit lane wire, counters, plinth rims, pins, the battle coin, the reticle.
+Walls are bronze; resting lanes are a dim gold wire. House colour on the dark is the enamel lifted (`HI`, for fields
+of colour) or brought toward ivory (`INK`, for lettering and fine lines: every house holds 4.5:1).
+
+### 13.4 Stars are gems (the stone tells the kind)
+
+| kind | stone |
+|---|---|
+| yellow | citrine |
+| red | garnet, larger |
+| blue | sapphire, small |
+| white | moonstone |
+| binary | citrine and sapphire on one gold bar |
+| pulsar | star sapphire, its asterism turning slowly, gold beam pins |
+| black hole | onyx inside a gold orbit ring that crosses in front, a gold bead riding it |
+| the Throne | a repoussé gold sun boss with the crown struck in it; held, its centre is fired in the holder's enamel |
+| fogged | pewter in a silver collet |
+
+Each is a cabochon in a gold collet with a cut groove round it, lit from the lamp (a specular dab never under a pixel).
+**No bloom, lens crosses, coronas or twinkles.** Crowns wear a gold ring with pearl milgrain and a gold crown; the
+Throne a grand double bezel (the inner ring in the holder's enamel) with the lamp's glint walking slowly round it.
+Tenure: one thin enamel ring in the holder's colour per tier, round the collet. Blockade: the stone clouds over.
+At detail zoom the system is an orrery: engraved gold tracks, arms from the hub, bodies as small cabochons (gas,
+ice, lava, ocean, garden, rock), a belt as gold granules, a station as a gold lozenge.
+
+### 13.5 Pieces
+
+- **Strategic pip:** a house-enamel chevron in a gold keyline, in an opaque groove.
+- **Operational counter:** a struck gold token, the domed house enamel inside, the heading as an ivory chevron; shadow.
+- **Detail figurine:** the game's own sculpts (`ships.ts`) gradient-mapped to the house metal (Azure silver, Crimson
+  red-gold, Gilded gold, the Warden violet-silver), the strongly painted lacquer kept as enamel; on gold pins over a
+  black-enamel plinth with a gold rim and a band of house enamel. Silhouettes unchanged. A limping fleet lists on its
+  pins; a picked-up piece lifts 4 px and its shadow widens. Metal bakes are spread over frames (a few a frame).
+- **Status:** idle = a slowly turning ring of pearls; out of supply = amber dashes; exposed = cinnabar; lurking = pale
+  dashes; each in a groove. Stack count = a black-enamel stud with a gold rim. Strength (selected) = gold sword and
+  ivory figure. Posture and dug-in marks are black studs in gold.
+- **Battle:** a gold coin with cinnabar enamel and gold crossed swords, over the star's setting. Up close the pieces
+  exchange flat enamel bolts with ivory heads; impacts are gold beads.
+
+### 13.6 Marks
+
+Contested: a ring of twelve segments, gold and the space-holder's ink. Occupied: a small gold staff with the
+occupier's flag, lower right. Tribute: a gold coin struck with the scales, rimmed in the receiver's enamel, lower
+left. Routes and planned orders: the house's ink dashes in a groove, a gilt-keyed head; rivals' routes have shorter
+dashes (never fainter). Seize: a gold reticle with the attacker's ink inside. Lit lanes: bright gold wire in a groove.
+Selection: a pale-gold wall inside the region. Reach while dragging: the region's wall gilt in the verb's colour.
+
+### 13.7 Readability (measured)
+
+`scripts/orrery-contrast.mjs` measures the live board (`MapRenderer.measureContrast()`, the method of
+STYLE-EXPLORE §2) at every tier, on a battle and the most crowded star, with and without a selection, on 1440, 2560,
+iPad and phone, on a mid-game and a turn-1 (fogged) board. Target: no indicator under 4.5:1 (resting lanes are quiet
+by design and reported apart). Keep it as the regression test.
+
+### 13.8 The battle viewer and the lobby
+
+The same dial, closer (`art/orrery-bg.ts`): velvet, the black enamel with cloisonné and guilloché, the gold bezel with
+pearls and its degree scale, the sides' enamels inlaid inside the bezel in the viewer; baked once per size. The lobby
+needs no frames at all.
+
+### 13.9 Graphics setting, and what retired
+
+`art/gfx.ts`: **Auto** (High, stepping down to Low after ~2 s of frames over 22 ms), **High** (figurines at full device
+resolution, soft shadows, the lamp's reflection, the ground baked at up to 3x), **Low** (figurines at up to 1.5x, plain
+shadows, no reflection, the ground baked at up to 1.5x). Old values read as High (`medium`) or Low (`off`, `?gl=0`).
+
+**Retired on the board:** the WebGL table (`art/gl/table.ts` deleted; `stage.ts`, `shaders.ts`, `core.ts` stay for
+the art lab only), the domain-warped nebula, the Hubble dust map, star coronas, bloom, lens crosses and anamorphic
+streaks, the GL lamp beam and motes, film grain on the board, the painted star sprites and twinkles on the map
+(`stars.ts` still serves the art lab and `starKindOf`), the printed 2D nebula and starfield (`mat.ts`), the acrylic
+bases on the map (`minis.ts` drawBase stays for the battle viewer). §2.5, §3 Starlight and the sky rows of §4 are
+history.
+

@@ -1,7 +1,7 @@
 # Three Crowns: one art style for the map (style exploration)
 
-Status: exploration only. Nothing is wired into the game. All the work is in new files (listed at the end), and
-`npx tsc --noEmit -p .` is clean.
+Status: **direction C (with A's three rules) is adopted and integrated into the live game**; see docs/ART-BIBLE.md §13.
+What follows is the exploration as it was run (the style lab files are unchanged).
 
 **What's here**
 - `compare-strategic.png`, `compare-operational.png`, `compare-detail.png`: the **current look** next to directions

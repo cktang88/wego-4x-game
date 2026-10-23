@@ -1,8 +1,8 @@
-// Graphics settings: the table's light (art/gl/table.ts) at auto / high / medium / low / off. A small brass-and-steel
-// dialog beside Sound (lobby, Help) and a row in Tweaks; the choice is saved in this browser.
+// Graphics settings: the board's quality tier (art/gfx.ts) at auto / high / low. A small brass-and-steel dialog beside
+// Sound (lobby, Help) and a row in Tweaks; the choice is saved in this browser.
 import { esc, overlay } from './dom.ts';
 import { ic } from '../art/icons.ts';
-import { GFX_OPTIONS, gfxSetting, gfxStatus, setGfxSetting, onTableChange, type GfxSetting } from '../art/gl/table.ts';
+import { GFX_OPTIONS, gfxSetting, gfxStatus, setGfxSetting, onGfxChange, type GfxSetting } from '../art/gfx.ts';
 
 /** The segmented control on its own (Tweaks embeds it). */
 export function graphicsPanel(): HTMLElement {
@@ -25,14 +25,14 @@ export function graphicsPanel(): HTMLElement {
     el.querySelector<HTMLButtonElement>(`[data-gfx="${b.dataset.gfx}"]`)?.focus();
   });
   // the governor may step the tier down while the dialog is open
-  const off = onTableChange(() => { const s = el.querySelector('[data-gfx-status]'); if (s) s.textContent = gfxStatus(); else off(); });
+  const off = onGfxChange(() => { const s = el.querySelector('[data-gfx-status]'); if (s) s.textContent = gfxStatus(); else off(); });
   return el;
 }
 
 export function openGraphicsSettings(): HTMLElement {
   document.querySelector('.overlay .gfx-dlg')?.closest('.overlay')?.remove();
   const o = overlay(`<div class="dialog gfx-dlg" role="dialog" aria-label="Graphics"><h2><i>${ic('star')}</i>Graphics</h2>
-    <p class="k-prose gfx-lede">The living sky, the lamp and its dust, the coronas on the stars. Lower it if the board stutters.</p>
+    <p class="k-prose gfx-lede">How finely the figurines are cast, their shadows, and the lamp on the glaze. Lower it if the board stutters.</p>
     <div data-gfx-host></div><p class="snd-foot">Saved in this browser.</p></div>`);
   o.querySelector('[data-gfx-host]')!.appendChild(graphicsPanel());
   return o;
