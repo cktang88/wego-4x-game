@@ -214,8 +214,13 @@ function lobbyTable(host: HTMLElement) {
     timer = window.setTimeout(step, 100);
   };
   // the player switched Graphics on (or the context came back): start again
-  const off = onTableChange(() => { if (!timer && c.isConnected) step(); });
+  const off = onTableChange(() => { if (!c.isConnected) off(); else if (!timer) step(); });
   step();
+  // leaving the lobby on the 2D table never steps again, so drop the listener when the canvas leaves the page
+  if (!host.classList.contains('gl')) {
+    const mo = new MutationObserver(() => { if (!c.isConnected) { off(); mo.disconnect(); } });
+    mo.observe(document.body, { childList: true, subtree: true });
+  }
 }
 
 function joinDialog(meta: GameMeta) {

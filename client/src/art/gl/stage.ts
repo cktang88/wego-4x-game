@@ -44,6 +44,10 @@ export interface StageFrame {
   stars?: CoronaStar[];
   /** the 2D board to bloom (downscaled each frame); omit for no bloom */
   bloomSrc?: HTMLCanvasElement | null;
+  /** the caller's real frame interval in ms, for the quality governor. A caller that draws the stage only every
+   *  2nd or 3rd frame on purpose (a paced still board) must pass it: the gap between stage frames is not its frame
+   *  time. Without it, gaps over 50 ms (a timer-driven or paced caller) are not counted as slow frames. */
+  dt?: number;
 }
 
 export interface StageOptions {
@@ -316,6 +320,10 @@ export class ArtStage {
   quality: Quality;
   toggles: StageToggles;
   lost = false;
+  /** layers whose context is lost now / was lost since the layers were last built */
+  private lostSet = new Set<HTMLCanvasElement>();
+  private stale = new Set<HTMLCanvasElement>();
+  private disposed = false;
   private reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   private U: UnderLayer | null; private L: LightLayer | null; private S: ShadeLayer | null;
   private w = 0; private h = 0; private dpr = 1;
@@ -332,9 +340,12 @@ export class ArtStage {
     this.seed = o.seed ?? 7;
     this.onChange = o.onChange;
     this.fixed = !!o.fixedQuality;
+    // each layer has its own context: a GPU reset loses all three and the browser restores them one at a time, so
+    // the stage stays lost until none is, and only the layers that were lost are rebuilt (the others keep their
+    // programs and textures: rebuilding them leaked a set per loss)
     for (const c of [under, light, shade]) {
-      c.addEventListener('webglcontextlost', e => { e.preventDefault(); this.setLost(true); });
-      c.addEventListener('webglcontextrestored', () => this.restore());
+      c.addEventListener('webglcontextlost', e => { e.preventDefault(); this.lostSet.add(c); this.stale.add(c); this.setLost(true); });
+      c.addEventListener('webglcontextrestored', () => { this.lostSet.delete(c); this.restore(); });
     }
   }
 
@@ -364,6 +375,7 @@ export class ArtStage {
   unmount() { this.under.remove(); this.light.remove(); this.shade.remove(); }
 
   dispose() {
+    this.disposed = true; this.onChange = undefined;
     this.unmount();
     this.U?.dispose(); this.L?.dispose();
     for (const c of [this.under, this.light, this.shade]) (c.getContext('webgl2') as GL | null)?.getExtension('WEBGL_lose_context')?.loseContext();
@@ -387,8 +399,11 @@ export class ArtStage {
   }
 
   private restore() {
-    const U = UnderLayer.create(this.under), L = LightLayer.create(this.light), S = ShadeLayer.create(this.shade);
-    if (U && L && S) { this.U = U; this.L = L; this.S = S; this.w = 0; this.setLost(false); }
+    if (this.lostSet.size || this.disposed) return;
+    const U = this.stale.has(this.under) ? UnderLayer.create(this.under) : this.U;
+    const L = this.stale.has(this.light) ? LightLayer.create(this.light) : this.L;
+    const S = this.stale.has(this.shade) ? ShadeLayer.create(this.shade) : this.S;
+    if (U && L && S) { this.U = U; this.L = L; this.S = S; this.stale.clear(); this.w = 0; this.setLost(false); }
   }
 
   private resize(w: number, h: number) {
@@ -403,9 +418,12 @@ export class ArtStage {
   }
 
   /** The governor: EMA of frame time; 2s over 21ms steps down one tier. Never steps up on its own. */
-  private govern(now: number) {
-    if (this.lastT) {
-      const dt = Math.min(100, now - this.lastT);
+  private govern(now: number, frameDt?: number) {
+    // a paced caller (every 2nd/3rd frame on a still board) or the lobby's 10 fps timer looked like a slow device:
+    // an idle board stepped Auto down to low within seconds and it never came back up
+    const gap = now - this.lastT;
+    if (this.lastT && (frameDt !== undefined || gap <= 50)) {
+      const dt = Math.min(100, frameDt ?? gap);
       this.ema += (dt - this.ema) * 0.05;
       if (this.ema > 21) { this.slowFor += dt; this.fastFor = 0; } else { this.fastFor += dt; this.slowFor = 0; }
       if (!this.fixed && this.slowFor > 2000) {
@@ -420,7 +438,7 @@ export class ArtStage {
   /** Draw one frame. w/h: the viewport in CSS px (the 2D canvas's client size). */
   frame(f: StageFrame, w: number, h: number) {
     if (this.lost || !this.U || !this.L || !this.S) return;
-    this.govern(performance.now());
+    this.govern(performance.now(), f.dt);
     this.resize(w, h);
     const q = TIERS[this.quality], tg = this.toggles;
     // reduced motion: the sky, motes, twinkle and coronas hold still (state changes still show)

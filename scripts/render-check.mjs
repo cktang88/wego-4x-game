@@ -256,11 +256,12 @@ async function v2MapTests(label, dev) {
     m.cam.z = 95 / med; await step(); await step();
     rebuilds = 0; await step(); await step();
     if (rebuilds) fail(`static layer rebuilt while idle (${rebuilds})`);
-    // ---- lenses / peek / selection rebuild the static layer and draw without errors
-    for (const o of [{ lens: 'supply' }, { lens: 'economy' }, { lens: 'military' }, { peek: true }, { selRegion: s.engagements[0]?.region ?? 0 }, {}]) {
+    // ---- lenses / peek rebuild the static layer; a selection lives in the dynamic pass (no rebuild); all draw cleanly
+    for (const o of [{ lens: 'supply' }, { lens: 'economy' }, { lens: 'military' }, { peek: true }, {}, { selRegion: s.engagements[0]?.region ?? 0 }]) {
       rebuilds = 0; H.opts = o; await step();
-      if (!rebuilds) fail(`no rebuild for ${JSON.stringify(o)}`);
+      if (!rebuilds && !o.selRegion) fail(`no rebuild for ${JSON.stringify(o)}`);
     }
+    H.opts = {}; await step();
     // ---- tokens: one per owner per region, every visible fleet is in exactly one token, tokenAt finds each
     for (const [tier, Rs] of [['strategic', 55], ['operational', 95], ['detail', 230]]) {
       m.cam.z = Rs / med; H.opts = {}; await step(); await step();
@@ -280,7 +281,9 @@ async function v2MapTests(label, dev) {
         if (!got || got.region !== h.hit.region || got.owner !== h.hit.owner) fail(`${tier}: tokenAt(${k}) -> ${JSON.stringify(got)}`);
         const tp = m.tokenScreenPos(h.hit.region, h.hit.owner);
         if (!Number.isFinite(tp.x) || !Number.isFinite(tp.y)) fail('tokenScreenPos NaN');
-        const near = m.tokenAt(p.x + 15, p.y + 4);
+        // 15 px off the piece, on its far side from its star (a press on the star's own centre picks the star)
+        const sr = st.regions[h.hit.region], ss = sr ? m.toScreen(sr.site) : p, side = p.x < ss.x ? -1 : 1;
+        const near = m.tokenAt(p.x + 15 * side, p.y + 4);
         if (!near) fail(`${tier}: tokenAt radius < 15px for ${k}`);
       }
       // banners hit-test to their own region

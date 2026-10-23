@@ -318,10 +318,11 @@ function resize() {
   const r = board.getBoundingClientRect();
   dpr = Math.min(2, window.devicePixelRatio || 1);
   if (r.width === w && r.height === h && mapCanvas.width === Math.round(r.width * dpr)) return;
+  const first = !w;
   w = r.width; h = r.height;
   mapCanvas.width = Math.round(w * dpr); mapCanvas.height = Math.round(h * dpr);
-  // fit the board on first layout
-  cam.z = Math.min(w / 2300, h / 1500) * (w < 600 ? 1.55 : 1);
+  // fit the board on first layout (a later resize or rotation keeps the player's zoom)
+  if (first) cam.z = Math.min(w / 2300, h / 1500) * (w < 600 ? 1.55 : 1);
   bg2d = null;
 }
 window.addEventListener('resize', resize);
@@ -348,7 +349,7 @@ const haze = stage ? null : nebulaPrint(B.bounds.minX, B.bounds.minY, B.bounds.m
 const toScreen = (x: number, y: number) => ({ x: (x - cam.x) * cam.z + w / 2, y: (y - cam.y) * cam.z + h / 2 });
 const tFreeze = Q.get('t') !== null ? Number(Q.get('t')) : null;
 const t0 = performance.now();
-let frames = 0, fpsT = performance.now();
+let frames = 0, fpsT = performance.now(), lastDraw = 0;
 
 function draw(now: number) {
   resize();
@@ -356,7 +357,9 @@ function draw(now: number) {
   if (local.drift && tFreeze === null && now - interacted > 2500) { cam.x += Math.sin(t * 0.05) * 0.22; cam.y += Math.cos(t * 0.037) * 0.14; }
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, w, h);
-  if (!stage) {
+  // the 2D table also stands in while the stage's context is lost (it was a black board until it came back)
+  const flat = !stage || stage.lost;
+  if (flat) {
     bg2d ??= { mat: matBackdrop(w, h), stars: starfield(w, h, 4242), lamp: lampOverlay(w, h) };
     g.drawImage(bg2d.mat, 0, 0, w, h);
     g.globalAlpha = 0.8; g.drawImage(bg2d.stars, 0, 0, w, h); g.globalAlpha = 1;
@@ -409,9 +412,10 @@ function draw(now: number) {
       drawShip(g, p.x + ox, p.y + oy - L * 0.25 + bob, L * (i === 0 ? 1 : 0.7), L * dpr, c, SEAT[f.house], team, f.ang, { shadow: { dx: 4, dy: 7, alpha: 0.5 }, engine: 0.6 });
     });
   }
-  if (!stage && bg2d) g.drawImage(bg2d.lamp, 0, 0, w, h);
+  if (flat && bg2d) g.drawImage(bg2d.lamp, 0, 0, w, h);
 
-  stage?.frame({ cam, t, stars: coronas, bloomSrc: mapCanvas }, w, h);
+  stage?.frame({ cam, t, stars: coronas, bloomSrc: mapCanvas, dt: lastDraw ? now - lastDraw : undefined }, w, h);
+  lastDraw = now;
 
   frames++;
   if (now - fpsT > 500) {

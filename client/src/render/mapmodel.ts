@@ -261,6 +261,12 @@ export function empireLabels(st: GameState, owners: (number | null)[]): { owner:
     const mid = { x: ax / aw, y: ay / aw };
     const cands: Pt[] = [mid, ...best.map(r => r.centroid)];
     for (const r of best) for (const n of r.neighbors) if (best.some(b => b.id === n)) { const o = st.regions[n]; cands.push({ x: (r.centroid.x + o.centroid.x) / 2, y: (r.centroid.y + o.centroid.y) / 2 }); }
+    // a small block (a capital alone at the start): its centroid is its star, so the name sat on the star and the
+    // fleets parked beside it; offer points half-way out toward its rim too
+    if (best.length <= 3) for (const r of best) r.poly.forEach((v, i) => {
+      const w = r.poly[(i + 1) % r.poly.length];
+      cands.push({ x: (r.site.x + v.x) / 2, y: (r.site.y + v.y) / 2 }, { x: r.site.x + ((v.x + w.x) / 2 - r.site.x) * 0.5, y: r.site.y + ((v.y + w.y) / 2 - r.site.y) * 0.5 });
+    });
     const sites = st.regions.filter(r => !isLane(r)).map(r => r.site);
     let p = mid, bestScore = -Infinity;
     for (const c of cands) {

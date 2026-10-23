@@ -142,5 +142,5 @@ function twoWay(): BattleReport {
 const params = new URLSearchParams(location.search);
 document.getElementById('open3')!.onclick = () => openBattleViewer(threeWay(), ctx);
 document.getElementById('open2')!.onclick = () => openBattleViewer(twoWay(), ctx);
-(window as unknown as { __bv: unknown }).__bv = { threeWay, twoWay, ctx, openBattleViewer };
+(window as unknown as { __bv: unknown }).__bv = { threeWay, twoWay, ctx, openBattleViewer, buildReport };
 if (params.get('mode') !== 'none') openBattleViewer(params.get('mode') === '2' ? twoWay() : threeWay(), ctx);

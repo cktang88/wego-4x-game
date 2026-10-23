@@ -396,7 +396,16 @@ export class MapRenderer {
       const score = inBox ? Math.min(d, 8) : d;
       if (score < bd) { bd = score; best = h; }
     }
-    return best ? { ...best.hit, fleetIds: best.hit.fleetIds.slice() } : null;
+    if (!best) return null;
+    // zoomed out, a parked piece sits ~20 px from its star and its hit circle covers the star itself: a press on the
+    // star's own centre is meant for the star (tapping your capital picked the fleet beside it on phones)
+    const r = this.lastState?.regions[best.hit.region];
+    if (r && !isLane(r)) {
+      const s = this.toScreen(r.site), c = this.toScreen(best);
+      const dStar = Math.hypot(sx - s.x, sy - s.y), dTok = Math.hypot(sx - c.x, sy - c.y);
+      if (dStar < dTok && dStar <= 10 * this.ui) return null;
+    }
+    return { ...best.hit, fleetIds: best.hit.fleetIds.slice() };
   }
 
   /** The region whose banner (garrison cap / name plate / strategic plate) is under screen point (sx, sy). */
@@ -468,7 +477,9 @@ export class MapRenderer {
     const W = this.canvas.width, H = this.canvas.height;
     if (!W || !H) return;
     // the battle viewer covers the whole screen: keep the last frame instead of animating the map underneath it
-    if (battleViewerOpen() && this.layer && this.layerKey) return;
+    // (also after an invalidate: a redraw here would take the shared GL table back from the open viewer, e.g. when the
+    // governor changes tier mid-battle, leaving the fight on a black stage; the board redraws once the viewer closes)
+    if (battleViewerOpen() && this.layer) return;
     const now = I.now;
     this.dt = this.lastNow ? Math.min(100, Math.max(0, now - this.lastNow)) : 16;
     this.lastNow = now; this.now = now;
@@ -516,6 +527,14 @@ export class MapRenderer {
         if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
         const x = c.getContext('2d')!;
         x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, W, H); x.drawImage(this.layer, 0, 0);
+        // feather its edges: zooming out shrinks the snapshot inside the view, and a hard rectangle showed there
+        x.globalCompositeOperation = 'destination-out';
+        const fw = Math.round(Math.min(W, H) * 0.12);
+        for (const [x0, y0, x1, y1, rx, ry, rw, rh] of [[0, 0, fw, 0, 0, 0, fw, H], [W, 0, W - fw, 0, W - fw, 0, fw, H], [0, 0, 0, fw, 0, 0, W, fw], [0, H, 0, H - fw, 0, H - fw, W, fw]]) {
+          const gr = x.createLinearGradient(x0, y0, x1, y1); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+          x.fillStyle = gr; x.fillRect(rx, ry, rw, rh);
+        }
+        x.globalCompositeOperation = 'source-over';
         this.fade = { c, cam: { ...lc }, t0: now };
       }
       const main = this.ctx;
@@ -548,9 +567,10 @@ export class MapRenderer {
     }
     if (this.fade) {
       const t = (now - this.fade.t0) / FADE_MS;
-      // the snapshot was rendered at its own camera: once a flight pans or zooms out past it, it no longer covers
-      // the screen and its edges would show as a rectangle (seen during reveal push-ins): drop the crossfade then
-      if (t >= 1 || !covers(this.fade.cam, 0)) this.fade = null;
+      // the snapshot was rendered at its own camera: zooming out, it no longer covers the view (dropping it there
+      // meant no crossfade at all on a zoom-out tier switch); its feathered edges let it fade in place instead.
+      // A snapshot shrunk under half the view (a long flight) is dropped.
+      if (t >= 1 || cam.z / this.fade.cam.z < 0.5) this.fade = null;
       else { ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0); this.blitAt(this.fade.c, this.fade.cam, 1 - easeOutCubic(clamp01(t))); }
     }
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -585,7 +605,7 @@ export class MapRenderer {
       const ck = `${cam.x},${cam.y},${cam.z},${this.w},${this.h}`;
       const busy = ck !== this.stageCam || moving || !!this.fade || this.particles.length > 0 || I.fx.length > 0 || !!I.drag;
       this.stageCam = ck;
-      if (this.pacer.tick(busy)) this.stage.frame({ cam, t: now / 1000, stars: this.coronas, bloomSrc: this.canvas }, this.w, this.h);
+      if (this.pacer.tick(busy)) this.stage.frame({ cam, t: now / 1000, stars: this.coronas, bloomSrc: this.canvas, dt: this.dt }, this.w, this.h);
     }
   }
 
@@ -2447,6 +2467,8 @@ export class MapRenderer {
    *  The renderer owns it because it knows what is drawn where; it reuses the shell's `.uxtip` look. */
   private tipEl: HTMLDivElement | null = null;
   private tipKey = '';
+  /** the last tap, in world units: a tap often selects and the camera then glides, so the tip stays with what was
+   *  tapped (a screen point would describe whatever slid under the finger: another star, or empty space) */
   private tapAt: { x: number; y: number; until: number } | null = null;
   private tipCand = { key: '', t: 0 };
   private quietUntil = 0;
@@ -2463,13 +2485,13 @@ export class MapRenderer {
       this.downAt = null;
       if (!d || e.pointerType === 'mouse') return;
       const p = local(e);
-      if (performance.now() - d.t < 450 && Math.hypot(p.x - d.x, p.y - d.y) < 12) this.tapAt = { ...p, until: performance.now() + 3500 };
+      if (performance.now() - d.t < 450 && Math.hypot(p.x - d.x, p.y - d.y) < 12) this.tapAt = { ...this.toWorld(p.x, p.y), until: performance.now() + 3500 };
     }, { passive: true });
     c.addEventListener('pointercancel', () => { this.downAt = null; this.tapAt = null; }, { passive: true });
   }
 
   private updateTip(I: DrawInput) {
-    const tapping = this.tapAt && performance.now() < this.tapAt.until ? this.tapAt : null;
+    const tapping = this.tapAt && performance.now() < this.tapAt.until ? this.toScreen(this.tapAt) : null;
     const pt = this.mouse ?? tapping;
     // quiet while dragging, while the selected fleet previews an order (the shell's preview card speaks then), just
     // after a drop (the shell may pop an offer there), and until the mouse has rested on a mark for a moment

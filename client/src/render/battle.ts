@@ -14,7 +14,7 @@ import { fbm2, rand as artRand, mix as artMix, css as artCss, rgb as artRgb } fr
 import { drawStructure } from '../art/structures.ts';
 import { uiScale } from '../ui/dom.ts';
 import { iconizeDom, iconizeHtml, ic, drawIcon, fillIconText } from '../art/icons.ts';
-import { tableFor, releaseTable, Pacer } from '../art/gl/table.ts';
+import { tableFor, releaseTable, onTableChange, Pacer } from '../art/gl/table.ts';
 import { enamel, retint, SEMANTIC } from '../art/bible.ts';
 // the art bible's tokens and kit (battle-demo.html loads the viewer without the app's stylesheets)
 import '../art/kit.css';
@@ -596,7 +596,15 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   const g = canvas.getContext('2d')!;
   let bg: HTMLCanvasElement | null = null;
   /** the shared GL table (sky, lamp, coronas, grain) moved under this viewer while it is open; null = 2D table */
-  const table = tableFor(canvas, Math.abs(report.id * 131 + report.region * 7) % 100000);
+  const tableSeed = Math.abs(report.id * 131 + report.region * 7) % 100000;
+  let table = tableFor(canvas, tableSeed);
+  // the table can lose its GL context (or get it back, or be switched off) while the viewer is open: re-check it, so
+  // the fight never plays over a hidden sky (black) and a restored sky is not covered by the 2D backdrop
+  const offTable = onTableChange(() => {
+    if (closed) return;
+    const t = tableFor(canvas, tableSeed);
+    if (t !== table) { table = t; if (W) buildBg(); }
+  });
   const pacer = new Pacer();
   let farDist = 800;
 
@@ -1520,6 +1528,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
 
   let camK = 1, camX = 0, camY = 0;
   let slowFired = false, slowUntil = 0, slowFrom = 0;
+  /** the real interval of this animation frame (ms), for the GL table's quality governor */
+  let frameMs = 16.7;
   function camera(tt: number) {
     if (reduced) { camK = 1; camX = 0; camY = 0; return; }
     let k = 1 + 0.045 * clamp((tt - INTRO) / Math.max(1, BATTLE_END - INTRO));
@@ -1579,7 +1589,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     drawHover(tt);
     if (table) {
       // the same table, closer: the board's sky pushed in with the battle's camera; the lamp, motes and grain over it
-      if (pacer.tick(playing)) table.frame({ cam: { x: (report.region % 13) * 90 - camX * 0.4, y: (report.id % 7) * 60 - camY * 0.4, z: 1.1 * camK }, t: performance.now() / 1000, stars: [], bloomSrc: canvas }, W, H);
+      if (pacer.tick(playing)) table.frame({ cam: { x: (report.region % 13) * 90 - camX * 0.4, y: (report.id % 7) * 60 - camY * 0.4, z: 1.1 * camK }, t: performance.now() / 1000, stars: [], bloomSrc: canvas, dt: frameMs }, W, H);
       return;
     }
     // vignette (the 2D table)
@@ -1634,8 +1644,11 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     // removed from the DOM by someone else (route change): stop the loop and drop listeners
     if (!overlay.isConnected) { close(); return; }
     const dt = Math.min(0.1, (now - last) / 1000);
+    frameMs = now - last;
     last = now;
-    if (playing) {
+    // while the scrubber is held the playhead stays under the finger: playing on between pointer moves ran it ahead
+    // of the thumb, played shot sounds mid-scrub and could set off the decisive slow-mo from a seek
+    if (playing && !dragging) {
       const prevT = T;
       // the decisive volley: 600 ms (real time) at 0.35x, starting just before its impact; only when the playhead
       // runs into it (never on a seek), once per battle. Time only slows: no number, hit or outcome changes.
@@ -1710,6 +1723,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   bar.addEventListener('pointermove', e => { if (dragging) barSeek(e); });
   bar.addEventListener('pointerup', () => { dragging = false; });
   bar.addEventListener('pointercancel', () => { dragging = false; });
+  bar.addEventListener('lostpointercapture', () => { dragging = false; });
   const setMouse = (e: PointerEvent) => {
     const r = canvas.getBoundingClientRect();
     // map to layout px (the panel may still be scaled by its open/close animation)
@@ -1729,6 +1743,7 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     cancelAnimationFrame(raf);
     ro.disconnect();
     // hand the table back: the map mounts it again on its next frame
+    offTable();
     releaseTable(canvas);
     window.removeEventListener('keydown', onKey, true);
     // fade out (renamed so nothing treats it as an open viewer any more), unless it was already taken out of the page
