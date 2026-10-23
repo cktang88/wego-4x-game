@@ -17,6 +17,7 @@ import { bannerSvg } from '../art/sigils.ts';
 import { fleetPortrait, portraitTag } from './portrait.ts';
 import { postureStatus, fleetGambit, sigAction, toggleGambit, betPeek, resetSignature } from './signature.ts';
 import { tributeAction, roleKey, paintArt, artPeek, resetSystems } from './systems.ts';
+import { courtAction } from './court.ts';
 import { ownWorld, foreignWorld, tabOf, setWorldTab, toggleLocks, toggleTrack, intoNext, buildInto, hullPeek, trackPeek, resetWorldCard, type WorldTab } from './worldcard.ts';
 import { paintMinis } from '../ui/ship-plinth.ts';
 import { ic } from '../art/icons.ts';
@@ -427,6 +428,7 @@ export function cardAction(g: GameScreen, a: string, data: DOMStringMap, shift =
   if (a === 'intonext' && sel.kind === 'region') { intoNext(g, sel.id); g.renderAll(); return; }
   if (a === 'research') { g.openModal('empire', 'research'); return; }
   if (a === 'record' && soulAction(g, a, data)) return;
+  if (courtAction(g, a, data)) return;
   if (g.canPlan && (sigAction(g, a, data) || soulAction(g, a, data) || tributeAction(g, a))) return;
   if (a === 'fleet') { g.select({ kind: 'fleet', id: Number(data.id) }); return; }
   if (a === 'sib' && sel.kind === 'fleet') {

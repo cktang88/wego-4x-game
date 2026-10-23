@@ -29,6 +29,8 @@ import { Teach } from './hud/onboarding.ts';
 import { fmtDur, shortWhy, typing, safeInsets } from './hud/util.ts';
 import { intentFor, commitIntent, type Intent } from './hud/verbs.ts';
 import { applyFoundingVows } from './hud/soul.ts';
+import { courtCheck, refreshCourt, courtFreeText } from './hud/court.ts';
+import { exileOf } from '../../shared/sim/court.ts';
 import { postureMap } from './hud/signature.ts';
 import { FATE_USES, POSTURES, WORLD_POSTURES } from '../../shared/config/content.ts';
 import { maybeHerald, openHerald, heraldOpen, closeHerald } from './ui/herald.ts';
@@ -539,7 +541,7 @@ export class GameScreen {
   planBlock(): string | null {
     if (this.you === null) return 'You are spectating.';
     if (this.st.winner !== null) return 'The game is over.';
-    if (this.st.players[this.you]?.eliminated) return 'You have been eliminated.';
+    if (this.st.players[this.you]?.eliminated) return this.st.court && exileOf(this.st, this.you) ? 'You are in exile: you may only whisper.' : 'You have been eliminated.';
     if (!this.live && this.submitted) return 'Your orders are sealed. Unseal them to make changes.';
     return null;
   }
@@ -919,6 +921,7 @@ export class GameScreen {
       case 'raze': return `Raze ${this.st.regions[x.region]?.name ?? '?'}`;
       case 'dispatch': return `Dispatch: “${x.text.slice(0, 40)}”`;
       case 'tribute': return `${x.accept ? 'Accept terms over' : 'Offer terms over'} ${this.st.regions[x.region]?.name ?? '?'}`;
+      case 'captive': case 'ransom': case 'decree': case 'exile': return courtFreeText(this, x) ?? x.type;
       default: return empireFreeText(x, cls => this.st.rules.ships[cls]?.name ?? cls) ?? (x as { type: string }).type;
     }
   }
@@ -1525,6 +1528,7 @@ export class GameScreen {
     // the Reckoning ribbon never sits over a card's or a modal's controls
     if (this.sel || this.hud.modalOpen()) this.reck.dismiss();
     this.hud.render();
+    refreshCourt(this);
     this.teach?.update();
     this.tipCheck();
     this.hud.refreshModal();
@@ -1631,7 +1635,8 @@ export class GameScreen {
   /** Open the Herald if a new edition is waiting and nothing else is on screen (start of a turn / cycle). */
   heraldCheck() {
     if (this.destroyed || this.curtain || this.blockingReplay || this.hud.modalOpen() || document.querySelector('.overlay, .bv-overlay')) return;
-    maybeHerald(this);
+    // a new coronation's decree opens after the Herald (once per coronation and seat)
+    if (!maybeHerald(this) && !heraldOpen()) courtCheck(this);
   }
   onKey = (e: KeyboardEvent) => {
     if (this.destroyed || e.defaultPrevented) return;

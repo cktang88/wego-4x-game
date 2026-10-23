@@ -22,6 +22,7 @@ import { ic, icFor } from '../art/icons.ts';
 import { bannerSvg } from '../art/sigils.ts';
 import { sysArt, sysLine, garrisonPlate, ribbon, faceYield, storyBodies, termsPrompt, termsOffer, growthLine } from './systems.ts';
 import { epithetOf, callingLine, callingPrompt, razePrompt, purgePrompt, storyWorld, bannersLeft } from './soul.ts';
+import { courtFace } from './court.ts';
 import { worldGambit } from './signature.ts';
 import { suggestAt, warmSuggestions } from './suggest.ts';
 import { seizeOptions } from './card.ts';
@@ -367,7 +368,7 @@ export function ownWorld(g: GameScreen, r: Region, phone: boolean, snap: 'peek' 
   warmSuggestions(g);
   const tab = tabOf(g, r);
   const rb = ribbon(g, r);
-  const prompts = callingPrompt(g, r) + termsPrompt(g, r) + razePrompt(g, r) + purgePrompt(g, r, flipThreshold(g.st, r.id));
+  const prompts = courtFace(g, r) + callingPrompt(g, r) + termsPrompt(g, r) + razePrompt(g, r) + purgePrompt(g, r, flipThreshold(g.st, r.id));
   const body = tab === 'raise' ? raiseTab(g, r) : tab === 'improve' ? improveTab(g, r) : `<div class="story">${storyBodies(g, r) ? `<section><h4>The system</h4>${storyBodies(g, r)}</section>` : ''}${storyWorld(g, r)}</div>`;
   const face = `${sysArt(g, r, { ribbon: rb, garrison: garrisonPlate(g, r) })}<div class="wc-face">${head(g, r)}${phone && snap === 'full' ? '' : callingLine(g, r)}${prompts}${yieldLine(g, r)}${phone && snap === 'peek' && !prompts ? primaryButton(g, r) : ''}</div>`;
   return `${face}${tabs(g, r, tab)}<div class="wc-body" data-tab="${tab}">${body}</div>${worldGambit(g, r)}`;
@@ -417,6 +418,6 @@ export function foreignWorld(g: GameScreen, r: Region): string {
   const foes = fog ? [] : st.fleets.filter(f => f.region === r.id && f.owner !== you && f.ships.length);
   const fl = foes.length ? `<div class="fan foe">${foes.map(f => `<button class="cls" data-a="fleet" data-id="${f.id}" aria-label="${esc(f.name)}"${tip(f.name)}>${f.banner ? bannerSvg(f.banner.sigil, g.color(f.owner), 18) : ic('ships')}<b>${ic('attack')}${fleetPower(st, f)}</b></button>`).join('')}</div>` : '';
   const y = !fog && r.owner !== null ? yieldLine(g, r) : '';
-  return `${sysArt(g, r, { fog, ribbon: rb, garrison: garrisonPlate(g, r, fog) })}<div class="wc-face">${head(g, r)}${!fog ? callingLine(g, r) : ''}${y}</div><div class="wc-body foreign">${fl}${body}</div>`;
+  return `${sysArt(g, r, { fog, ribbon: rb, garrison: garrisonPlate(g, r, fog) })}<div class="wc-face">${head(g, r)}${!fog ? callingLine(g, r) : ''}${courtFace(g, r)}${y}</div><div class="wc-body foreign">${fl}${body}</div>`;
 }
 

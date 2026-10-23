@@ -4,6 +4,7 @@ import { type Ctx } from './modal-util.ts';
 import { ic } from '../art/icons.ts';
 import { openSoundSettings, soundIcon } from '../audio/hooks.ts';
 import { openGraphicsSettings } from './graphics.ts';
+import { CR } from '../../../shared/sim/court.ts';
 
 /** "Reading the map": the board's visual language, first in How to win (and in the lobby's How to play, help.ts). */
 export const MAP_INTRO = 'Everything on the board is either a territory, a star, a fleet piece, a battle, or an order line. Numbers appear only when you point at something: hover (or tap) a star for its defenders, a fleet for its strength, a battle for its odds. Zoom out for who owns what and where the armies are; zoom in for names, then the full tabletop.';
@@ -53,6 +54,12 @@ function cards(st: GameState, tab: string): Card[] {
       { ic: '♨', t: 'Raze', b: ['Right after a capture you may <b>raze</b> a world.', 'Loot now, development −1; its old owner swears vengeance.'] },
       { ic: '✒', t: 'The Herald', b: ['A front page every turn, printed from the events.', 'Plant one <b>dispatch</b> a turn: a boast, a threat, a lie.', 'Blood-debts: kill a commander, and their house hits back harder.'] },
       { ic: '⚜', t: 'The Saga', b: ['At the end: every banner’s story, reigns, the fallen.', 'Copy it or save the image for the group chat.'] },
+      // the Court (docs/SOUL.md §4): only where the game has one (st.court; never in an old save)
+      ...(st.court ? [
+        { ic: '⛓', t: 'Captives', b: ['Wipe out a fleet: its commander may be taken <b>captive</b>.', '<b>Ransom</b>, <b>Turn</b> (influence) or <b>Execute</b> (a lasting grievance).', `Undecided, the captive walks free after ${CR(st).releaseTurns} turns.`, 'Your commander held? <b>Pay</b> the terms or <b>Refuse</b>.'] },
+        { ic: '♛', t: 'Kneel or Defy', b: [`A new Throne holder: rivals answer within ${CR(st).decreeTurns} turns.`, `<b>Kneel</b>: +${CR(st).kneelInfluence}✦; striking the holder then costs ${CR(st).kneelBreakVp}♛.`, '<b>Defy</b>: free, and printed. Silence is Defiance.', 'Crests show who knelt and who defied.'] },
+        { ic: '☁', t: 'Exile', b: ['A fallen house stays at the table.', '<b>Whisper</b>: point the Warden at a house near the lead.', `<b>Ghost vote</b>: +${CR(st).ghostInfluence}✦ a turn to a house; it wins ties.`, 'Exile points: what your mark loses, counted against the winner.'] },
+      ] : []),
     ];
     case 'bets': {
       const G = R.signature;

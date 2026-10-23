@@ -60,8 +60,8 @@ export function mountCaptiveCard(host: HTMLElement, props: CaptiveCardProps, h: 
       <div class="ct-choices" role="group" aria-label="What becomes of ${esc(c.cmd.name)}">
         <div class="ct-choice">
           <div class="k-seg" role="radiogroup" aria-label="Terms">
-            <button type="button" role="radio" aria-checked="${sel('credits')}" aria-pressed="${sel('credits')}" data-res="credits"><span class="k-num">${priceC}</span>¢</button>
-            <button type="button" role="radio" aria-checked="${sel('influence')}" aria-pressed="${sel('influence')}" data-res="influence"><span class="k-num">${priceI}</span> ${ic('influence')}</button>
+            <button type="button" role="radio" aria-checked="${sel('credits')}" aria-pressed="${sel('credits')}" data-res="credits" aria-label="${priceC} credits"><span class="k-num">${priceC}</span>¢</button>
+            <button type="button" role="radio" aria-checked="${sel('influence')}" aria-pressed="${sel('influence')}" data-res="influence" aria-label="${priceI} influence"><span class="k-num">${priceI}</span> ${ic('influence')}</button>
           </div>
           <button type="button" class="k-btn primary" data-act="ransom" ${ransomWhy ? `aria-disabled="true" title="${esc(ransomWhy)}"` : ''}>${ic('purse')} Ransom</button>
           <small class="ct-why">${ransomWhy && !owner?.eliminated ? esc(ransomWhy) : owner?.eliminated ? 'Its house is gone: nobody can pay.' : 'They pay, or you decide again.'}</small>

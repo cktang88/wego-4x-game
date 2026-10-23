@@ -13,6 +13,7 @@ import { haptic } from '../fx/haptics.ts';
 import { ORDER_ICON, shortName, tip, romanN, fmtClock } from './util.ts';
 import { ic, icFor } from '../art/icons.ts';
 import { planNags } from './notify.ts';
+import { COURT_FREE_ICON } from './court.ts';
 
 /** Two words for an order chip: what it targets. */
 export function orderTarget(g: GameScreen, o: Order): string {
@@ -49,7 +50,7 @@ const soft = (t: string) => t.replace(/[\p{L}]{9,}/gu, w => {
   if (at < 0) at = mid;
   return `${w.slice(0, at)}\u00ad${w.slice(at)}`;
 });
-const freeIcon = (t: string) => ic(icFor('free', t));
+const freeIcon = (t: string) => ic(COURT_FREE_ICON[t] ?? icFor('free', t));
 const X = ic('close');
 /** The seal: a poured wax disc with the crown debossed (art/kit.css .k-seal), on the commit button. */
 const WAX = `<span class="k-seal seal-disc" aria-hidden="true">${ic('crown')}</span>`;

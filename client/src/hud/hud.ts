@@ -14,6 +14,7 @@ import { empireHtml, bindEmpire } from '../ui/empire.ts';
 import { renderStrip, renderPrimary, bindStrip } from './strip.ts';
 import { renderCard, bindCard } from './card.ts';
 import { renderNotes, bindNotes, resetNotes } from './notify.ts';
+import { renderExile, crestCourt, resetCourt } from './court.ts';
 import * as M from '../ui/modals.ts';
 import { fmtClock, plus, shortName, tip, safeInsets } from './util.ts';
 import { fatePill, fatePop } from './signature.ts';
@@ -58,6 +59,7 @@ export class Hud {
       <div class="hud-br" data-h="tools"></div>
       <div class="hud-bc" data-h="bottom"><div class="strip" data-h="strip"></div><div class="prim" data-h="primary"></div></div>
       <div class="card hidden" data-h="card"></div>
+      <div class="card ct-exilecard at-right hidden" data-h="exile" role="region" aria-label="In exile"></div>
       <div class="dragcard hidden" data-h="preview"></div>
       <div class="ring hidden" data-h="ring"></div>
       <div class="loupe hidden" data-h="loupe"><canvas width="240" height="240"></canvas><div class="lbl"></div></div>
@@ -93,6 +95,7 @@ export class Hud {
     document.removeEventListener('pointerdown', this.outside, true);
     this.unbindCard();
     resetNotes();
+    resetCourt();
     this.fallback?.remove();
     try { if (modals?.isModalOpen()) modals.closeModal(); } catch { /* */ }
   }
@@ -119,6 +122,7 @@ export class Hud {
     renderStrip(g, this.h.strip);
     renderPrimary(g, this.h.primary);
     renderCard(g, this.h.card);
+    renderExile(g, this.h.exile);
     if (this.pop) this.showPop(this.pop.kind, this.pop.anchor);
     this.fitTop();
     g.tickClocks();
@@ -208,8 +212,10 @@ export class Hud {
       // a blood-debt this house owes you: a red wax drop on its crest; avenged last turn, the drop lies shattered (DELIGHT #74)
       const owes = g.you !== null && p.id !== g.you ? (st.soul?.debts ?? []).filter(d => d.debtor === p.id && d.creditor === g.you) : [];
       const debt = owes.some(d => !d.cleared) ? 'owed' : owes.some(d => d.cleared === st.turn - 1) ? 'paid' : '';
-      return `<div class="pcrest ${p.id === g.you ? 'you' : ''} ${p.eliminated ? 'out' : ''} ${oath ? 'oath' : ''} ${nem ? 'nemesis' : ''} ${near ? 'near-win' : ''}" style="--pc:${esc(p.color)}" data-crest="${p.id}"${tip(`${p.name}${ai ? `, ${ai.replace(/^the \S+, /, '')}` : ''}: ${p.vp} of ${target} victory points (♛)${near ? ` · ${left} from victory` : ''}${leader === p.id ? ' · in the lead' : ''}${sealed ? ' · orders sealed' : sand ? ' · still planning' : ''}${oath ? ' · Oathbreaker' : ''}${nem ? ' · your nemesis in this League' : ''}${debt === 'owed' ? ' · owes you a blood-debt' : debt === 'paid' ? ' · blood-debt avenged' : ''}`)}>
-        <span class="cb">${shield}<b class="vp" data-vp="${p.id}">${vp}</b>${oath ? '<i class="crack" aria-label="Oathbreaker"></i>' : ''}${sealed ? '<i class="sealed wax" aria-label="Orders sealed"></i>' : ''}${sand ? '<i class="sand" aria-label="Still planning"><i></i></i>' : ''}${debt ? `<i class="debt ${debt}" aria-label="${debt === 'owed' ? 'Owes you a blood-debt' : 'Blood-debt avenged'}"></i>` : ''}${nem ? `<i class="nem" aria-label="Your nemesis">${ic('blade')}</i>` : ''}</span>${leader === p.id ? '<i class="lead" aria-label="In the lead">♛</i>' : ''}
+      // the Court in public: who wears the crown, who knelt, who defied (and the exiles)
+      const court = crestCourt(g, p.id);
+      return `<div class="pcrest ${p.id === g.you ? 'you' : ''} ${p.eliminated ? 'out' : ''} ${oath ? 'oath' : ''} ${nem ? 'nemesis' : ''} ${near ? 'near-win' : ''}" style="--pc:${esc(p.color)}" data-crest="${p.id}"${tip(`${p.name}${ai ? `, ${ai.replace(/^the \S+, /, '')}` : ''}: ${p.vp} of ${target} victory points (♛)${near ? ` · ${left} from victory` : ''}${leader === p.id ? ' · in the lead' : ''}${sealed ? ' · orders sealed' : sand ? ' · still planning' : ''}${oath ? ' · Oathbreaker' : ''}${nem ? ' · your nemesis in this League' : ''}${debt === 'owed' ? ' · owes you a blood-debt' : debt === 'paid' ? ' · blood-debt avenged' : ''}${court.tip}`)}>
+        <span class="cb">${shield}<b class="vp" data-vp="${p.id}">${vp}</b>${oath ? '<i class="crack" aria-label="Oathbreaker"></i>' : ''}${sealed ? '<i class="sealed wax" aria-label="Orders sealed"></i>' : ''}${sand ? '<i class="sand" aria-label="Still planning"><i></i></i>' : ''}${debt ? `<i class="debt ${debt}" aria-label="${debt === 'owed' ? 'Owes you a blood-debt' : 'Blood-debt avenged'}"></i>` : ''}${nem ? `<i class="nem" aria-label="Your nemesis">${ic('blade')}</i>` : ''}${court.mark}</span>${leader === p.id ? '<i class="lead" aria-label="In the lead">♛</i>' : ''}
         <span class="nm">${s?.online && g.src.kind === 'remote' ? '<i class="on"></i>' : ''}${esc(shortName(p.name, 1))}</span><i class="vpbar"><i style="width:${(frac * 100).toFixed(1)}%"></i></i></div>`;
     }).join('');
     g.setHtml(this.h.crests, `<button class="crests" aria-label="Score: victory points of each player">${html}</button>`);

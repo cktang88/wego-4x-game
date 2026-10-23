@@ -29,7 +29,12 @@ const KIND_ICON: Record<string, string> = {
 /** A special edition's ornament (ACT_EDITIONS[act].ornament) as an icon of the closed set. */
 const ORNAMENT: Record<string, IconKey> = { beacon: 'fire', border: 'gates', blood: 'blade', scales: 'scales', throne: 'throne', candle: 'time', feud: 'blood-debt' };
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
-export const headlineIcon = (k: string) => ic(icFor('herald', k, KIND_ICON[k] ?? (k.startsWith('p_') ? '◉' : '•')));
+/** The Court's story kinds (shared/config/herald-stories.ts): their icons, ahead of the art kit's table. */
+const COURT_ICON: Record<string, IconKey> = {
+  captured: 'chain', ransom_offer: 'purse', ransom_refused: 'close', ransomed: 'purse', released: 'liberated', executed: 'skull', turned: 'banner',
+  kneel: 'crown', defy: 'fist', knee_broken: 'oathbreaker', decree_open: 'throne', ghost_vote: 'ghost', exiled: 'ghost',
+};
+export const headlineIcon = (k: string) => ic(COURT_ICON[k] ?? icFor('herald', k, KIND_ICON[k] ?? (k.startsWith('p_') ? '◉' : '•')));
 
 const seenKey = (g: GameScreen) => `tc.herald.${g.gameKey()}.${g.you ?? 's'}`;
 function seen(g: GameScreen): number { try { return Number(localStorage.getItem(seenKey(g)) ?? 0) || 0; } catch { return 0; } }
@@ -53,6 +58,9 @@ export function maybeHerald(g: GameScreen): boolean {
   openHerald(g, ed.turn);
   return true;
 }
+
+/** The Herald has gone (its fade takes 220ms): what waits for it at the start of a turn may open now. */
+const afterClose = (g: GameScreen) => g.later(() => g.heraldCheck(), 260);
 
 export function closeHerald() {
   const o = open;
@@ -83,7 +91,7 @@ export function openHerald(g: GameScreen, turn?: number) {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-h]');
     if (!b) return;
     const a = b.dataset.h!;
-    if (a === 'close') { closeHerald(); g.renderAll(); return; }
+    if (a === 'close') { closeHerald(); g.renderAll(); afterClose(g); return; }
     if (a === 'ed') { const t = Number(b.dataset.t); const e2 = editions(g).find(x => x.turn === t); if (e2 && open) { open.turn = t; audio.ui('page'); render(g, e2); } return; }
     if (a === 'as') { asWho = b.dataset.v === 'source' ? 'source' : 'house'; render(g, edNow(g)); return; }
     if (a === 'file') { file(g); return; }
@@ -98,12 +106,12 @@ export function openHerald(g: GameScreen, turn?: number) {
   });
   el.addEventListener('keydown', e => {
     e.stopPropagation();
-    if (e.key === 'Escape') { closeHerald(); g.renderAll(); }
+    if (e.key === 'Escape') { closeHerald(); g.renderAll(); afterClose(g); }
     if (e.key === 'Enter' && (e.target as HTMLElement).matches('[data-dispatch]') && !e.shiftKey) { e.preventDefault(); file(g); }
   });
   window.addEventListener('keydown', function esc(e) {
     if (!el.isConnected) { window.removeEventListener('keydown', esc, true); return; }
-    if (e.key === 'Escape' && !(e.target as HTMLElement)?.closest?.('.herald')) { e.stopPropagation(); closeHerald(); g.renderAll(); }
+    if (e.key === 'Escape' && !(e.target as HTMLElement)?.closest?.('.herald')) { e.stopPropagation(); closeHerald(); g.renderAll(); afterClose(g); }
   }, true);
 }
 

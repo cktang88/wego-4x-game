@@ -68,12 +68,22 @@ export class LocalSource implements GameSource {
   }
 
   get humans() { return this.save.seats.map((s, i) => ({ s, i })).filter(x => x.s.kind === 'human' && !this.save.state.players[x.i].eliminated).map(x => x.i); }
+  /** The Court: human seats in exile (eliminated, still at the table: they whisper and cast a ghost vote). */
+  get exiles() {
+    const st = this.save.state;
+    if (st.winner !== null || !st.court) return [];
+    return this.save.seats.map((s, i) => i).filter(i => this.save.seats[i].kind === 'human' && st.players[i].eliminated && st.court!.exiles.some(e => e.p === i));
+  }
+  /** Who takes the device in turn: the living humans, then (WEGO) the exiles, who pass it on when they have whispered. */
+  private get rotation() { const h = this.humans; return h.length && !this.save.state.live ? [...h, ...this.exiles] : h; }
 
   refresh() {
     const st = this.save.state;
+    // no living human left: watch the AIs; a human exile still sits at the table (its whisper panel needs a seat)
+    const exile = this.humans.length ? null : this.exiles[0] ?? null;
     const seat = this.save.reveal || !this.humans.length ? null : this.save.current;
     this.view = viewFor(st, st.winner !== null ? null : seat);
-    if (seat === null) this.view = { ...this.view, you: this.humans.length ? this.save.current : null };
+    if (seat === null) this.view = { ...this.view, you: this.humans.length ? this.save.current : exile };
     this.mySubmission = this.save.pending[this.save.current] ?? null;
     this.meta = {
       id: 'local', name: this.save.name, createdAt: 0, turn: st.turn, deadline: null, deadlineHours: 0,
@@ -96,7 +106,7 @@ export class LocalSource implements GameSource {
 
   submit(sub: Submission) {
     this.save.pending[this.save.current] = sub;
-    const waiting = this.humans.filter(h => !this.save.pending[h]);
+    const waiting = this.rotation.filter(h => !this.save.pending[h]);
     if (waiting.length) {
       this.save.current = waiting[0];
       this.refresh();
@@ -110,21 +120,43 @@ export class LocalSource implements GameSource {
     if (this.save.state.last) this.save.history.push(this.save.state.last);
     if (this.save.history.length > 60) this.save.history.shift();
     this.save.pending = {};
-    const hs = this.humans;
+    const hs = this.rotation;
     this.save.current = hs.length ? hs[0] : 0;
     this.refresh();
     if (hs.length > 1) this.onHandoff(this.save.current);
     this.onChange('view');
   }
   unsubmit() { delete this.save.pending[this.save.current]; this.refresh(); this.onChange('view'); }
+  /**
+   * The Court: an exile's whisper / ghost vote. `humans` drops eliminated seats, so an exile is never planning: its
+   * choice is stored straight into `pending[seat]` (resolve reads pending before planTurn), replacing an earlier one.
+   * LIVE: queued for the next tick like any free action.
+   */
+  exileFree(seat: number, fa: FreeAction) {
+    const st = this.save.state;
+    if (st.winner !== null || !st.players[seat]?.eliminated) return;
+    if (st.live) { this.liveAct(() => queueFree(this.save.state, seat, fa)); return; }
+    const prev = this.save.pending[seat];
+    this.save.pending[seat] = { orders: prev?.orders ?? [], free: [...(prev?.free ?? []).filter(x => x.type !== fa.type), fa] };
+    this.refresh();
+    this.onChange('view');
+  }
+  /** Hotseat: the exile holding the device is done; pass it on (its whisper, if any, is already in `pending`). */
+  exilePass() {
+    const seat = this.save.current;
+    if (!this.exiles.includes(seat)) return;
+    this.submit(this.save.pending[seat] ?? { orders: [], free: [] });
+  }
   /** All-AI games (Watch AIs): resolve the next turn with AI plans for everyone. */
   advance() {
     if (this.humans.length || this.save.state.winner !== null) return;
     const subs: Record<number, Submission> = {};
-    for (let i = 0; i < 3; i++) subs[i] = planTurn(this.save.state, i);
+    // a human exile's whisper (stored by exileFree) goes in; planTurn invents none for a human exile
+    for (let i = 0; i < 3; i++) subs[i] = this.save.pending[i] ?? planTurn(this.save.state, i);
     this.save.state = resolveTurn(this.save.state, subs);
     if (this.save.state.last) this.save.history.push(this.save.state.last);
     if (this.save.history.length > 60) this.save.history.shift();
+    this.save.pending = {};
     this.refresh();
     this.onChange('view');
   }

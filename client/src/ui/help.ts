@@ -4,6 +4,19 @@ import type { GameState } from '../../../shared/sim/types.ts';
 import { ORDER_INFO } from '../../../shared/sim/orders.ts';
 import { ORDER_ICON } from '../hud/util.ts';
 import { MAP_INTRO, MAP_LEGEND } from './modal-help.ts';
+import { CR } from '../../../shared/sim/court.ts';
+
+/** The Court (docs/SOUL.md §4): only in games that have one (st.court; an old save never does). */
+function courtHelp(st: GameState): string {
+  const K = CR(st);
+  return `<h2>The Court</h2>
+  <ul>
+    <li><b>Captives.</b> Wipe out a fleet (or catch it limping) and its commander may be taken <b>captive</b>. The captor decides on the world's card, once a turn: <b>Ransom</b> (name the terms, credits or influence; the price rises with rank), <b>Turn</b> them (pay influence; they serve you, scars and all) or <b>Execute</b> them (a wax seal: a grievance that never clears). Nobody decides, and the captive walks home free after ${K.releaseTurns} turns.</li>
+    <li><b>Ransom letters.</b> If your commander is held, the captor's terms reach you the next turn: <b>Pay</b> and they come home, or <b>Refuse</b> and the captor decides again.</li>
+    <li><b>Kneel or Defy.</b> When a house takes the Hollow Throne, every rival answers in public within ${K.decreeTurns} turns. <b>Kneel</b>: +${K.kneelInfluence} influence now, but striking the holder later costs ${K.kneelBreakVp} VP. <b>Defy</b>: free, printed in the Herald. Silence is Defiance. The crests show who knelt and who defied.</li>
+    <li><b>Exile.</b> A fallen house stays at the table. It <b>whispers</b> to the Warden (which hunts that house if it is near the lead), casts a <b>ghost vote</b> (+${K.ghostInfluence} influence a turn to that house, and it wins exact ties), and earns Exile points from what its mark loses: they count against the winner in the Saga and the League.</li>
+  </ul>`;
+}
 
 export function helpHtml(st: GameState): string {
   const R = st.rules, S = R.soul;
@@ -59,6 +72,7 @@ export function helpHtml(st: GameState): string {
     <li><b>Blood-debts</b>: kill a rival's commander and their house hits you harder until they get even (a drop of blood on the map).</li>
     <li>At the end, <b>the Saga</b> tells it all: every banner's story, the Throne's reigns, the memorial roll, broken oaths and debts. Copy it or save the image for the group chat.</li>
   </ul>
+${st.court ? courtHelp(st) : ''}
   <h2>Postures and Fate: reading your friends</h2>
   <ul>
     <li>From turn ${3} each fleet card offers a <b>posture</b>: a secret bet on what your rival will do this turn. <b>Guarded</b> (they attack me here), <b>Running</b> (my path is clear), <b>Charge</b> (with a Seize: the defender isn't braced), <b>Ambush</b> (they come through here). Right, and you win the moment; wrong, and you pay. <b>Steady</b>, the default, never bets. Drop a Seize by drag and the board offers a Charge.</li>

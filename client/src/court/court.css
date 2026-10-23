@@ -39,8 +39,7 @@
 .ct-choices.two { grid-template-columns: 1fr auto; }
 /* the captive's execute seal sits on its own row under the two plates, away from them (it cannot be undone) */
 .ct-captive .ct-exec { grid-column: 1 / -1; max-width: none; grid-template-columns: auto 1fr; justify-items: start; align-items: center; text-align: left; column-gap: 0.85rem;
-  padding-top: 0.6rem; background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.6) 10%, rgba(0, 0, 0, 0.6) 90%, transparent) 0 0 / 100% 1px no-repeat,
-  linear-gradient(90deg, transparent, rgba(220, 180, 108, 0.25) 10%, rgba(220, 180, 108, 0.25) 90%, transparent) 0 1px / 100% 1px no-repeat; }
+  padding-top: 0.6rem; border-top: 1px solid rgba(0, 0, 0, 0.6); box-shadow: inset 0 1px 0 rgba(220, 180, 108, 0.2); }
 .ct-choice { display: grid; gap: 0.4rem; justify-items: start; align-content: start; }
 .ct-choice .k-btn { width: 100%; min-height: 2.75rem; }
 .ct-choice .k-seg { width: 100%; }
@@ -69,10 +68,9 @@
   clip-path: polygon(0% 1.5%, 6% 0%, 14% 1%, 23% 0%, 34% 0.6%, 46% 0%, 58% 1%, 70% 0%, 82% 0.6%, 93% 0%, 100% 1%, 99.4% 20%, 100% 42%, 99.4% 64%, 100% 86%, 99% 100%, 86% 99%, 74% 100%, 61% 99.4%, 48% 100%, 35% 99%, 22% 100%, 10% 99%, 0% 100%, 0.6% 78%, 0% 56%, 0.6% 32%);
   filter: drop-shadow(0.15rem 0.4rem 0.45rem rgba(0, 0, 0, 0.7)); }
 .ct-ransom .ct-letter::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--k-paper) 0 0 / 520px; mix-blend-mode: multiply; opacity: 0.28; }
-.ct-letterhead { display: flex; align-items: center; gap: 0.6rem; padding-bottom: 0.5rem;
-  background: linear-gradient(90deg, transparent, rgba(74, 44, 16, 0.45) 10%, rgba(74, 44, 16, 0.45) 90%, transparent) 0 100% / 100% 1px no-repeat; }
+.ct-letterhead { display: flex; align-items: center; gap: 0.6rem; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(74, 44, 16, 0.4); }
 .ct-letterhead .ct-house { color: #4a2c10 !important; font-size: 1.05rem; }
-.ct-from { display: block; font: italic 0.95rem/1.2 var(--k-prose); color: var(--k-ink-faded); }
+.ct-from { display: block; font: italic 0.95rem/1.2 var(--k-prose); color: #4e3d26; }
 .ct-letter-p { font: 1rem/1.45 var(--k-prose); color: var(--k-ink-text); }
 .ct-letter-p.small { font-size: 0.95rem; color: var(--k-ink-faded); }
 .ct-letter-p b { font-family: var(--k-display); font-size: 0.95em; letter-spacing: 0.03em; color: #3a2408; }
@@ -125,3 +123,94 @@
   .ct-exec .k-seal.armed { animation: none; filter: drop-shadow(0 0 0.5rem rgba(226, 114, 93, 0.7)); }
   .ct-pick { transition: none; }
 }
+
+/* ============================================================================
+   The Court on the HUD (client/src/hud/court.ts): the one-turn prompts on a world card's face, the sheet that holds
+   a full module, the exile's panel in the card slot, the crest marks, and the Herald's ink for the Court's stories.
+   ============================================================================ */
+/* ---- face prompts: the card's .prompt grammar (card.css), the captive's portrait, the public answers, a wax button */
+.card.wc .prompt.ct-fp { box-shadow: inset 0 0 0 1px rgba(241, 212, 136, 0.55), inset 3px 0 0 var(--pc, #f1d488); }
+.card.wc .prompt.ct-fp .acts + .acts { margin-top: 0.375rem; }
+.card.wc .prompt.ct-fp p { color: var(--wc-dim); }
+.card.wc .ct-fwho { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.25rem; }
+.card.wc .ct-fwho p { margin: 0; }
+.card.wc .ct-fport { width: 2.5rem; height: auto; flex: none; border-radius: 2px; box-shadow: 0 0 0 1px var(--k-brass-500, #a07a3a), 0 0 0 2px rgba(0, 0, 0, 0.7); filter: saturate(0.85) sepia(0.12); }
+.card.wc .prompt .ct-fnote { color: var(--wc-ink); }
+.card.wc .ct-fans { list-style: none; margin: 0.375rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; }
+.card.wc .ct-fans li { display: inline-flex; align-items: center; gap: 0.3rem; font: 600 var(--fs-xs)/1.2 var(--font); color: var(--wc-ink); }
+.card.wc .ct-fans li b { font-weight: 700; color: var(--wc-dim); }
+.card.wc .ct-fans li.kneel b { color: #f1d488; }
+.card.wc .ct-fans li.defy b { color: #f0b4a4; }
+.card.wc .prompt .acts .ct-wax { color: #ffe9dc; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.8);
+  background: radial-gradient(120% 140% at 35% 25%, #a8352b 0%, #7a1d17 55%, #4e100c 100%); box-shadow: inset 0 0 0 1px #c2453a, var(--k-bevel); }
+.card.wc .prompt .acts .ct-wax.armed { animation: ct-arm 1.2s var(--k-ease-heavy, ease-out) infinite alternate; box-shadow: inset 0 0 0 1px #ffb59e, var(--k-bevel); }
+.card.wc .prompt .acts .ct-wax[aria-disabled=true] { filter: grayscale(0.6) brightness(0.8); }
+
+/* ---- the sheet: a module on a dark plate, centred; a bottom sheet on a phone */
+.overlay.ct-ov .dialog.ct-sheet { width: auto; max-width: min(32rem, 100%); padding: 2.75rem 1rem 1rem; overflow-y: auto; overscroll-behavior: contain; }
+.overlay.ct-ov .dialog.ct-sheet > .ct-card { margin: 0 auto; }
+.phone .overlay.ct-ov { align-items: flex-end; padding: 0 0.25rem calc(0.25rem + var(--safe-b, 0px)); }
+.phone .overlay.ct-ov .dialog.ct-sheet { width: 100%; max-width: none; max-height: 82vh; border-radius: 7px 7px 4px 4px; }
+
+/* ---- the exile's panel: the card slot (a bottom sheet on a phone), the module on its own plate */
+.hud > .card.ct-exilecard { padding: 0; background: none; border: 0; box-shadow: none; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; display: grid; gap: 0.5rem; align-content: start; }
+.hud > .card.ct-exilecard.hidden { display: none; }
+.hud > .card.ct-exilecard > .ct-exbody > .ct-card { width: 100%; padding: 1rem; }
+.ct-exilecard .ct-fold { display: none; }
+.ct-exilecard .ct-exfoot:empty { display: none; }
+.ct-exilecard .ct-exfoot .k-btn { width: 100%; min-height: 2.75rem; }
+.phone .hud > .card.ct-exilecard { left: calc(0.25rem + var(--safe-l, 0px)) !important; right: calc(0.25rem + var(--safe-r, 0px)) !important; width: auto; top: calc(4.25rem + var(--safe-t, 0px)); bottom: auto; max-height: 52%; z-index: 7; }
+.phone .ct-exilecard .ct-fold { display: flex; align-items: center; gap: 0.5rem; justify-content: center; width: 100%; min-height: 2.75rem; border: 0; border-radius: 6px; cursor: pointer;
+  font: 700 var(--fs-sm, 0.875rem)/1 var(--k-display, var(--display)); letter-spacing: 0.12em; text-transform: uppercase; color: var(--k-ivory, #efe6d0);
+  background: linear-gradient(180deg, #2c2f38, #17181d); box-shadow: var(--k-bevel), 0 0 0 1px rgba(0, 0, 0, 0.7); }
+.phone .ct-exilecard .ct-fold .ic:last-child { transform: rotate(90deg); transition: transform 0.2s; }
+.phone .ct-exilecard.folded .ct-fold .ic:last-child { transform: rotate(-90deg); }
+.ct-exilecard.folded .ct-exbody, .ct-exilecard.folded .ct-exfoot { display: none; }
+
+/* ---- the crests: the crowned holder, a kneel, a defiance, a broken knee, an exile (top-left of the shield) */
+.pcrest .cb .ct-ans { position: absolute; left: -0.25rem; top: -0.25rem; width: 1.125rem; height: 1.125rem; display: grid; place-items: center; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle at 35% 30%, #3a3328, #15130f); box-shadow: 0 0 0 1px #000, 0 1px 2px rgba(0, 0, 0, 0.7); color: #f1d488; }
+.pcrest .cb .ct-ans .ic { width: 0.75rem; height: 0.75rem; }
+.pcrest .cb .ct-ans.defy, .pcrest .cb .ct-ans.broke { color: #ff9a86; background: radial-gradient(circle at 35% 30%, #a8352b, #4e100c); }
+.pcrest .cb .ct-ans.exile { color: #c9d3e0; }
+
+/* ---- the Herald's ink for the Court's stories (shared/config/herald-stories.ts) */
+.herald-ov .hl.k-executed h2, .herald-ov .hl.k-knee_broken h2, .herald-ov .hl.k-defy h2 { color: #6a1410; }
+.herald-ov .hl.k-executed .hl-ic, .herald-ov .hl.k-knee_broken .hl-ic, .herald-ov .hl.k-defy .hl-ic { color: #8e1f1f; }
+.herald-ov .hl.k-kneel h2, .herald-ov .hl.k-ransom_offer h2, .herald-ov .hl.k-captured h2 { color: #5a3a0e; }
+.herald-ov .hl.k-kneel .hl-ic, .herald-ov .hl.k-ransom_offer .hl-ic, .herald-ov .hl.k-captured .hl-ic { color: #7a5418; }
+.herald-ov .hl.k-ransomed h2, .herald-ov .hl.k-released h2 { color: #1f3a12; }
+.herald-ov .hl.k-ransomed .hl-ic, .herald-ov .hl.k-released .hl-ic { color: #2f6a1a; }
+.herald-ov .hl.k-turned h2 { color: #3a1a5a; }
+.herald-ov .hl.k-turned .hl-ic { color: #5a2a8a; }
+.herald-ov .hl.k-exiled h2, .herald-ov .hl.k-ghost_vote h2 { color: #26303c; font-style: italic; }
+.herald-ov .hl.k-exiled .hl-ic, .herald-ov .hl.k-ghost_vote .hl-ic { color: #3c4a5c; }
+@media (prefers-reduced-motion: reduce) { .card.wc .prompt .acts .ct-wax.armed { animation: none; } }
+
+/* ---- the kit's gradient rims (border-box) on the Court's plates: here the rim is the border colour and a ring, so the
+   text's background is only the plate's face (what the eye reads, and what the HUD's contrast audit measures) */
+.ct-card.k-card { background: var(--k-grain) 0 0 / 160px, radial-gradient(120% 90% at 20% 0%, #2e313b 0%, #1d1f25 50%, #131418 100%);
+  background-blend-mode: soft-light, normal; border-color: #4a4f5a; }
+.ct-card.k-card.riveted { background-image: var(--k-grain), radial-gradient(120% 90% at 20% 0%, #2e313b 0%, #1d1f25 50%, #131418 100%); background-size: 160px, auto; }
+/* the rivets: four brass domes on the inner rule (a pseudo-element: no text sits on them) */
+.ct-card.k-card.riveted::before { background:
+    radial-gradient(circle at 40% 35%, #f4dc9c 0 1px, #a87a35 1.6px, #3a2810 2.6px, transparent 3px) 2px 2px / 8px 8px no-repeat,
+    radial-gradient(circle at 40% 35%, #f4dc9c 0 1px, #a87a35 1.6px, #3a2810 2.6px, transparent 3px) calc(100% - 2px) 2px / 8px 8px no-repeat,
+    radial-gradient(circle at 40% 35%, #f4dc9c 0 1px, #a87a35 1.6px, #3a2810 2.6px, transparent 3px) 2px calc(100% - 2px) / 8px 8px no-repeat,
+    radial-gradient(circle at 40% 35%, #f4dc9c 0 1px, #a87a35 1.6px, #3a2810 2.6px, transparent 3px) calc(100% - 2px) calc(100% - 2px) / 8px 8px no-repeat; }
+.ct-card .k-btn:not(.ghost), .ct-exilecard .k-btn:not(.ghost) { background: var(--k-grain) 0 0 / 160px, var(--face); background-blend-mode: soft-light, normal; border-color: #8a6a34; }
+.ct-card .k-btn.primary, .ct-exilecard .k-btn.primary { border-color: #6b4a1c; }
+.ct-card .k-token { background: var(--k-grain) 0 0 / 160px, #23262d; background-blend-mode: soft-light, normal; border-color: #4a4f5a; }
+.ct-pick { background: var(--k-grain) 0 0 / 160px, var(--k-steel-face); background-blend-mode: soft-light, normal; border-color: #4a4f5a; }
+.ct-pick:hover:not([aria-disabled=true]) { background: var(--k-grain) 0 0 / 160px, var(--k-steel-face-hi); }
+.ct-pick.on { background: var(--k-grain) 0 0 / 160px, var(--k-steel-face-hi); border-color: #dcb46c; }
+.ct-card .k-seg { background: #15161b; }
+
+/* ---- the face prompts' buttons: a row wraps whole buttons, never a label */
+.card.wc .prompt.ct-fp .acts { flex-wrap: wrap; }
+.card.wc .prompt.ct-fp .acts button { white-space: nowrap; flex: 1 1 auto; }
+.card.wc .prompt.ct-fp.done p { display: none; }
+.card.wc .ct-fps { max-height: min(26rem, 46vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding-bottom: 0.125rem; }
+.phone .card.wc .ct-fps { max-height: 40vh; }
+/* an exile is still at the table: its crest fades less than a house that is simply gone */
+.pcrest.out:has(.ct-ans.exile) { opacity: 0.75; }

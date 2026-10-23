@@ -7,12 +7,13 @@ import { esc } from '../ui/dom.ts';
 import { shortName, tip } from './util.ts';
 import { soulNotes } from './soul.ts';
 import { systemNotes } from './systems.ts';
+import { courtNotes } from './court.ts';
 
 export interface Note { key: string; icon: string; text: string; tone: 'bad' | 'good' | 'gold' | 'info'; p: number; go: () => void }
 
 /** Planning nags (a choice to make, research to buy, a full bank, terms offered): they live on the plan strip's
  *  "to do" tab, not in the notice stack over the map. */
-const NAG = /^(?:cal|hon|trib)\d|^bank$/;
+const NAG = /^(?:cal|hon|trib)\d|^bank$|^ct-/;
 export function planNags(g: GameScreen): Note[] { return allNotes(g).filter(n => NAG.test(n.key)); }
 export function notes(g: GameScreen): Note[] { return allNotes(g).filter(n => !NAG.test(n.key)); }
 function allNotes(g: GameScreen): Note[] {
@@ -53,6 +54,8 @@ function allNotes(g: GameScreen): Note[] {
     const dig = st.fleets.find(f => f.owner === you && st.regions[f.region]?.relic === 'unclaimed' && st.regions[f.region].owner === you);
     if (dig) out.push({ key: 'dig', icon: '✧', text: `Relic at ${rn(dig.region)}`, tone: 'gold', p: 3, go: () => { g.select({ kind: 'fleet', id: dig.id }); g.focus(st.regions[dig.region].site); } });
     for (const n of soulNotes(g)) out.push({ ...n, tone: 'gold', p: 1 });
+    // the Court: a prisoner to decide, ransom terms, Kneel or Defy (keys ct-…: the "to do" tab, never folded as news)
+    for (const n of courtNotes(g)) out.push({ ...n, p: n.tone === 'bad' ? 0 : 1 });
     for (const n of systemNotes(g)) out.push({ ...n, p: n.tone === 'bad' ? 0 : 1 });
     // (research ready: the primary button and the Empire tool's dot say so; no notice over the map)
     if (g.live && g.bank >= st.rules.live.bankCap) out.push({ key: 'bank', icon: '⏱', text: 'Order bank full', tone: 'gold', p: 2, go: () => g.nextIdle() });
