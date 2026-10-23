@@ -60,7 +60,9 @@ export function makeEdition(s: GameState, cov: Set<RegionId>[]): HeraldEdition |
   const seen = new Set<string>();
   const ranked = beats.map((b, i) => ({ b, i })).sort((x, y) => y.b.drama - x.b.drama || x.i - y.i).map(x => x.b)
     .filter(b => { const k = `${b.kind}:${b.region ?? ''}:${b.text}`; if (seen.has(k)) return false; seen.add(k); return true; });
-  const headlines = ranked.filter(b => b.drama > 0).slice(0, S.heraldMax);
+  // an act of the war takes one of the page's slots (the front page stays at most heraldMax stories)
+  const act = actOf(s, st, ranked);
+  const headlines = ranked.filter(b => b.drama > 0).slice(0, S.heraldMax - (act ? 1 : 0));
   // the Herald remembers: an anniversary fills a thin page before the quiet filler does
   if (headlines.length < S.heraldMax) { const an = anniversaryOf(s, st); if (an) headlines.push(an); }
   const quiet = HERALD_TEMPLATES.quiet;
@@ -71,7 +73,6 @@ export function makeEdition(s: GameState, cov: Set<RegionId>[]): HeraldEdition |
   const ob = obituaryOf(headlines);
   if (ob) headlines.splice(headlines.indexOf(ob.after) + 1, 0, ob.h);
   // special editions: an act of the war (by drama, so a great battle may still lead), and the League's feud (always leads)
-  const act = actOf(s, st, ranked);
   if (act) { const at = headlines.findIndex(h => h.drama < act.h.drama); headlines.splice(at < 0 ? headlines.length : at, 0, act.h); }
   const feud = feudOf(s, st);
   if (feud) headlines.unshift(feud);
@@ -556,6 +557,18 @@ function slotsFor(c: Ctx, h: Headline, aud: PlayerId[]): { v: Slots; kind: strin
       break;
     }
     case 'eliminated': bad(a); break;
+    // the Court: A = captor (or the house answering), B = the commander's house (or the holder); C from the headline
+    case 'captured': case 'ransom_offer': case 'ransomed': case 'released': case 'executed': case 'turned': {
+      const hv = headlineVars(kind, h.text);
+      if (hv.c) v.C = hv.c;
+      if (kind === 'captured' || kind === 'turned') { good(a); bad(b); }
+      if (kind === 'executed') bad(b);
+      break;
+    }
+    case 'kneel': case 'defy': case 'knee_broken': case 'ghost_vote': case 'exiled': {
+      if (kind === 'knee_broken') bad(a);
+      break;
+    }
     case 'obituary': {
       const cmd = h.text.replace(/^Obituary:\s*/, '');
       const rec = (s.soul?.fallen ?? []).find(x => x.commander === cmd && x.owner === a && x.fateTurn === s.turn);
@@ -813,6 +826,10 @@ export interface Saga {
   vowsBroken: { fleet: string; owner: PlayerId; turn: number; vow: string }[];
   debts: { debtor: PlayerId; creditor: PlayerId; victim: string; killer: string; turn: number; cleared: number | null }[];
   worlds: { region: RegionId; name: string; epithet: string | null; calling: string | null; deeds: string[] }[];
+  /** The Court: houses in exile and their Exile points (what they cost the winner; 0 until the game ends). */
+  exiles: { player: PlayerId; name: string; since: number; points: number; vote: PlayerId | null }[];
+  /** The Court: captives' fates and Coronation answers, newest last (as the reader may know them). */
+  court: { turn: number; kind: string; text: string; players: PlayerId[] }[];
 }
 
 /** The end-of-game Saga as structured data (pure). Works mid-game too (fleets still flying are "alive"). */
@@ -854,7 +871,29 @@ export function sagaOf(s: GameState): Saga {
     debts: (st?.debts ?? []).map(d => ({ debtor: d.debtor, creditor: d.creditor, victim: d.victim, killer: d.killer, turn: d.turn, cleared: d.cleared ?? null })),
     worlds: s.regions.filter(r => r.story && (r.story.epithet || r.story.calling || r.story.deeds.length))
       .map(r => ({ region: r.id, name: r.name, epithet: r.story!.epithet, calling: r.story!.calling?.id ?? null, deeds: r.story!.deeds.map(d => d.name) })),
+    exiles: (s.court?.exiles ?? []).map(e => ({ player: e.p, name: s.players[e.p]?.name ?? '?', since: e.since, points: e.points ?? 0, vote: e.vote })),
+    court: courtLines(s),
   };
 }
 
 
+
+/** The Court's lines for the Saga: captives' fates and the Coronation's answers (whatever the state holds: views are fogged). */
+function courtLines(s: GameState): Saga['court'] {
+  const ct = s.court;
+  if (!ct) return [];
+  const pn = (p: PlayerId) => s.players[p]?.name ?? '?';
+  const verb: Record<string, (r: NonNullable<GameState['court']>['records'][number]) => string> = {
+    captured: r => `${pn(r.captor)} took ${r.cmd} of ${pn(r.owner)} captive.`,
+    ransomed: r => `${pn(r.owner)} ransomed ${r.cmd} from ${pn(r.captor)}${r.amount ? ` for ${r.amount} ${r.res === 'credits' ? 'credits' : 'influence'}` : ''}.`,
+    executed: r => `${pn(r.captor)} executed ${r.cmd} of ${pn(r.owner)}.`,
+    turned: r => `${r.cmd} left ${pn(r.owner)} to serve ${pn(r.captor)}.`,
+    released: r => `${pn(r.captor)} released ${r.cmd}.`,
+  };
+  const lines = [
+    ...ct.records.map(r => ({ turn: r.turn, kind: r.kind, text: verb[r.kind]?.(r) ?? '', players: [r.captor, r.owner] })),
+    ...ct.decrees.map(d => ({ turn: d.turn, kind: d.answer, players: [d.p, d.holder],
+      text: d.answer === 'kneel' ? `${pn(d.p)} knelt to ${pn(d.holder)}.` : d.answer === 'broke' ? `${pn(d.p)} broke its knee and struck ${pn(d.holder)}.` : `${pn(d.p)} ${d.auto ? 'gave no answer, and so defied' : 'defied'} ${pn(d.holder)}.` })),
+  ];
+  return lines.filter(l => l.text).sort((a, b) => a.turn - b.turn);
+}

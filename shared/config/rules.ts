@@ -234,8 +234,8 @@ export const DEFAULT_RULES = {
   },
 };
 
-export type Rules = typeof DEFAULT_RULES & typeof EXTRA_DEFAULTS & typeof PLAYTEST_DEFAULTS & typeof SOUL_DEFAULTS & typeof SIGNATURE_DEFAULTS & typeof SYSTEMS_DEFAULTS & typeof WORLD_DEFAULTS;
-export function defaultRules(): Rules { return structuredClone({ ...DEFAULT_RULES, ...EXTRA_DEFAULTS, ...PLAYTEST_DEFAULTS, ...SOUL_DEFAULTS, ...SIGNATURE_DEFAULTS, ...SYSTEMS_DEFAULTS, ...WORLD_DEFAULTS }); }
+export type Rules = typeof DEFAULT_RULES & typeof EXTRA_DEFAULTS & typeof PLAYTEST_DEFAULTS & typeof SOUL_DEFAULTS & typeof SIGNATURE_DEFAULTS & typeof SYSTEMS_DEFAULTS & typeof WORLD_DEFAULTS & typeof COURT_DEFAULTS;
+export function defaultRules(): Rules { return structuredClone({ ...DEFAULT_RULES, ...EXTRA_DEFAULTS, ...PLAYTEST_DEFAULTS, ...SOUL_DEFAULTS, ...SIGNATURE_DEFAULTS, ...SYSTEMS_DEFAULTS, ...WORLD_DEFAULTS, ...COURT_DEFAULTS }); }
 
 export function isObj(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -253,10 +253,10 @@ export function mergeRules<T>(base: T, over: unknown): T {
 }
 
 /** Layers whose absence from a game's rules means "off": the sim plays a game saved before they existed without them. */
-export const OPT_IN_LAYERS = ['soul', 'signature', 'world'] as const;
+export const OPT_IN_LAYERS = ['soul', 'signature', 'world', 'court'] as const;
 /**
  * Rules of a saved game, upgraded for this build: every knob a newer version added is filled from the defaults,
- * except that a whole layer the save predates (no `soul` / `signature` / `world` group) stays off instead of switching on
+ * except that a whole layer the save predates (no `soul` / `signature` / `world` / `court` group) stays off instead of switching on
  * mid-game (old fleets have no banners, old houses no Fate...). Use this, not mergeRules(defaultRules(), saved),
  * when loading a save.
  */
@@ -640,5 +640,36 @@ export const WORLD_DEFAULTS = {
     outpostCap: 3,               // B3: Outpost members (Depot, Sensor Array, Warp Gate)
     station: false,              // B3: no new Stations (built ones keep their +1 citizens cap)
     engrave: false,              // B4: no Engrave order
+  },
+};
+
+// ---------------------------------------------------------------- the Court (docs/SOUL.md phase C; shared/sim/court.ts)
+// Ransom of captured commanders, the Coronation (Kneel or Defy) and Exile. Each is ONE free decision with a visible
+// payoff. An opt-in layer (OPT_IN_LAYERS): a save without a `court` group plays exactly as before. Needs the Soul layer.
+export const COURT_DEFAULTS = {
+  court: {
+    enabled: true,
+    // ---- Ransom: a commander whose fleet is wiped out (or caught limping) by a house with ships there is captured
+    ransom: true,
+    releaseTurns: 4,             // a captive goes home free at the end of the turn it was taken + this (no game stalls)
+    ransomCredits: 12,           // the captor names the currency; the price is fixed: base + perRank x rank
+    ransomCreditsPerRank: 4,
+    ransomInfluence: 4,
+    ransomInfluencePerRank: 1,
+    turnInfluence: 3,            // turning a commander costs the captor this + perRank x rank influence
+    turnInfluencePerRank: 1,
+    executeHit: 0.04,            // execution: a grievance that never clears; the victim's house gets debtHit + this vs the executioner
+    // ---- Coronation: a new Throne holder; each rival publicly Kneels or Defies (no answer = Defy)
+    coronation: true,
+    decreeTurns: 2,              // rivals answer within this many turns
+    kneelInfluence: 4,           // paid at once to a house that kneels (once per house and holder per game)
+    kneelBreakVp: 2,             // a house that knelt and then strikes the holder (Seize or Influence on it) loses this VP
+    // ---- Exile: an eliminated house whispers to the Warden, keeps a ghost vote, and scores Exile points
+    exile: true,
+    whisperGap: 6,               // the Warden obeys a whisper only against a house within this many VP of the leader
+    ghostInfluence: 1,           // the house the ghost vote backs gains this influence a turn (and wins exact VP ties)
+    exileShipPts: 1,             // Exile points per ship the marked house loses...
+    exileWorldPts: 2,            // ...per world it loses...
+    exileWardenMult: 2,          // ...doubled when the Warden did it. Only points against the eventual winner count.
   },
 };

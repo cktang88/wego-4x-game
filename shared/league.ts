@@ -39,6 +39,8 @@ export interface LeagueSeatSummary {
   shipsKilled: number;
   /** The house's banners as the Saga lists them (most storied first), at most three. */
   banners: string[];
+  /** The Court: Exile points (what this house, in exile, cost the winner). Absent in older summaries and for houses never exiled. */
+  exilePoints?: number;
 }
 
 export interface LeagueGameSummary {
@@ -87,6 +89,8 @@ export interface LeagueMemberRow {
   vpTotal: number; oathsKept: number; oathsBroken: number;
   /** One earned title (LOOPS.md §3.4), or null. */
   title: string | null;
+  /** The Court: Exile points earned across games (making the winner's victory costly). */
+  exilePoints: number;
   /** Holds the Ugly Trophy (last place in the League's latest game). */
   ugly: boolean;
 }
@@ -249,6 +253,7 @@ export function summarizeGame(s: GameState, inp: SummaryInput): LeagueGameSummar
     shipsLost: lost[p.id], shipsKilled: kills[p.id].reduce((a, x) => a + x, 0),
     banners: saga.fleets.filter(f => f.owner === p.id).sort((a, b) => Number(b.fate === 'alive') - Number(a.fate === 'alive') || b.rank - a.rank || b.epithets.length - a.epithets.length || a.id - b.id)
       .slice(0, 3).map(f => clip(f.epithets.length ? `${f.name}, ${f.epithets[f.epithets.length - 1]}` : f.name, 90)),
+    ...(saga.exiles.some(e => e.player === p.id) ? { exilePoints: int(saga.exiles.find(e => e.player === p.id)!.points, 0, 1e6) } : {}),
   }));
   return {
     game: inp.game, name: clip(inp.name, 60), createdAt: int(inp.createdAt, 0, 1e15), mode: s.mode === 'live' ? 'live' : 'wego',
@@ -277,13 +282,13 @@ export function leagueTable(l: League): LeagueTable {
   const games = l.games;
   const rows = new Map<string, LeagueMemberRow>();
   for (const g of games) for (const sd of g.seats) {
-    const r = rows.get(sd.member) ?? { key: sd.member, name: sd.name, kind: sd.kind, color: sd.color, games: 0, wins: 0, crowns: 0, podiums: 0, lastPlaces: 0, vpTotal: 0, oathsKept: 0, oathsBroken: 0, title: null, ugly: false };
+    const r = rows.get(sd.member) ?? { key: sd.member, name: sd.name, kind: sd.kind, color: sd.color, games: 0, wins: 0, crowns: 0, podiums: 0, lastPlaces: 0, vpTotal: 0, oathsKept: 0, oathsBroken: 0, title: null, ugly: false, exilePoints: 0 };
     r.name = sd.name; r.color = sd.color; r.kind = sd.kind;   // the latest game's name and colour
     r.games++;
     if (sd.place === 1 && g.winner !== null) r.wins++;
     if (sd.place <= 2) r.podiums++;
     if (sd.place === g.seats.length) r.lastPlaces++;
-    r.crowns += sd.crowns; r.vpTotal += sd.vp;
+    r.crowns += sd.crowns; r.vpTotal += sd.vp; r.exilePoints += int(sd.exilePoints ?? 0, 0, 1e6);
     r.oathsKept += sd.vowsKept + sd.pactsKept; r.oathsBroken += sd.vowsBroken + sd.oathsBroken;
     rows.set(sd.member, r);
   }

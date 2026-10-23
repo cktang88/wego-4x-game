@@ -57,6 +57,26 @@ describe('fog of war: viewFor', () => {
     expect(viewFor(s, 0).state.fleets.find(f => f.id === mine.id)!.doctrine.guard).toBe(true);
   });
 
+  it("hides the Court's private business: others' captives and terms, an exile's whisper and tally (decrees stay public)", () => {
+    const s = ai3(14);
+    const c = { name: 'Secret Prisoner', xp: 0, rank: 2, traits: [], alive: true, deeds: { kills: 0, wins: 0, defWins: 0, losses: 0, retreats: 0, captures: 0 }, rivals: {} };
+    s.court = { nextId: 2, captives: [{ id: 1, cmd: c, owner: 1, captor: 2, fleet: 'Lost Wing', region: 0, turn: 1, until: 5, offer: { res: 'credits', amount: 20, turn: 1 } }],
+      records: [{ turn: 1, kind: 'captured', cmd: c.name, owner: 1, captor: 2, public: false }, { turn: 1, kind: 'executed', cmd: 'Someone', owner: 2, captor: 1, public: true }],
+      coronation: { holder: 1, since: 1, until: 3, answers: { 2: 'defy' } }, kneels: [], decrees: [{ turn: 1, p: 2, holder: 1, answer: 'defy' }], paid: [],
+      exiles: [{ p: 2, since: 1, whisper: 1, vote: 0, tally: [0, 5, 0] }] };
+    const v = viewFor(s, 0).state;
+    expect(v.court!.captives).toEqual([]);
+    expect(v.court!.records.map(r => r.kind)).toEqual(['executed']);
+    expect(JSON.stringify(v.court).includes('Secret Prisoner')).toBe(false);
+    expect(v.court!.exiles[0]).toMatchObject({ whisper: null, vote: 0, tally: [] });
+    expect(v.court!.coronation!.answers[2]).toBe('defy');
+    expect(v.court!.decrees.length).toBe(1);
+    // the two houses involved see the captive and its terms; the exile sees its own whisper
+    expect(viewFor(s, 1).state.court!.captives[0].offer!.amount).toBe(20);
+    expect(viewFor(s, 2).state.court!.captives.length).toBe(1);
+    expect(viewFor(s, 2).state.court!.exiles[0].whisper).toBe(1);
+  });
+
   it("zeroes rivals' battle stats and anonymises their battle-honor VP lines", () => {
     const s = ai3(12);
     s.turnStats = { kills: [1, 5, 2], battlesWon: [0, 2, 1], crownBattlesWon: [0, 1, 0], captures: [0, 1, 0] };

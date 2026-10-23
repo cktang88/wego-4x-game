@@ -2,6 +2,7 @@
 import { withinArea } from './graph.ts';
 import { coverage, seesFleetsIn, seesFleet, postureSeenBy } from './visibility.ts';
 import { headlineVisible } from './herald.ts';
+import { courtViewFor } from './court.ts';
 import type { Doctrine, Fleet, GameState, PlayerId, RegionId, TurnResult } from './types.ts';
 
 /** Remember what a player last saw of each region (for fogged regions). */
@@ -122,6 +123,8 @@ export function viewFor(s: GameState, p: PlayerId | null): PlayerView {
     // the Herald's memory: only what this house could know (same rule as a headline)
     if (v.soul.annals) v.soul.annals = v.soul.annals.filter(a => headlineVisible(a, p));
   }
+  // the Court: captives and terms for the two houses involved; an exile's whisper and tally for itself; decrees are public
+  if (v.court) v.court = courtViewFor(v.court, p);
   if (v.live) {
     // your own queue and bank only; rivals' banks and plans are secret
     v.live.queue = { [p]: v.live.queue[p] ?? [] };

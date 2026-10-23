@@ -13,9 +13,11 @@
 //  Everything here is pure and deterministic given the same sequence of calls,
 //  so the server (authoritative) and the browser (solo games) share it.
 // ============================================================================
+import { captiveBlock, ransomBlock, decreeBlock, exileBlock } from './court.ts';
 import { resolveTurn, creditRate } from './resolve.ts';
 import { fleetSpeed } from './graph.ts';
 import { planTurn } from './ai.ts';
+import { courtFree } from './ai-court.ts';
 import { validateOrder, ORDER_INFO, orderCost, canAfford, pay } from './orders.ts';
 import { researchBlock, techCost, opposite, blueprintFor, baseHp, hasTech, moveNeighbors } from './empire.ts';
 import { MODULE } from '../config/empire.ts';
@@ -244,7 +246,8 @@ export function queueFree(s: GameState, pid: PlayerId, fa: FreeAction): string |
   const L = s.live;
   if (!L) return 'not a live game';
   if (s.winner !== null) return 'the game is over';
-  if (!s.players[pid] || s.players[pid].eliminated) return 'you have been eliminated';
+  // the Court: an exiled house still whispers to the Warden and casts its ghost vote (and nothing else)
+  if (!s.players[pid] || (s.players[pid].eliminated && fa.type !== 'exile')) return 'you have been eliminated';
   const list = (L.free[pid] ??= []);
   const same = (x: FreeAction) =>
     x.type === fa.type && (
@@ -252,7 +255,8 @@ export function queueFree(s: GameState, pid: PlayerId, fa: FreeAction): string |
       : fa.type === 'blueprint' ? (x as { cls: string }).cls === fa.cls
       : fa.type === 'calling' || fa.type === 'raze' || fa.type === 'wposture' || fa.type === 'tribute' ? (x as { region: number }).region === fa.region
       : fa.type === 'fate' ? (x as { fleet?: number; region?: number }).fleet === fa.fleet && (x as { region?: number }).region === fa.region
-      : fa.type === 'dispatch');   // a newer dispatch replaces the queued one
+      : fa.type === 'captive' || fa.type === 'ransom' ? (x as { id: number }).id === fa.id
+      : fa.type === 'dispatch' || fa.type === 'decree' || fa.type === 'exile');   // a newer dispatch (answer, whisper) replaces the queued one
   // the replaced action comes out first (it must not count against its own replacement), but goes back in
   // if the replacement is refused: a rejected re-issue never silently cancels what was already queued
   const i = list.findIndex(same);
@@ -308,6 +312,11 @@ function queueFreeBlock(s: GameState, pid: PlayerId, fa: FreeAction, list: FreeA
       if (list.filter(x => x.type === 'fate').length + (sp && sp.turn === s.turn ? sp.n : 0) >= SG(s).fatePerTurn) return `at most ${SG(s).fatePerTurn} Fate per cycle`;
       break;
     }
+    // the Court: checked now and again at the tick
+    case 'captive': return captiveBlock(s, pid, fa.id, fa.act, fa.res);
+    case 'ransom': return ransomBlock(s, pid, fa.id, fa.pay);
+    case 'decree': return decreeBlock(s, pid, fa.answer);
+    case 'exile': return exileBlock(s, pid, fa.whisper, fa.vote);
     case 'merge': {
       const f = s.fleets.find(x => x.id === fa.fleet && x.owner === pid);
       if (!f) return 'no such fleet of yours';
@@ -348,9 +357,10 @@ export function runTick(s0: GameState, isAI: (pid: PlayerId) => boolean): GameSt
   const L = s1.live!;
   const tickTime = L.startedAt + (L.tick + 1) * tickMs(s1);
   accrue(s1, tickTime);
-  // AI seats: spend a banked order on their best idea
+  // AI seats: spend a banked order on their best idea (isAI is asked once per seat per tick)
+  const ai = s1.players.map(p => isAI(p.id));
   for (const p of s1.players) {
-    if (!isAI(p.id) || p.eliminated || s1.winner !== null || L.bank[p.id] < 1) continue;
+    if (!ai[p.id] || p.eliminated || s1.winner !== null || L.bank[p.id] < 1) continue;
     const plan = planTurn(s1, p.id);
     const fleetOf = (o: Order) => ('fleet' in o && o.type !== 'build' ? s1.fleets.find(f => f.id === o.fleet) : undefined);
     // skip orders that would only redo what a fleet is already doing (re-routing to the same place, re-besieging)
@@ -374,6 +384,8 @@ export function runTick(s0: GameState, isAI: (pid: PlayerId) => boolean): GameSt
     }
     for (const fa of plan.free) if (['doctrine', 'research', 'blueprint', 'vow', 'honour', 'calling', 'raze', 'dispatch', 'posture', 'wposture', 'fate', 'tribute'].includes(fa.type)) queueFree(s1, p.id, fa);
   }
+  // the Court's decisions cost no order: AI seats (and exiles) make them every tick, banked order or not
+  for (const p of s1.players) if (ai[p.id] && s1.winner === null) for (const fa of courtFree(s1, p.id)) queueFree(s1, p.id, fa);
   const ticks = ticksPerCycle(s1);
   const t = L.tick;
   const subs: Record<number, { orders: Order[]; free: FreeAction[] }> = {};

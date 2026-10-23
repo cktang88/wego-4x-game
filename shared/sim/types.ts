@@ -145,6 +145,11 @@ export interface Commander {
   deeds: { kills: number; wins: number; defWins: number; losses: number; retreats: number; captures: number };
   rivals: Record<string, { met: number; lastWinner: string | null }>;  // other commander -> record
   alive: boolean;
+  // ---- the Court (docs/SOUL.md phase C). Optional: absent on every commander from before it.
+  /** Turned by a captor: it now serves the house that held it (public once it commands). */
+  turned?: { from: PlayerId; turn: number } | null;
+  /** Scars carried from the fleet it lost (a turned commander keeps them; its next fleet bears them). */
+  scars?: FleetScar[];
 }
 
 export interface Fleet {
@@ -244,7 +249,9 @@ export interface RegionStory {
 /** A system ledger entry. `body`: index into Region.bodies, or 3 for the Station (BODY_STATION). */
 export interface LedgerEntry { turn: number; kind: string; text: string; body?: number; players?: PlayerId[] }
 
-export interface BloodDebt { id: number; turn: number; debtor: PlayerId; creditor: PlayerId; killer: string; victim: string; fleet: string; region: RegionId; cleared?: number | null }
+export interface BloodDebt { id: number; turn: number; debtor: PlayerId; creditor: PlayerId; killer: string; victim: string; fleet: string; region: RegionId; cleared?: number | null;
+  /** The Court: an execution. A grievance never clears (vengeance does not pay it) and hits harder (court.executeHit). */
+  grievance?: boolean }
 export interface Headline {
   text: string; kind: string; region?: RegionId; players: PlayerId[]; drama: number; public: boolean; seenBy?: PlayerId[];
   /** The Herald's story under the headline (paragraphs split by a blank line). Only facts its audience may know. Absent in old saves. */
@@ -427,7 +434,11 @@ export type FreeAction =
   | { type: 'posture'; fleet: FleetId; posture: Posture }        // Signature: this turn's fleet posture (secret)
   | { type: 'wposture'; region: RegionId; posture: WorldPosture } // Signature: this turn's posture for a system you own (secret)
   | { type: 'fate'; use: FateUse; fleet?: FleetId; region?: RegionId }  // Signature: spend a Fate token (public)
-  | { type: 'tribute'; region: RegionId; accept?: boolean };            // Star systems: offer terms over a system you besiege / accept them for your own
+  | { type: 'tribute'; region: RegionId; accept?: boolean }             // Star systems: offer terms over a system you besiege / accept them for your own
+  | { type: 'captive'; id: number; act: CaptiveAct; res?: RansomRes }    // Court: the captor ransoms (names the currency), executes or turns a captive
+  | { type: 'ransom'; id: number; pay: boolean }                        // Court: the owner pays (or refuses) the terms on its captive
+  | { type: 'decree'; answer: DecreeAnswer }                            // Court: Kneel or Defy the new Throne holder (public)
+  | { type: 'exile'; whisper?: PlayerId; vote?: PlayerId };             // Court: an eliminated house whispers to the Warden / casts its ghost vote
 
 export interface Submission {
   orders: OrderSlots;
@@ -546,6 +557,56 @@ export interface GameState {
   soul?: SoulState;
   /** League games: what the Herald may recall of past games between these houses (public; names and counts only). */
   league?: LeagueMemory;
+  /** The Court (Ransom, Coronation, Exile): absent in old saves and when rules.court is off. */
+  court?: CourtState;
+}
+
+// ------------------------------------------------------------------- the Court (shared/sim/court.ts)
+export type RansomRes = 'credits' | 'influence';
+export type CaptiveAct = 'ransom' | 'execute' | 'turn';
+export type DecreeAnswer = 'kneel' | 'defy';
+/** A captured commander. Visible to its owner and its captor only. */
+export interface Captive {
+  id: number;
+  cmd: Commander;
+  owner: PlayerId;                 // the house it served
+  captor: PlayerId;
+  fleet: string;                   // the fleet it lost
+  region: RegionId;                // where it was taken
+  turn: number;                    // taken at the end of this turn
+  until: number;                   // released home, free, at the end of this turn (court.releaseTurns)
+  scars?: FleetScar[];             // its lost fleet's scars (a turned commander keeps them)
+  /** Terms named by the captor: the owner may pay them from the next turn on. */
+  offer?: { res: RansomRes; amount: number; turn: number } | null;
+  refused?: number | null;         // the turn the owner refused the last terms
+  acted?: number;                  // the last turn the captor acted on it (one act a turn)
+}
+/** What happened to a captive (the Saga). Public ones (executed, turned) for all; the rest for the two houses. */
+export interface CourtRecord { turn: number; kind: 'captured' | 'ransomed' | 'executed' | 'turned' | 'released'; cmd: string; owner: PlayerId; captor: PlayerId; res?: RansomRes; amount?: number; public: boolean }
+/** A new reign's public countdown: each rival must Kneel or Defy before the end of turn `until` (public). */
+export interface Coronation { holder: PlayerId; since: number; until: number; answers: Record<number, DecreeAnswer> }
+/** A public answer to a Coronation (or a broken knee). */
+export interface Decree { turn: number; p: PlayerId; holder: PlayerId; answer: DecreeAnswer | 'broke'; auto?: boolean }
+/** An eliminated house that stays at the table. `whisper` and `tally` are its secret; `vote` and `points` are public. */
+export interface ExileState {
+  p: PlayerId;
+  since: number;
+  whisper: PlayerId | null;        // the house it points the Warden at (and marks for Exile points)
+  vote: PlayerId | null;           // its ghost vote at the Throne
+  tally: number[];                 // Exile points earned against each house so far
+  points?: number;                 // final: the tally against the winner (set when the game ends)
+}
+export interface CourtState {
+  nextId: number;
+  captives: Captive[];
+  records: CourtRecord[];
+  coronation: Coronation | null;
+  /** Houses that knelt to the current holder: striking it costs court.kneelBreakVp (public). */
+  kneels: { p: PlayerId; holder: PlayerId; turn: number }[];
+  decrees: Decree[];
+  /** "p:holder" pairs already paid for kneeling (once per pair per game). */
+  paid: string[];
+  exiles: ExileState[];
 }
 
 /** LIVE mode: resolve a single tick instead of a whole turn. */

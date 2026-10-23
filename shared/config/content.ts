@@ -228,6 +228,19 @@ export const HERALD_TEMPLATES: Record<string, string[]> = {
   p_levies:    ['{r} calls the levies: the walls fill in time', 'Levies man the walls of {r}'],
   fate:        ['FATE: {a} spends a token — {x}', 'The dice are thrown: {a} — {x}'],
   fate_bonus:  ['Fortune favours the fallen: {a} gains a Fate', '{a}, far behind, is touched by Fate'],
+  // ---- the Court ({a} = the captor / the house that answers, {b} = the commander's house / the Throne's holder, {c} = the commander)
+  captured:    ['{c} TAKEN CAPTIVE by {a}', '{a} holds {c} of {b} in irons'],
+  ransom_offer: ['{a} names its price for {c}', 'Terms for {c}: {a} writes to {b}'],
+  ransomed:    ['{b} buys back {c} from {a}', '{c} ransomed: {b} pays {a}'],
+  released:    ['{a} sends {c} home', '{c} walks free from {a}'],
+  executed:    ['EXECUTED: {a} puts {c} of {b} to death', '{a} hangs {c}: {b} swears a grievance'],
+  turned:      ['TURNCOAT: {c} now serves {a}', '{c} leaves {b} for {a}'],
+  kneel:       ['{a} KNEELS to {b}', '{a} bends the knee to {b}'],
+  defy:        ['{a} DEFIES {b}', '{a} will not kneel to {b}'],
+  defy_silent: ['No answer from {a}: it defies {b}', 'Silence from {a} is defiance of {b}'],
+  knee_broken: ['{a} RISES FROM ITS KNEE and strikes {b}', 'The knee breaks: {a} turns on {b}'],
+  ghost_vote:  ['A ghost vote: the exiled {a} backs {b}', '{a}, in exile, speaks for {b}'],
+  exiled:      ['{a} GOES INTO EXILE', 'The exiles of {a} still whisper'],
 };
 
 /** Signature: fleet postures (docs/SIGNATURE.md). The numbers live in rules.signature. */

@@ -9,6 +9,7 @@ import type { ChatMsg, CreateGameReq, GameMeta, SeatInfo } from '../shared/proto
 import { spectatorView } from './history.ts';
 import { cleanLeagueMemory, leagueMemory, leagueName, memberKey, summarizeGame, type League } from '../shared/league.ts';
 import type { LeagueStore } from './league.ts';
+import { exileOf } from '../shared/sim/court.ts';
 
 export interface Seat {
   name: string;
@@ -497,7 +498,8 @@ export class Store {
     if (g.state.winner !== null) throw new UserError('game is over', 409);
     if (g.state.live) throw new UserError('this is a live game: spend orders directly', 409);
     if (!Number.isInteger(seat) || !g.seats[seat] || g.seats[seat].kind !== 'human') throw new UserError('bad seat', 403);
-    if (g.state.players[seat].eliminated) throw new UserError('you have been eliminated', 409);
+    // the Court: an exiled seat may still send its whisper and ghost vote (free actions only; it never holds up the turn)
+    if (g.state.players[seat].eliminated && !exileOf(g.state, seat)) throw new UserError('you have been eliminated', 409);
     if (turn !== undefined && turn !== null && turn !== g.state.turn) throw new UserError(`stale submission for turn ${turn}; it is now turn ${g.state.turn}`, 409);
     const sub = validateSubmission(raw, g.state.rules.orders.perTurn);
     g.pending[seat] = sub;
@@ -532,7 +534,7 @@ export class Store {
         const s = g.seats[i];
         const p = g.state.players[i];
         if (g.pending[i]) subs[i] = g.pending[i];
-        else if (p.eliminated) subs[i] = emptySubmission(g.state);
+        else if (p.eliminated) subs[i] = s.kind === 'ai' ? planTurn(g.state, i) : emptySubmission(g.state);   // an AI exile still whispers
         else if (s.kind === 'ai') subs[i] = planTurn(g.state, i);
         else {
           // missed the deadline: steward takes over

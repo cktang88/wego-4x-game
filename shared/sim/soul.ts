@@ -278,7 +278,9 @@ export function debtHit(s: GameState, shooter: PlayerId | -1, target: PlayerId |
   let h = 0;
   for (const d of s.soul.debts) {
     if (d.cleared || d.creditor !== shooter || d.debtor !== target) continue;
-    h = Math.max(h, S.debtHit + (targetCmd && d.killer === targetCmd ? S.debtKillerHit : 0));
+    // the Court: an execution's grievance hits harder (and never clears)
+    const extra = d.grievance ? ((s.rules.court as { executeHit?: number } | undefined)?.executeHit ?? 0.04) : 0;
+    h = Math.max(h, S.debtHit + extra + (targetCmd && d.killer === targetCmd ? S.debtKillerHit : 0));
   }
   return h;
 }
@@ -398,8 +400,8 @@ export function breakFleet(s: GameState, f: Fleet, at: RegionId, pulse: number, 
   f.ships = [];
 }
 
-/** A limping fleet caught by a hostile fleet (or garrison) dies. */
-export function catchLimping(s: GameState, f: Fleet, by: PlayerId | -1, killer: Fleet | null, pulse: number, emit: Emit) {
+/** A limping fleet caught by a hostile fleet (or garrison) dies. `captive`: the Court takes its commander (no roll; the caller does it). */
+export function catchLimping(s: GameState, f: Fleet, by: PlayerId | -1, killer: Fleet | null, pulse: number, emit: Emit, captive = false) {
   const r = s.regions[f.region];
   emit({ k: 'destroyed', pulse, fleet: f.id, owner: f.owner, region: r.id, name: f.name });
   for (const sh of f.ships) { r.wreckage++; if (sh.title) r.memorials.push(`${sh.name} ${sh.title}, lost limping home at ${r.name} (turn ${s.turn})`); }
@@ -407,7 +409,7 @@ export function catchLimping(s: GameState, f: Fleet, by: PlayerId | -1, killer: 
   f.ships = [];
   // the commander falls with it or escapes to command again (as for any lost fleet; deterministic, no rng draw)
   const c = f.commander;
-  if (f.owner >= 0 && c.alive && !c.name.endsWith('flag captain')) {
+  if (f.owner >= 0 && c.alive && !c.name.endsWith('flag captain') && !captive) {
     if ((hashString(`${s.seed}:${s.turn}:${f.id}:caught`) % 1000) / 1000 < (s.rules.commanderFate?.dieChance ?? 0.5)) {
       c.alive = false;
       r.memorials.push(`${c.name} fell with ${f.name}, caught limping home at ${r.name}, turn ${s.turn}.`);
@@ -447,7 +449,7 @@ export function onBeaten(s: GameState, loser: PlayerId, winner: PlayerId, cmd: s
   const st = s.soul;
   if (!st) return;
   for (const d of st.debts) {
-    if (d.cleared || d.creditor !== winner || d.debtor !== loser) continue;
+    if (d.cleared || d.grievance || d.creditor !== winner || d.debtor !== loser) continue;
     d.cleared = s.turn;
     emit({ k: 'soul', pulse, kind: 'vengeance', owner: null, text: `${pname(s, winner)} avenges ${d.victim}.`, region: at, players: [winner, loser] });
     beat(s, { kind: 'vengeance', text: headline(s, 'vengeance', { a: pname(s, winner), b: pname(s, loser), c: d.victim, r: s.regions[at]?.name ?? '?' }), region: at, players: [winner, loser], drama: 7, public: true });

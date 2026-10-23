@@ -18,20 +18,26 @@ Needs: server-side league identity, map seeds per league, and a persistence and 
 - The winner's Decree (cosmetic or flavour only).
 - The last-place finisher's Ugly Trophy.
 
-## Exile (Soul phase C)
-Eliminated players stay in the game:
-- they whisper to the Warden (set its hunt priority);
-- they keep a ghost vote at the Throne;
-- they earn Exile points for making the winner's victory costly.
+## The Court (Soul phase C): built
+Exile, Ransom and Coronation (Kneel or Defy) are built. See docs/SOUL.md section 4, `shared/sim/court.ts`,
+`shared/sim/ai-court.ts`, `client/src/court/` and `tests/court.test.ts`. What is still open:
+- **Wiring the UI modules** into the HUD: the chips, the prompt sheet, the exile's HUD and the Saga and League
+  sections. The hooks are listed with the modules (`client/src/court/index.ts`).
+- **Ransom terms beyond influence or credits** (a pact, a relic) were cut to keep the decision to one currency
+  choice. Revisit them if players ask.
+- **Balance** (`scripts/simulate.ts`). Wins by AI level, with the court off and then on, on the same seeds:
 
-## Ransom (Soul phase C)
-Captured commanders can be ransomed (influence, a pact, a relic), executed (a permanent grievance), or
-turned (they serve the captor and keep their memories). A clock auto-releases them so no game stalls.
+  | suite | games | court off | court on | winning margin (off → on) |
+  |---|---|---|---|---|
+  | expert, standard, novice | 40 | 25 / 13 / 2 | 22 / 16 / 2 | 18.4 → 15.7 VP |
+  | expert, novice, novice | 40 | 38 / 2 | 32 / 8 | 23.9 → 25.1 VP |
+  | standard, novice, novice | 40 | 28 / 12 | 26 / 14 | 19.0 → 21.2 VP |
+  | expert, expert, standard | 40 | 32 / 8 | 32 / 8 | 16.3 → 14.3 VP |
+  | expert, novice, novice | 120 | 110 / 10 | 110 / 10 | 24.0 → 24.0 VP |
+  | expert, standard, novice | 120 | 86 / 31 / 3 | 80 / 32 / 8 | 18.7 → 18.5 VP |
 
-## Coronation: Kneel or Defy (Soul phase C)
-Taking the Throne starts a public countdown, and each rival must publicly Kneel or Defy.
-- Kneel: gain influence; striking the holder later costs VP.
-- Defy: costs nothing, but is a public declaration.
+  The shift is small and runs toward the trailing seats: they get kneel influence and ransoms. Seat balance did not
+  move. With `court.enabled: false`, the numbers match the build before the Court exactly.
 
 ## Turncoats
 Spend influence to plant a hidden agent in a rival's fleet or world, then activate it once at the worst possible moment.

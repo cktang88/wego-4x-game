@@ -115,6 +115,9 @@ export function newFleet(s: GameState, rng: Rng, owner: PlayerId, region: Region
     doctrine: { stance: 'defensive', retreatAt: 0.35, target: 'weakest', guard: false },
     fortified: false, fatigued: false, ordersThisTurn: 0, guardUsed: false, history: [], bornTurn: s.turn,
   };
+  // the Court: a turned commander brings the scars of the fleet it lost (and the story of whose it was)
+  if (commander.scars?.length) { f.scars = commander.scars; delete commander.scars; }
+  if (commander.turned) f.history.push(`T${s.turn}: ${commander.name}, once of ${s.players[commander.turned.from]?.name ?? '?'}, takes command.`);
   s.fleets.push(f);
   return f;
 }

@@ -91,9 +91,57 @@ Every world keeps a ledger of what happened there: **Toil** (turns developed), *
 - **The Saga** (end of game): a shareable page with a one-paragraph saga per fleet, the Throne's list of reigns, the memorial roll, the three biggest moments, and broken vows and debts. It is the thing you send to the group chat.
 - **Later (phase B):**
   - A **League** ledger across games: feuds, records, a Hall of Crowns. The winner's Decree names a star, and the last-place finisher carries an Ugly Trophy.
-  - **Exile:** eliminated players whisper to the Warden and keep a ghost vote.
-  - **Ransom** of captured commanders.
-  - **Coronation** with Kneel or Defy.
+- **The Court (phase C, built):** Ransom, the Coronation and Exile. See section 4.
+
+## 4. The Court: Ransom, Coronation, Exile (phase C)
+Three social mechanics, each **one free decision with a visible payoff**. The code is `shared/sim/court.ts` (rules),
+`shared/sim/ai-court.ts` (AI) and `client/src/court/` (UI modules). Every number is in `rules.court`. It is an opt-in
+layer (`OPT_IN_LAYERS`): a save without a `court` group plays exactly as before, and it needs the Soul layer.
+
+**Ransom.** A commander is **captured** instead of escaping when:
+- its fleet is wiped out and the house that sank it still has ships in the system (a commander who falls still falls); or
+- its limping fleet is caught by an enemy fleet. This is a capture outright, with no roll.
+
+The Warden and garrisons never take prisoners. The captor makes **one decision a turn**:
+
+| Choice | What happens | Default numbers |
+|---|---|---|
+| **Ransom** | Name the currency. The price is fixed: base + per-rank × rank. The owner may pay from the next turn; paying brings the commander home at once. Refusing clears the terms, and the captor decides again. | 12¢ + 4¢/rank, or 4 + 1/rank influence |
+| **Execute** (a wax seal) | The commander dies. The captor's house owes a **grievance**: a blood-debt that never clears (vengeance does not pay it) and gives the victim's house +debtHit +4% to hit the executioner. It makes a public headline and a memorial. | executeHit 0.04 |
+| **Turn** | The captor pays influence, and the commander joins its reserve. The commander keeps its rank, rivals and deeds, and its next fleet bears the scars of the fleet it lost. Public headline. | 3 + 1/rank influence |
+
+**The clock:** at the end of turn captured + `releaseTurns` (4), a captive goes home free, so no game stalls. A captive
+whose captor falls is released at once. **Fog:** the captive, the terms and any payment are seen by the two houses only.
+A witness to the battle reads only "X survives the wreck". Executions and turncoats are public. The AI ransoms first. It
+executes a commander that killed one of its own, turns a Veteran or better when it can afford to, and lets the clock run
+otherwise. As an owner, it pays for a Blooded or better commander, or when the price is under 35% of its stock.
+
+**Coronation: Kneel or Defy.** A new Throne reign opens a public countdown of `decreeTurns` (2) turns. Every living
+rival answers in public:
+- **Kneel** gives `kneelInfluence` (4) at once, paid once per house and holder per game. While that reign lasts, a
+  Seize on the holder's worlds or fleets, or an Influence on its worlds, **breaks the knee**. That costs
+  `kneelBreakVp` (2) VP, in public.
+- **Defy** is free, and printed in the Herald.
+- **No answer by the deadline counts as Defy** (printed as silence).
+
+Losing the Throne releases the knees. The AI kneels only when it trails the holder by 4 VP or more, shares no border
+with it, and the holder is not close to winning. It counts a broken knee as a cost when it picks orders.
+
+**Exile.** A house that is eliminated goes into exile and stays at the table. It has two standing choices, set with
+one free action:
+- **Whisper to the Warden.** The awake Warden hunts the whispered house instead of the VP leader, but only if that
+  house is within `whisperGap` (6) VP of the leader. This keeps an exile from turning the Warden on the weakest.
+- **Ghost vote.** The house it backs gains `ghostInfluence` (1) influence a turn and **wins an exact VP tie**. That is
+  the only tiebreak an exile has, and it comes before the Throne and Crowns.
+
+**Exile points** come from the losses of the whispered house: 1 per ship and 2 per world, with the Warden's work
+counting double. Only points against the **eventual winner** count. They appear in the Saga (`saga.exiles`) and the
+League (`exilePoints` per seat and per member). The whisper and the running tally are the exile's secret; the vote and
+the final points are public. An AI exile marks the leader and backs the trailing house. A human exile's choice is never
+overwritten by a stand-in plan. An exile has no orders and never holds up the turn.
+
+**Balance** (`scripts/simulate.ts`, the same seeds with the court on and off): see `docs/TODO.md`. Turning the court off
+reproduces the old numbers exactly.
 
 ## What we cut on purpose
 - Per-ship characterization (ships are background detail).
@@ -116,4 +164,5 @@ Every world keeps a ledger of what happened there: **Toil** (turns developed), *
   - map signals (banner tokens with rank chevrons and scar notches, Calling glyphs, tenure ring segments, deed pips, a limping trail);
   - the Herald on turn start;
   - the Saga page.
-- **C:** League, Exile, Ransom, Coronation.
+- **C:** League, Exile, Ransom, Coronation. Exile, Ransom and Coronation are built (section 4). The UI modules are in
+  `client/src/court/`, and the HUD wiring is pending.

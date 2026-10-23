@@ -40,6 +40,7 @@ import { heraldNote, makeEdition, queueDispatch } from './herald.ts';
 import { traitFx, traitHpMult } from './shiptraits.ts';
 import { sigOn, ensureSig, fx, postureOf, effStance, postureSpeed, isDugIn, hasHyperjump, ambushAt, noteArrivals, checkPostures, postureBlock, setPosture, wpostureBlock, setWorldPosture, fateBlock, spendFate, scorchedOnCapture, scorchAftermath, gatesOpenFor, gatesHost, sigEndTurn, regionIdle, regionSurge, SG, POSTURE_IDS, WORLD_POSTURE_IDS, FATE_IDS } from './signature.ts';
 import { BOONS, DEEDS } from '../config/content.ts';
+import { courtOn, ensureCourt, captureCommander, capturable, captiveBlock, captiveAct, ransomBlock, answerRansom, decreeBlock, answerDecree, checkKneels, exileBlock, setExile, wardenTarget, ghostVotes, courtReigns, courtEndTurn, courtTally, courtFinal } from './court.ts';
 
 export function emptySubmission(s: GameState): Submission {
   return { orders: new Array(s.rules.orders.perTurn).fill(null), free: [] };
@@ -96,13 +97,30 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   // eliminated players can't act at all
   const freeRot = s.turn % s.players.length;
   const freeSeats = [...s.players.slice(freeRot), ...s.players.slice(0, freeRot)].filter(p => !p.eliminated);
+  const court = !!ensureCourt(s);
+  const COURT_FREE = new Set(['ransom', 'captive', 'decree', 'exile']);
   for (const p of freeSeats) for (const fa of subs[p.id].free) {
+    if (COURT_FREE.has(fa.type)) continue;   // the Court's pass below
     const err = applyFree(s, rng, p.id, fa, e => freeFails.push(e));
     if (err) freeFails.push({ k: 'fail', pulse: 0, owner: p.id, text: `${fa.type === 'research' ? `Research (${TECH[fa.tech]?.name ?? fa.tech})` : fa.type} failed: ${err}` });
     else if (fa.type === 'research') {
       freeFails.push({ k: 'tech', pulse: 0, owner: p.id, tech: fa.tech });
       if (TECH[fa.tech]?.tier === 4) s.chronicle.push({ turn: s.turn, players: [p.id], major: true, text: `${p.name} completes ${TECH[fa.tech].name}. No other empire can ever have it.` });
     } else if (fa.type === 'revoke') freeFails.push({ k: 'law', pulse: 0, owner: p.id, law: fa.law, revoked: true });
+  }
+  // the Court: owners answer standing terms first, then captors decide, then the Coronation's answers; exiles too
+  // (an exile acts only here). Then a house that knelt and now strikes the holder breaks its knee.
+  if (court) {
+    const seats = [...s.players.slice(freeRot), ...s.players.slice(0, freeRot)];
+    for (const type of ['ransom', 'captive', 'decree', 'exile']) for (const p of seats) {
+      if (p.eliminated !== (type === 'exile')) continue;
+      for (const fa of subs[p.id].free) {
+        if (fa.type !== type) continue;
+        const err = applyFree(s, rng, p.id, fa, e => freeFails.push(e));
+        if (err) freeFails.push({ k: 'fail', pulse: 0, owner: p.id, text: `${fa.type} failed: ${err}` });
+      }
+    }
+    checkKneels(s, subs, 0, e => freeFails.push(e));
   }
   // Signature: postures that contradict their fleet's orders fall back to Steady (a Charge needs a Seize...)
   if (sig) checkPostures(s, subs, e => freeFails.push(e));
@@ -157,6 +175,16 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     for (const f of out.destroyedFleets) {
       emit({ k: 'destroyed', pulse, fleet: f.id, owner: f.owner, region: rid, name: f.name });
       if (soul && f.owner >= 0) { const k = out.killers.get(f.id); onFleetLost(s, f, rid, 'destroyed', k?.owner ?? null, k?.cmd ?? null, pulse, emit); }
+      // the Court: a commander who escaped the wreck is taken captive by the house that sank it, if its ships hold the system
+      const k = court && f.owner >= 0 ? out.killers.get(f.id) : undefined;
+      if (k && capturable(s, f, k.owner) && (s.players[f.owner].reserveCommanders ?? []).includes(f.commander)
+        && s.fleets.some(x => x.owner === k.owner && x.region === rid && x.ships.length)) {
+        if (captureCommander(s, f, k.owner, rid, pulse, emit) && report) {
+          const esc = `${f.commander.name} escapes the wreck of ${f.name} and will command again.`;
+          // a battle report is read by every witness: it says only that the commander survived (the capture is the two houses' news)
+          report.highlights = report.highlights.map(h => (h === esc ? `${f.commander.name} survives the wreck of ${f.name}.` : h));
+        }
+      }
     }
     s.fleets = s.fleets.filter(f => f.ships.length > 0);
     // credit whoever sank the Warden's last ship, even if the battle goes on between players
@@ -207,7 +235,10 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
         if (!catcher && !gar) continue;
         s.chronicle.push({ turn: s.turn, region: r.id, players: [f.owner, ...(catcher && catcher.owner >= 0 ? [catcher.owner] : [])], major: (f.commander.rank >= 3),
           text: `${f.name} is caught limping at ${r.name} and destroyed${catcher ? ` by ${catcher.name}` : ''}.` });
-        catchLimping(s, f, catcher ? catcher.owner : r.owner!, catcher ?? null, pulse, emit);
+        // the Court: a fleet that catches a limping fleet takes its commander captive (no roll)
+        const taken = court && !!catcher && capturable(s, f, catcher.owner);
+        catchLimping(s, f, catcher ? catcher.owner : r.owner!, catcher ?? null, pulse, emit, taken);
+        if (taken) captureCommander(s, f, catcher!.owner, r.id, pulse, emit);
         if (catcher) fought.add(catcher.id);
       }
       if (soul) s.fleets = s.fleets.filter(f => f.ships.length > 0);
@@ -834,7 +865,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   const warden = s.fleets.find(f => f.owner === -1);
   if (warden) {
     if (R.wardenHunt.enabled) {
-      const lead = currentLeader(s);   // only hunts a clear leader (bounty.leaderMinLead)
+      // only hunts a clear leader (bounty.leaderMinLead), unless an exile whispered another name (court.whisperGap)
+      const lead = (court ? wardenTarget(s) : null) ?? currentLeader(s);
       if (lead !== null && s.regions[warden.region].owner !== lead) {
         let best: RegionId[] | null = null;
         for (const r of s.regions) {
@@ -1023,6 +1055,8 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
   maybeWakeWarden(s, rng, endPulse, emit);
   if (soul) {
     soulReigns(s, endPulse, emit);
+    // the Court: a new reign's Coronation; exiles, ghost votes, the captives' clock, the Coronation's deadline
+    if (court) { courtReigns(s, endPulse, emit); courtEndTurn(s, endPulse, emit); }
     // LIVE: everyone who fought in any tick of the cycle (not just this last one)
     soulEndTurn(s, endPulse, emit, live ? new Set([...(s.cycleFought ?? []), ...fought]) : fought);
   }
@@ -1061,8 +1095,11 @@ export function resolveTurn(prev: GameState, submissions: Record<number, Submiss
     finalSignals.push({ turn: s.turn, pulse: 1, observer: o.id, about: p, region: s.players[p].capital, confidence: 'confirmed', text: `Heavy jamming from ${s.players[p].name}'s capital. Their movements this turn are hidden.` });
   }
 
+  // the Court: what each exile's marked house lost in this step
+  if (court) courtTally(s, battles, events, startOwners);
   // ---- victory (LIVE: the turn limit only expires when the cycle ends, not on its first tick)
   checkVictory(s, endCycle);
+  if (court) courtFinal(s);
 
   // LIVE: fleets that fought this tick count for the whole cycle (Grudge sulks, honours... at its end)
   if (live && soul && !endCycle) { const cf = (s.cycleFought ??= []); for (const id of fought) if (!cf.includes(id)) cf.push(id); }
@@ -1193,6 +1230,14 @@ export function cleanFree(fa: unknown): FreeAction | null {
     return { type: 'fate', use: fa.use as FateUse, ...(isId(fa.fleet) ? { fleet: fa.fleet } : {}), ...(isId(fa.region) ? { region: fa.region } : {}) };
   }
   if (fa.type === 'tribute') return isId(fa.region) ? { type: 'tribute', region: fa.region, ...(fa.accept === true ? { accept: true } : {}) } : null;
+  // the Court
+  if (fa.type === 'captive') return isId(fa.id) && (fa.act === 'ransom' || fa.act === 'execute' || fa.act === 'turn') ? { type: 'captive', id: fa.id, act: fa.act, ...(fa.res === 'credits' || fa.res === 'influence' ? { res: fa.res as 'credits' | 'influence' } : {}) } : null;
+  if (fa.type === 'ransom') return isId(fa.id) && typeof fa.pay === 'boolean' ? { type: 'ransom', id: fa.id, pay: fa.pay } : null;
+  if (fa.type === 'decree') return fa.answer === 'kneel' || fa.answer === 'defy' ? { type: 'decree', answer: fa.answer } : null;
+  if (fa.type === 'exile') {
+    if ((fa.whisper !== undefined && !isId(fa.whisper)) || (fa.vote !== undefined && !isId(fa.vote)) || (fa.whisper === undefined && fa.vote === undefined)) return null;
+    return { type: 'exile', ...(isId(fa.whisper) ? { whisper: fa.whisper } : {}), ...(isId(fa.vote) ? { vote: fa.vote } : {}) };
+  }
   if (fa.type === 'dispatch') { const text = cleanText(fa.text, 140); return text ? { type: 'dispatch', text, ...(fa.as === 'source' ? { as: 'source' as const } : {}) } : null; }
   if (fa.type === 'calling') return isId(fa.region) && (typeof fa.pick === 'string' && fa.pick.length < 32 || isId(fa.pick)) ? { type: 'calling', region: fa.region, pick: fa.pick as string | number } : null;
   if (fa.type === 'raze') return isId(fa.region) ? { type: 'raze', region: fa.region } : null;
@@ -1261,6 +1306,31 @@ function applyFree(s: GameState, rng: Rng, p: PlayerId, fa: Submission['free'][n
     const b = fa.accept ? acceptBlock(s, p, fa.region, 'resolve') : tributeBlock(s, p, fa.region, 'resolve');
     if (b) return b;
     if (fa.accept) acceptTribute(s, p, fa.region, 0, emit); else offerTribute(s, p, fa.region, 0, emit);
+    return null;
+  }
+  // ---- the Court (Ransom, Coronation, Exile)
+  if (fa.type === 'captive') {
+    const b = captiveBlock(s, p, fa.id, fa.act, fa.res);
+    if (b) return b;
+    captiveAct(s, p, fa.id, fa.act, fa.res, 0, emit);
+    return null;
+  }
+  if (fa.type === 'ransom') {
+    const b = ransomBlock(s, p, fa.id, fa.pay);
+    if (b) return b;
+    answerRansom(s, p, fa.id, fa.pay, 0, emit);
+    return null;
+  }
+  if (fa.type === 'decree') {
+    const b = decreeBlock(s, p, fa.answer);
+    if (b) return b;
+    answerDecree(s, p, fa.answer, 0, emit);
+    return null;
+  }
+  if (fa.type === 'exile') {
+    const b = exileBlock(s, p, fa.whisper, fa.vote);
+    if (b) return b;
+    setExile(s, p, fa.whisper, fa.vote, 0, emit);
     return null;
   }
   // ---- Soul layer
@@ -1606,6 +1676,7 @@ export function checkVictory(s: GameState, endOfTurn = true) {
     if (o !== null && o !== undefined && crowns.every(r => r.owner === o) && (s.crownHold?.owner === o && s.crownHold.turns >= s.rules.crowns.holdTurnsToWin)) { s.winner = o; s.winReason = `Held all three Crowns for ${s.rules.crowns.holdTurnsToWin} turns.`; return; }
   }
   const rank = () => live.slice().sort((a, b) => b.vp - a.vp
+    || ghostVotes(s, b.id) - ghostVotes(s, a.id)   // the Court: an exile's ghost vote breaks an exact tie
     || (s.throne.owner === b.id ? 1 : 0) - (s.throne.owner === a.id ? 1 : 0)
     || s.regions.filter(r => r.kind === 'crown' && r.owner === b.id).length - s.regions.filter(r => r.kind === 'crown' && r.owner === a.id).length
     || (a.id + s.seed) % 3 - (b.id + s.seed) % 3);

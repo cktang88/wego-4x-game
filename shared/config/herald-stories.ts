@@ -1081,6 +1081,199 @@ export const STORIES: Record<string, StoryKind> = {
       'A {cycle} of convoys and contracts. Nobody died, which counts for something.',
     ],
   },
+  // ------------------------------------------------------------------ the Court (shared/sim/court.ts)
+  // A = the captor (or the house that kneels, defies or votes), B = the commander's house (or the Throne's holder)
+  captured: {
+    mood: 'war', context: ['rumour', 'grim'],
+    lede: [
+      '{C} did not go down with the ship. {C} went into the hold of one of {A}’s, in irons, and the question now is what {A} wants for them.',
+      'A commander of {B} is a prisoner tonight. {A} took {C} from the wreck, and {A} has three choices, none of them kind.',
+      'There is a cell aboard an {A} flagship with a new occupant: {C}, late of {B}’s service.',
+      '{A} has taken {C} alive. In the Reach that is worth more than a dead commander, and everyone knows it.',
+      'The wreck gave up one survivor worth the name, and {A} has {C} under guard.',
+      '{C} of {B} has been taken captive by {A}. Ransom, the rope or a new coat: {A} will decide.',
+    ],
+    detail: [
+      'A captor may name terms, carry out a sentence, or offer the prisoner a new flag. If nobody decides, the prisoner walks home in a few {cycle}s.',
+      '{B} will be waiting for a letter. It may not like what the letter says.',
+    ],
+    short: [
+      '{C} TAKEN CAPTIVE by {A}. {B} waits for the terms.',
+      '{A} holds {C} of {B} in irons. Ransom, rope or a new coat.',
+      'A prisoner of note: {C}, taken by {A}.',
+      '{C} survived the wreck, and {A} made sure of it. The question is what for.',
+      '{B} has lost {C}, but not to death: to {A}’s brig.',
+      'In chains aboard an {A} flagship: {C} of {B}.',
+    ],
+  },
+  ransom_offer: {
+    mood: 'politics', context: ['rumour'],
+    lede: [
+      '{A} has written to {B}. The letter is short, polite and has a number in it: the price of {C}.',
+      'Terms have been named for {C}. {B} can pay {A}, or wait and hope.',
+      'Every prisoner has a price, and {A} has named {C}’s.',
+    ],
+    short: [
+      '{A} names its price for {C}.',
+      'Terms for {C}: {A} writes to {B}.',
+      '{B} weighs a letter from {A}: pay for {C}, or wait.',
+    ],
+  },
+  ransomed: {
+    mood: 'politics', context: ['rumour', 'standings'],
+    lede: [
+      '{C} is coming home. {B} paid {A} what was asked, and nobody is saying how much.',
+      'A quiet transfer, a shuttle without markings, and {C} is back in {B}’s service. {A} is richer for it.',
+      'The price was paid. {A} has its money; {B} has its commander; {C} has a story for the mess.',
+    ],
+    short: [
+      '{B} buys back {C} from {A}.',
+      '{C} ransomed: {B} pays, {A} counts it.',
+      'Home again: {C}, at a price {B} will not discuss.',
+    ],
+  },
+  released: {
+    mood: 'quiet', context: ['rumour'],
+    lede: [
+      '{A} has let {C} go. Nobody paid, nobody swung; the clock simply ran out.',
+      '{C} is free. {A} kept the prisoner as long as the custom allows, and not a {cycle} longer.',
+    ],
+    short: [
+      '{A} sends {C} home, unransomed.',
+      '{C} walks free from {A}’s brig.',
+    ],
+  },
+  executed: {
+    mood: 'blood', context: ['grim', 'standings'],
+    lede: [
+      '{A} has executed {C}, a commander of {B}. There will be no ransom and no exchange, and {B} will never call the debt paid.',
+      'The rope, then. {A} took {C} alive and has now put {C} to death, and {B} has a grievance that no victory will settle.',
+      '{C} of {B} is dead, not in battle but by order of {A}. It is the kind of thing a house remembers for the rest of a war.',
+      'There was a choice between gold and blood, and {A} chose blood. {C} is executed.',
+      'In the Reach, prisoners are usually worth more alive. {A} has decided {C} was not.',
+      '{A} has done what houses rarely do: executed a captive commander. {C} of {B} is gone.',
+    ],
+    detail: [
+      'An execution is a grievance, not a debt: no vengeance will ever clear it, and {B}’s guns will remember it in every fight with {A}.',
+      'Officers of {B} are said to be wearing black. Officers of {A} are said to be sleeping lightly.',
+      '[{leader} leads the table on {leaderVp} VP. ]Nobody at the table will forget this {cycle}.',
+    ],
+    short: [
+      'EXECUTED: {A} puts {C} of {B} to death. A grievance that will never be paid.',
+      '{A} hangs {C}. {B} swears it will never forget, and it will not.',
+      '{C} of {B} is executed by {A}. No ransom, no exchange.',
+      'The rope for {C}: {A} chooses blood over gold.',
+      '{B} mourns {C}, executed by {A}. The grievance is permanent.',
+      'An execution: {C}, commander of {B}, dies by {A}’s order.',
+    ],
+  },
+  turned: {
+    mood: 'oath', context: ['rumour', 'standings'],
+    lede: [
+      '{C}, who commanded for {B}, now commands for {A}. A prisoner offered a new flag has taken it.',
+      'Turncoat, say the officers of {B}. Pragmatist, say the officers of {A}. {C} says nothing, and takes the new commission.',
+      '{A} did not ransom {C} and did not hang them. {A} hired them, and {C} brings everything they know about {B}.',
+      'The Reach has a new turncoat. {C}, late of {B}, serves {A} now, scars and memories and all.',
+      'There are worse fates for a captive than a new uniform. {C} has chosen {A}’s.',
+      '{C} has changed sides. {B} trained them; {A} will use them.',
+    ],
+    detail: [
+      'A turned commander keeps their rank, their rivals and the scars of the fleet they lost. {B} will meet them again, across the line.',
+      'It cost {A} influence to buy that loyalty. Whether it stays bought is another matter.',
+    ],
+    short: [
+      'TURNCOAT: {C}, once of {B}, now serves {A}.',
+      '{C} leaves {B}’s service for {A}’s.',
+      '{A} turns {C}: a commander of {B} changes flags.',
+      'A new coat for {C}. {B} calls it treason; {A} calls it recruitment.',
+      '{C} will command for {A} now, scars and all.',
+      'From {B}’s brig-bait to {A}’s captain: {C} turns.',
+    ],
+  },
+  kneel: {
+    mood: 'politics', context: ['standings', 'throne'],
+    lede: [
+      '{A} has knelt to {B}. The Throne’s holder has one fewer enemy, and {A} has a purse a little heavier.',
+      'In public, before every house, {A} bends the knee to {B}. It was paid for; whether it was meant is another matter.',
+      'The Coronation has its first kneeler: {A}, before {B}.',
+      '{A} has chosen the knee. Should it ever strike {B} while {B} holds the Throne, it will pay for that in the only coin that counts.',
+      'It is not a surrender, says {A}. It is a kneel. {B} accepts it all the same.',
+      '{A} kneels to {B}, and the Herald prints it, as the custom demands.',
+    ],
+    detail: [
+      'A kneeling house is paid in influence at once. Breaking the knee, by striking the holder while it reigns, costs victory points, in public.',
+      '[{leader} leads on {leaderVp} VP. ]Kneeling is cheap until the day it is not.',
+    ],
+    short: [
+      '{A} KNEELS to {B}. Striking the Throne now would cost it dearly.',
+      '{A} bends the knee to {B}, and is paid for it.',
+      'A kneel at the Coronation: {A} before {B}.',
+      '{A} chooses the knee. {B} chooses to believe it.',
+      '{A} kneels. The Throne’s holder, {B}, has one less enemy, for now.',
+      'Before every house, {A} kneels to {B}.',
+    ],
+  },
+  defy: {
+    mood: 'politics', context: ['standings', 'throne'],
+    lede: [
+      '{A} will not kneel. Its answer to {B}’s Coronation is one word long, and the Herald prints it in full: no.',
+      '{B} asked for the knee. {A} sent back defiance, and the whole Reach heard it.',
+      'There is no law that says a house must bow to the Throne. {A} has made a point of that, publicly, to {B}.',
+      'Defiance costs nothing, and {A} has spent it freely: it will not kneel to {B}.',
+      '{A} defies {B}. The Throne has a holder; it does not, says {A}, have a master.',
+      'The Coronation of {B} has its first refusal. {A} stands.',
+    ],
+    detail: [
+      'Defiance is free. It is also a promise, of a kind, and the Herald will remember it.',
+      '[{leader} leads on {leaderVp} VP. ]Every house now knows where {A} stands.',
+    ],
+    short: [
+      '{A} DEFIES {B}. It will not kneel.',
+      '{A} will not kneel to {B}, and says so in print.',
+      'Defiance from {A}: {B} can keep its Throne, and its Coronation.',
+      'No knee from {A}. {B} is told so in public.',
+      '{A} stands at the Coronation of {B}.',
+      'One word from {A} to {B}: no.',
+    ],
+  },
+  knee_broken: {
+    mood: 'oath', context: ['standings', 'throne'],
+    lede: [
+      '{A} knelt to {B}, in public. Now it has struck {B}, in public, and it has paid for the privilege in victory points.',
+      'A kneel is a promise, and {A} has broken it. The Herald notes the attack on {B} and the price.',
+      'So much for the knee. {A} has risen from it and turned its guns on {B}.',
+    ],
+    detail: [
+      'Breaking a knee costs VP at once, and it is printed. {A} has decided it was worth it.',
+    ],
+    short: [
+      '{A} RISES FROM ITS KNEE and strikes {B}, at a price in VP.',
+      'The knee breaks: {A} turns on {B}.',
+      '{A} knelt; now {A} attacks {B}. The VP are gone.',
+    ],
+  },
+  ghost_vote: {
+    mood: 'grief', context: ['standings'],
+    lede: [
+      '{A} is gone from the map, but not from the table. Its ghost vote at the Throne goes to {B}.',
+      'The exiles of {A} have spoken, as exiles do, from the dark: they back {B}.',
+    ],
+    short: [
+      'A ghost vote: the exiled {A} backs {B}.',
+      '{A}, in exile, speaks for {B}.',
+    ],
+  },
+  exiled: {
+    mood: 'grief', context: ['standings'],
+    lede: [
+      '{A} has no worlds and no fleets, but it has not left the table. Its exiles whisper to the Warden now.',
+      'The house of {A} is in exile. It cannot win this war. It can still decide who pays for winning it.',
+    ],
+    short: [
+      '{A} GOES INTO EXILE. It still whispers to the Warden.',
+      'The exiles of {A} keep a ghost vote at the Throne.',
+    ],
+  },
 };
 
 /** Things people said (never real people). Keyed by mood; each a clause without its final full stop. */

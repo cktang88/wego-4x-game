@@ -25,6 +25,8 @@ import { shipStats, hasTech, hasLaw, baseHp, blueprintFor, maxDevAt } from './em
 import { stationUnblocks, aiSiteBonus, tributeCovers, roleOf, SY } from './systems.ts';
 import { LAW, LAWS } from '../config/empire.ts';
 import { soulFree, soulCands, aiFoundSpec } from './ai-soul.ts';
+import { courtFree, kneelPenalty } from './ai-court.ts';
+import { turnPrice } from './court.ts';
 import { hasBane } from './soul.ts';
 import { sigFree, readRivals, braceChance } from './ai-signature.ts';
 import { isDugIn, sigOn, posturesOn, isExposed, SG, postureOf } from './signature.ts';
@@ -41,7 +43,10 @@ type Level = 'novice' | 'standard' | 'expert';
 export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { depth?: number } = {}): Submission {
   const sub = emptySubmission(s0);
   const me = s0.players[pid];
-  if (!me || me.eliminated) return sub;
+  if (!me) return sub;
+  // the Court: an exiled house still whispers to the Warden and casts its ghost vote (it has no orders)
+  // (an AI seat only: a human exile's standing whisper is its own, never overwritten by a stand-in plan)
+  if (me.eliminated) { if (me.kind === 'ai') sub.free.push(...courtFree(s0, pid, level)); return sub; }
   const lvl = level ?? me.aiLevel;
   const rng = new Rng((s0.seed ^ (s0.turn * 7919) ^ (pid * 104729)) >>> 0);
   const s = perceive(s0, pid);
@@ -138,6 +143,15 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
   if (contestOn(s)) sub.free.push(...tributeFree());
   // -------------------------------------------------- the Soul layer: honours, callings, vows, razing, dispatches (free)
   sub.free.push(...soulFree({ s, pid, lvl, threatened, mainArmy: myFleets().filter(f => !isScoutFleet(f) && !f.limping).sort((a, b) => fleetPower(s, b) - fleetPower(s, a))[0] }));
+  // -------------------------------------------------- the Court: captives, terms, Kneel or Defy (free)
+  const court = courtFree(s, pid, lvl);
+  sub.free.push(...court);
+  // what the Court costs this turn is paid before any order (the resolver's court pass): plan orders with the rest
+  for (const fa of court) {
+    const c = 'id' in fa ? s.court?.captives.find(x => x.id === fa.id) : undefined;
+    if (fa.type === 'ransom' && fa.pay && c?.offer) s.players[pid].res[c.offer.res] -= c.offer.amount;
+    if (fa.type === 'captive' && fa.act === 'turn' && c) s.players[pid].res.influence -= turnPrice(s, c);
+  }
 
   // -------------------------------------------------- order slots (greedy over projected state)
   const usedTargets = new Set<string>();
@@ -145,7 +159,7 @@ export function planTurn(s0: GameState, pid: PlayerId, level?: Level, opts: { de
   const fleetUses = new Map<number, number>();
   for (const f of s.fleets) if (f.owner === pid && f.ordersThisTurn > 0) fleetUses.set(f.id, f.ordersThisTurn);
   for (let slot = 0; slot < R.orders.perTurn; slot++) {
-    const valid = candidates().filter(c => c.v > 0.3 && !usedTargets.has(c.tag) && !(isFleetOrder(c.o) && (fleetUses.get(c.o.fleet) ?? 0) >= R.orders.maxPerFleet) &&
+    const valid = candidates().map(c => { c.v -= kneelPenalty(s, pid, c.o); return c; }).filter(c => c.v > 0.3 && !usedTargets.has(c.tag) && !(isFleetOrder(c.o) && (fleetUses.get(c.o.fleet) ?? 0) >= R.orders.maxPerFleet) &&
       !economyBlocked(c.o) && !validateOrder(s, pid, c.o) && affordable(c.o));
     if (!valid.length) continue;
     // tiny seeded jitter so exact ties never break by region id (which would favour one map wedge)
