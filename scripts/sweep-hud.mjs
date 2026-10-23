@@ -119,12 +119,12 @@ async function open(tag, view) {
   await start();
   const f = await myFleet();
   await ev(id => window.tc.screen.select({ kind: 'fleet', id }), f);
-  await page.click('[data-a=more]'); await page.waitForTimeout(100);
+  await page.click('.card [data-a=ftab][data-t=story]'); await page.waitForTimeout(100);   // (v3: the name lives in Story)
   await page.fill('[data-rename]', 'Iron Tide');
   await page.keyboard.press('Enter'); await page.waitForTimeout(100);
   const s = await ev(() => ({ focus: document.activeElement?.tagName, free: window.tc.screen.plan.free.map(x => x.name) }));
   check(s.focus !== 'INPUT' && s.free.includes('Iron Tide'), 'Enter in the name field renames and leaves the field');
-  await page.click('[data-a=more]');
+  await page.click('.card [data-a=ftab][data-t=orders]');
   // the free-changes list follows a replaced doctrine
   await page.click('[data-a=stance][data-s=aggressive]', { force: true });
   await ev(() => window.tc.screen.deselect());
@@ -170,13 +170,14 @@ async function open(tag, view) {
   const t = await ev(id => { const s = window.tc.screen; return s.st.regions[s.fleet(id).region].neighbors.find(n => s.intent({ fleet: id }, n)?.verb === 'seize'); }, f);
   await drag(f, t);
   await page.mouse.move(700, 450);
-  await page.keyboard.press('Enter'); await page.waitForTimeout(500);
+  // (the hand-off waits for the seal ritual, fx/seal.ts SEAL_MS)
+  await page.keyboard.press('Enter'); await page.waitForTimeout(1100);
   const s1 = await ev(() => ({ you: window.tc.screen.you, curtain: !!document.querySelector('.overlay.curtain'), orders: window.tc.screen.plan.orders.filter(Boolean).length, free: window.tc.screen.plan.free.length, charge: !!document.querySelector('.chargeoffer') }));
   check(s1.curtain && s1.you !== me && !s1.orders && !s1.free && !s1.charge, `hotseat: curtain up, the next seat starts clean ${JSON.stringify(s1)}`);
   await page.keyboard.press('e'); await page.keyboard.press('Tab'); await page.waitForTimeout(200);
   check(await ev(() => !document.querySelector('.mdl-root.show') && window.tc.screen.sel === null), 'hotseat: shortcuts quiet under the curtain');
   await page.click('.curtain [data-x]'); await page.waitForTimeout(300);
-  await page.keyboard.press('Enter'); await page.waitForTimeout(800);
+  await page.keyboard.press('Enter'); await page.waitForTimeout(1400);
   const s3 = await ev(() => ({ turn: window.tc.state.turn, curtain: !!document.querySelector('.overlay.curtain'), playing: !!window.tc.screen.replay?.playing }));
   check(s3.curtain && s3.turn === 2 && !s3.playing, 'hotseat: the turn resolves behind the curtain, the replay waits');
   await H.ctx.close();

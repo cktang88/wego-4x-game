@@ -418,7 +418,7 @@ for (const vp of VPS) {
     for (const r of st.regions) r.name = L(r.name);`);
   await ev(() => { const s = window.tc.screen, st = s.st; const mine = st.fleets.filter(f => f.owner === s.you && f.ships.length); for (const f of mine.slice(0, 2)) s.addOrder({ type: 'move', fleet: f.id, path: [st.regions[f.region].neighbors[0]] }); s.addOrder({ type: 'scan', target: st.players[s.you].capital }); s.renderAll(); });
   await surf('30-long-hud', 400);
-  if (f2 !== undefined) { await select('fleet', f2); await surf('31-long-fleet', 400); await ev(() => document.querySelector('.card [data-a=more]')?.click()); await surf('31b-long-fleet-more', 200); await ev(() => document.querySelector('.card [data-a=more]')?.click()); }
+  if (f2 !== undefined) { await select('fleet', f2); await surf('31-long-fleet', 400); await ev(() => document.querySelector('.card [data-a=ftab][data-t=story]')?.click()); await surf('31b-long-fleet-more', 200); await ev(() => document.querySelector('.card [data-a=ftab][data-t=orders]')?.click()); }
   await select('region', cap); await surf('32-long-world', 400);
   await select('region', nb); await surf('33-long-contested', 400);
   await select('region', rcap); await surf('34-long-rival', 400);

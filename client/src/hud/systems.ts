@@ -423,6 +423,8 @@ const termsOf = (g: GameScreen) => { const Y = SY(g.st); return { pct: Math.roun
 const pendTrib = (g: GameScreen, rid: number) => g.myFree().find(x => x.type === 'tribute' && x.region === rid) as Extract<FreeAction, { type: 'tribute' }> | undefined;
 /** Terms you've been refused for this turn (the prompt goes away; it comes back next turn if they offer again). */
 const refused = new Set<string>();
+/** A new game: refusals were keyed by turn and region, which the next game reuses. */
+export function resetSystems() { refused.clear(); }
 
 /** Your world, a besieger offers terms: the prompt that takes the face for this turn (Accept / Refuse). */
 export function termsPrompt(g: GameScreen, r: Region): string {

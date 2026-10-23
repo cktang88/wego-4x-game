@@ -35,6 +35,8 @@ let trkOpen = '';
 const intoChoice = new Map<number, number | 'new'>();
 
 export function setWorldTab(rid: number, t: WorldTab) { worldTab.set(rid, t); }
+/** A new game: the per-world choices belong to the last one's worlds (region ids repeat across games). */
+export function resetWorldCard() { worldTab.clear(); intoChoice.clear(); lockOpen = -1; trkOpen = ''; }
 export function toggleLocks(rid: number) { lockOpen = lockOpen === rid ? -1 : rid; }
 export function toggleTrack(rid: number, t: string) { const k = `${rid}:${t}`; trkOpen = trkOpen === k ? '' : k; }
 

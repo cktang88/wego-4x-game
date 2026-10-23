@@ -70,7 +70,8 @@ const waitTick = (page, n) => page.waitForFunction(n => window.tc.screen.st.live
   await page.waitForTimeout(200);
   check(!!(await page.$('.card [data-a=stance][data-s=evasive].on')), 'live: pending doctrine shown before the tick');
   // a half-typed fleet name survives ticks (the card re-renders on every tick)
-  await page.click('.card [data-a=more]');
+  // (world card v3: the fleet's name field lives in its Story verb)
+  await page.click('.card [data-a=ftab][data-t=story]');
   await page.fill('[data-rename]', 'Half typed');
   const tk0 = await page.evaluate(() => window.tc.screen.st.live.tick);
   await waitTick(page, tk0 + 1);
@@ -238,8 +239,9 @@ const waitTick = (page, n) => page.waitForFunction(n => window.tc.screen.st.live
   await page.waitForTimeout(300);
   await page.evaluate(() => window.tc.screen.endReplay());
   await page.waitForSelector('[data-victory]', { timeout: 5000 }).catch(() => {});
-  const v = await page.evaluate(() => ({ w: window.tc.state.winner, h: document.querySelector('[data-victory] h2')?.textContent, first: document.querySelector('.vic-rank')?.textContent, name: window.tc.state.players[window.tc.state.winner]?.name }));
-  check(v.h === (v.w === 0 ? 'Victory' : 'has won') && v.first?.startsWith(v.name), `victory card names you as the victor and lists the winner first (${JSON.stringify(v)})`);
+  // (the crowning, fx/crowning.ts: the winner's name is the title, "Victory" under it when it is you)
+  const v = await page.evaluate(() => ({ w: window.tc.state.winner, h: document.querySelector('[data-victory] h2')?.textContent, first: document.querySelector('[data-victory] .cr-title')?.textContent, win: document.querySelector('.cr-seat.win')?.dataset.seat, name: window.tc.state.players[window.tc.state.winner]?.name }));
+  check(v.h === (v.w === 0 ? 'Victory' : 'is crowned') && v.first === v.name && Number(v.win) === v.w, `the crowning names you as the victor and crowns the winner's banner (${JSON.stringify(v)})`);
   await page.click('[data-victory] [data-x]');
   await page.keyboard.press('r');
   await page.evaluate(() => window.tc.screen.endReplay());

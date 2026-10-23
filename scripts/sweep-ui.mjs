@@ -179,7 +179,7 @@ if (want('lobby')) {
   await p.fill(inp, '4'); await p.press(inp, 'Tab');
   await p.click('[data-x=close]');
   await wait(300);
-  check(/1 groups changed/.test(await p.textContent('[data-l=tweaks]')), 'lobby Tweaks button recounts after closing', await p.textContent('[data-l=tweaks]'));
+  check(/1 (groups )?changed/.test(await p.textContent('[data-l=tweaks]')), 'lobby Tweaks button recounts after closing', await p.textContent('[data-l=tweaks]'));
   await p.click('[data-l=tweaks]');
   await p.fill(inp, ''); await p.press(inp, 'Tab');
   const ov = await p.evaluate(() => localStorage.getItem('tc.rules.overrides'));

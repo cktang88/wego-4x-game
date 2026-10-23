@@ -12,7 +12,7 @@ import { helpHtml } from '../ui/help.ts';
 import { empireHtml, bindEmpire } from '../ui/empire.ts';
 import { renderStrip, renderPrimary, bindStrip } from './strip.ts';
 import { renderCard, bindCard } from './card.ts';
-import { renderNotes, bindNotes } from './notify.ts';
+import { renderNotes, bindNotes, resetNotes } from './notify.ts';
 import * as M from '../ui/modals.ts';
 import { fmtClock, plus, shortName, tip, safeInsets } from './util.ts';
 import { fatePill, fatePop } from './signature.ts';
@@ -45,6 +45,7 @@ export class Hud {
   h: Record<string, HTMLElement> = {};
   private pop: { kind: string; anchor: HTMLElement | null } | null = null;
   private fallback: HTMLElement | null = null;
+  private unbindCard: () => void = () => {};
 
   constructor(private g: GameScreen) {
     const root = g.el.hud;
@@ -83,12 +84,14 @@ export class Hud {
     // a click anywhere else closes a popover
     document.addEventListener('pointerdown', this.outside, true);
     bindStrip(g, this.h.strip, this.h.primary);
-    bindCard(g, this.h.card);
+    this.unbindCard = bindCard(g, this.h.card);
     bindNotes(g, this.h.notes);
     void loadModals();
   }
   destroy() {
     document.removeEventListener('pointerdown', this.outside, true);
+    this.unbindCard();
+    resetNotes();
     this.fallback?.remove();
     try { if (modals?.isModalOpen()) modals.closeModal(); } catch { /* */ }
   }

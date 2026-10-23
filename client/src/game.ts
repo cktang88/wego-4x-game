@@ -240,6 +240,8 @@ export class GameScreen {
     this.map.dispose();
     this.tipEl?.remove();
     this.root.remove();
+    // the animated numbers keep their last elements: left there, they held this whole screen until the next game
+    resetUiFx();
     audio.me = null;
     audio.scene('lobby');
   }
@@ -832,6 +834,8 @@ export class GameScreen {
     this.sel = null; this.mode = null; this.targetSlot = null; this.hoverRegion = null; this.empFocus = null;
     this.gest.cancel();
     this.hideTip();
+    // (a resource breakdown or the menu opened by the previous player closes with the hand-off)
+    this.hud.closePopovers();
     this.lifted.clear(); this.replacing = null; this.expanded = null;
     // the previous player's Preview (their plan, animated) must not resume for the next player
     if (this.replay?.preview) { this.replay = null; this.fx = []; this.previewing = false; this.map.resetAnim(); }
@@ -962,8 +966,18 @@ export class GameScreen {
         this.renderAll();
         this.later(() => { this.sealingUntil = 0; if (!this.src.mySubmission) this.src.submit(plan); }, SEAL_MS - 60);
       } else this.src.submit(plan);
-      // the one-time offer of turn notifications (push/push.ts), after the seal ritual has landed; never on load
-      if (this.src.kind === 'remote') void import('./push/push.ts').then(m => { if (m.shouldOfferPush()) this.later(() => m.mountPushPrompt(), 1200); });
+      // the one-time offer of turn notifications (push/push.ts), after the seal ritual has landed; never on load.
+      // The last seal resolves the turn at once: then the offer waits for the reveal and its count-up (a sheet over
+      // Act I hid the seals cracking), and a quick unseal + reseal never offers twice
+      if (this.src.kind === 'remote') void import('./push/push.ts').then(m => {
+        if (!m.shouldOfferPush()) return;
+        const offer = (tries: number) => {
+          if (!m.shouldOfferPush() || document.querySelector('.tcp-sheet')) return;
+          if ((this.blockingReplay || this.reck.active || this.covered()) && tries > 0) { this.later(() => offer(tries - 1), 1000); return; }
+          m.mountPushPrompt();
+        };
+        this.later(() => offer(90), 1200);
+      });
     };
     if (used < this.plan.orders.length && !now) {
       const o = overlay(`<div class="dialog seal-ask"><div class="big">${used}<small>/${this.plan.orders.length}</small></div><h2>Seal anyway?</h2>
@@ -1544,6 +1558,7 @@ export class GameScreen {
     this.root.classList.toggle('phone', this.phone);
     this.layoutClasses();
     if (was !== this.root.className) this.renderAll(); else this.hud?.fitTop();
+    this.reck?.reposition();
     this.map.resize();
     if (!this.map.fitted && this.map.w > 0) this.map.fit(this.st, this.you !== null ? this.st.regions[this.st.players[this.you]?.capital]?.site : undefined);
   };
@@ -1569,7 +1584,7 @@ export class GameScreen {
     document.documentElement.classList.toggle('touch', touch);
   }
   /** A modal, dialog, battle viewer or curtain is up: the board's shortcuts stay quiet. */
-  covered(): boolean { return !!this.curtain || !!document.querySelector('.bv-overlay, .overlay') || this.hud.modalOpen() || heraldOpen() || sagaOpen(); }
+  covered(): boolean { return !!this.curtain || !!document.querySelector('.bv-overlay, .overlay, .tcl-ov') || this.hud.modalOpen() || heraldOpen() || sagaOpen(); }
   /** The Herald's front page (newest edition, or turn `turn`'s). */
   openHerald(turn?: number) { openHerald(this, turn); }
   /** The end-of-game Saga page (works mid-game too: the story so far). */
@@ -1606,7 +1621,15 @@ export class GameScreen {
       return;
     }
     if (e.repeat) return;
-    if (e.key === 'Tab') { e.preventDefault(); this.nextIdle(); return; }
+    if (e.key === 'Tab') {
+      // Tab cycles idle fleets, also with a card button the mouse just clicked still focused. A keyboard player's
+      // focus (:focus-visible) moves through the HUD as usual, and Shift+Tab from the board enters it: before, the
+      // keyboard could never reach a card's buttons (Raise, Improve, the Gambit...)
+      let kb = false;
+      try { kb = !!t && this.el.hud.contains(t) && t.matches(':focus-visible'); } catch { /* old engines */ }
+      if (kb || e.shiftKey) return;
+      e.preventDefault(); this.nextIdle(); return;
+    }
     if ((e.key === 'Delete' || e.key === 'Backspace') && this.canPlan) {
       const i = this.hoverSlot ?? this.targetSlot;
       if (i !== null) { this.removeOrder(i); this.hoverSlot = null; }

@@ -126,7 +126,9 @@ const research = async page => {
   await page.evaluate(() => { const s = window.tc.screen; s.select({ kind: 'region', id: window.__vein }); s.focus(s.st.regions[window.__vein].site); });
   await wait(page, 900);
   await page.screenshot({ path: `${out}/d-region-vein.png` });
-  check(!!(await page.$('.card [data-tray=develop]')), 'own planet card has the develop tray');
+  // world card v3 (docs/WORLD-CARD.md): developing lives in the Improve verb, one row per track
+  if (await page.$('.card [data-a=tab][data-t=improve]:not(.on)')) { await page.click('.card [data-a=tab][data-t=improve]'); await wait(page, 300); }
+  check(!!(await page.$('.card [data-tab=improve] .tracks .trk [data-a=track]')), 'own planet card has the Improve tracks');
   await page.evaluate(() => { const s = window.tc.screen; s.select({ kind: 'region', id: window.__far }); s.focus(s.st.regions[window.__far].site); });
   await wait(page, 900);
   await page.screenshot({ path: `${out}/d-region-cutoff.png` });

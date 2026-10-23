@@ -72,6 +72,8 @@ export function fateWhy(g: GameScreen, use: FateUse, fleet?: number, region?: nu
 // it or a Surge would pay; a fleet's is always possible from turn 3, and its chip reads the plan ("Seizing Vela:
 // Charge?"). Tapped open: the bet cards (Fate ones gold) and the chosen bet's three lines: the bet, right, wrong.
 const open = new Set<string>();
+/** A new game: no Gambit starts open, nothing armed, no Charge offer left over from the last one. */
+export function resetSignature() { open.clear(); armed = null; offerEl?.remove(); offerEl = null; }
 export const gambitOpen = (key: string) => open.has(key);
 export function toggleGambit(key: string) { if (open.has(key)) open.delete(key); else open.add(key); }
 

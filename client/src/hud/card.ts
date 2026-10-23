@@ -12,11 +12,11 @@ import { etaTicks, tickMs } from '../../../shared/sim/live.ts';
 import { esc, toast } from '../ui/dom.ts';
 import { intentFor, commitIntent, type Intent } from './verbs.ts';
 import { tip, fmtDur, shortName, shortWhy } from './util.ts';
-import { chevrons, fleetEpi, vowQuote, honourPrompt, limpLine, fleetStory, fleetSoulActs, shipTraitBits, soulAction, openFounding } from './soul.ts';
+import { chevrons, fleetEpi, vowQuote, honourPrompt, limpLine, fleetStory, fleetSoulActs, shipTraitBits, soulAction, openFounding, resetSoul } from './soul.ts';
 import { bannerSvg } from '../art/sigils.ts';
-import { postureStatus, fleetGambit, sigAction, toggleGambit, betPeek } from './signature.ts';
-import { tributeAction, roleKey, paintArt, artPeek } from './systems.ts';
-import { ownWorld, foreignWorld, tabOf, setWorldTab, toggleLocks, toggleTrack, intoNext, buildInto, hullPeek, trackPeek, type WorldTab } from './worldcard.ts';
+import { postureStatus, fleetGambit, sigAction, toggleGambit, betPeek, resetSignature } from './signature.ts';
+import { tributeAction, roleKey, paintArt, artPeek, resetSystems } from './systems.ts';
+import { ownWorld, foreignWorld, tabOf, setWorldTab, toggleLocks, toggleTrack, intoNext, buildInto, hullPeek, trackPeek, resetWorldCard, type WorldTab } from './worldcard.ts';
 import { paintMinis } from '../ui/ship-plinth.ts';
 import { ic } from '../art/icons.ts';
 import { audio } from '../audio/audio.ts';
@@ -265,7 +265,8 @@ export function hidePeek() {
 }
 
 // ---------------------------------------------------------------- events (bound once)
-export function bindCard(g: GameScreen, el: HTMLElement) {
+/** Wire the card's handlers once; returns the cleanup for what lives outside the card (the HUD's destroy calls it). */
+export function bindCard(g: GameScreen, el: HTMLElement): () => void {
   el.addEventListener('click', e => {
     const t = e.target as HTMLElement;
     const b = t.closest<HTMLElement>('[data-a]');
@@ -321,7 +322,8 @@ export function bindCard(g: GameScreen, el: HTMLElement) {
   el.addEventListener('pointercancel', clear);
   el.addEventListener('pointermove', e => { if (e.pointerType !== 'mouse' && Math.abs(e.movementX) + Math.abs(e.movementY) > 6) clear(); });
   el.addEventListener('click', e => { if (performance.now() < held) { e.stopPropagation(); e.preventDefault(); held = 0; } }, true);
-  document.addEventListener('pointerdown', e => { if (peekFor && !el.contains(e.target as Node)) hidePeek(); }, true);
+  const outside = (e: PointerEvent) => { if (peekFor && !el.contains(e.target as Node)) hidePeek(); };
+  document.addEventListener('pointerdown', outside, true);
   // ship fan: tap lifts a chip; dragging chips out onto the map splits them off
   el.addEventListener('pointerdown', e => {
     const chip = (e.target as HTMLElement).closest<HTMLElement>('[data-ship]');
@@ -354,7 +356,8 @@ export function bindCard(g: GameScreen, el: HTMLElement) {
   let sw: { y: number; id: number; moved: boolean } | null = null;
   el.addEventListener('pointerdown', e => {
     const t = e.target as HTMLElement;
-    if (!isSheet(g) || t.closest('button, input, .wc-body, [data-ship]')) return;
+    // the diorama's bodies are buttons (tap: a peek) covering much of the header: a swipe may start on them too
+    if (!isSheet(g) || t.closest('button:not([data-a=peek]), input, .wc-body, [data-ship]')) return;
     if (!t.closest('.wc-art, .wc-face, .wc-tabs') && !t.matches('.card')) return;
     sw = { y: e.clientY, id: e.pointerId, moved: false };
   });
@@ -366,12 +369,23 @@ export function bindCard(g: GameScreen, el: HTMLElement) {
   });
   const swEnd = (e: PointerEvent) => {
     if (!sw || e.pointerId !== sw.id) return;
-    const d = e.clientY - sw.y; sw = null; el.style.transform = '';
+    const d = e.clientY - sw.y, moved = sw.moved; sw = null; el.style.transform = '';
+    // a swipe that began on a body is not a tap on it
+    if (moved) held = performance.now() + 400;
     if (d < -40 && sheetSnap === 'peek') { sheetSnap = 'full'; audio.ui('click'); g.renderAll(); }
     else if (d > 70) { if (sheetSnap === 'full') { sheetSnap = 'peek'; g.renderAll(); } else g.deselect(); }
   };
   el.addEventListener('pointerup', swEnd);
   el.addEventListener('pointercancel', swEnd);
+  // (left on the document, it kept every finished game alive: its card, its screen, its state)
+  return () => {
+    document.removeEventListener('pointerdown', outside, true);
+    // the module-level card state belongs to this game: a peek left on <body>, the sheet's snap, the per-world
+    // tabs and choices, open Gambits, refused terms (all keyed by region ids the next game reuses)
+    hidePeek(); peekEl?.remove(); peekEl = null;
+    lastSel = ''; sheetSnap = 'peek'; bodyScroll = { key: '', top: 0 };
+    resetWorldCard(); resetSignature(); resetSystems(); resetSoul();
+  };
 }
 
 /**

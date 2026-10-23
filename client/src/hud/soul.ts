@@ -260,6 +260,8 @@ export function callingPrompt(g: GameScreen, r: Region): string {
 const shortName = (n: string) => n.replace(/^the\s+/i, '').split(/\s+/).slice(0, 2).join(' ');
 /** Raze-or-keep, the turn after a capture: its payout on the button. */
 const kept = new Set<string>();
+/** A new game: "keep" choices were keyed by turn and region, which the next game reuses. */
+export function resetSoul() { kept.clear(); vowOpen = null; }
 export function razePrompt(g: GameScreen, r: Region): string {
   const st = g.st, you = g.you;
   if (!on(g) || you === null || r.owner !== you || !g.canPlan || kept.has(`${st.turn}:${r.id}`)) return '';

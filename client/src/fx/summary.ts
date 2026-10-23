@@ -39,6 +39,7 @@ export class Reckoning {
   private flights: Flight[] = [];
   private timers: number[] = [];
   private ribbon: HTMLElement | null = null;
+  private unAway: () => void = () => {};
   private shown = new Map<PlayerId, number>();
   private changes: VpChange[] = [];
   active = false;
@@ -141,10 +142,14 @@ export class Reckoning {
     }
     this.flights = [];
     if (this.active) this.settle();
-    if (silent) { this.timers.forEach(t => clearTimeout(t)); this.timers = []; this.ribbon?.remove(); this.ribbon = null; }
+    if (silent) { this.timers.forEach(t => clearTimeout(t)); this.timers = []; this.ribbon?.remove(); this.ribbon = null; this.unAway(); this.unAway = () => {}; }
   }
   /** Back to the real numbers. */
   private settle() {
+    // a coin still in the air (a hidden tab or a slow device holds its animation back past the settle timer) must
+    // not land afterwards: it would count again from `before` and leave the crest stuck on a stale number
+    for (const f of this.flights) if (!f.landed) { f.landed = true; f.anim?.cancel(); f.el.remove(); }
+    this.flights = [];
     for (const c of this.changes) this.host.setShown(c.player, null);
     for (const c of this.changes) { const el = this.host.crest(c.player)?.querySelector<HTMLElement>('[data-vp]'); if (el) el.textContent = String(c.after); }
     this.shown.clear();
@@ -156,11 +161,19 @@ export class Reckoning {
     // (also called on every render with a card or modal up: cheap when there is no ribbon)
     if (!r) return;
     this.ribbon = null;
+    this.unAway(); this.unAway = () => {};
     if (reduced()) { r.remove(); return; }
     r.classList.add('out');
     setTimeout(() => r.remove(), 320);
   }
   destroy() { this.finish(true); this.dismiss(); }
+  /** A resize or a turned phone: the ribbon keeps clear of the (re-laid-out) top bar. */
+  reposition() {
+    const r = this.ribbon;
+    if (!r) return;
+    r.style.top = `${Math.round(this.host.ribbonTop())}px`;
+    r.classList.toggle('phone', this.host.phone);
+  }
 
   // ---------------------------------------------------------------- the ribbon
   private showRibbon(result: TurnResult, line: string) {
@@ -208,8 +221,11 @@ export class Reckoning {
     el.addEventListener('pointerenter', () => { hold = true; });
     el.addEventListener('pointerleave', () => { hold = false; });
     // the first touch anywhere else means the player has moved on
-    const away = (e: Event) => { if (!el.contains(e.target as Node)) { this.dismiss(); document.removeEventListener('pointerdown', away, true); } };
+    const away = (e: Event) => { if (!el.contains(e.target as Node)) this.dismiss(); };
     document.addEventListener('pointerdown', away, true);
+    // however the ribbon goes (a touch, its timer, a card opening, the game closing), the listener goes with it: a
+    // ribbon that left on its timer kept it on the document, and with it the whole finished game, until a click
+    this.unAway = () => document.removeEventListener('pointerdown', away, true);
     const linger = () => { if (this.ribbon !== el) return; if (hold) { this.later(linger, 1000); return; } this.dismiss(); };
     this.later(linger, 7500);
   }

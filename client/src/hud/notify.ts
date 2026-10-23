@@ -72,6 +72,9 @@ const NEWS_MS = 12000;
 const MAX_SHOWN = 2;
 const firstSeen = new Map<string, number>();
 let refresh = 0;
+/** The game is closing: its fold timer and chip state go with it (the timer held the finished game for seconds,
+ *  and a new game's news never folded while the old timer was pending). */
+export function resetNotes() { clearTimeout(refresh); refresh = 0; expanded = false; current = []; firstSeen.clear(); }
 export function renderNotes(g: GameScreen, el: HTMLElement) {
   current = notes(g);
   const list = current;
@@ -80,7 +83,9 @@ export function renderNotes(g: GameScreen, el: HTMLElement) {
   let soonest = Infinity;
   const fresh = (n: Note) => {
     if (!NEWS.test(n.key)) return true;
-    const k = `${turn}:${n.key}`;
+    // per game and seat: a hotseat player who takes over later still gets the turn's news (it went stale under
+    // the previous player's key), and a new game whose turn and battle ids repeat the last one's isn't muted
+    const k = `${g.gameKey()}:${g.you}:${turn}:${n.key}`;
     if (!firstSeen.has(k)) firstSeen.set(k, now);
     const left = NEWS_MS - (now - firstSeen.get(k)!);
     if (left > 0) soonest = Math.min(soonest, left);

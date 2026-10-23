@@ -69,7 +69,9 @@ export function crowning(o: CrowningOpts): HTMLElement {
     const r = b?.getBoundingClientRect(), L = lamp.getBoundingClientRect();
     if (!r || !r.width) return { ang: 0, len: 300 };
     const px = L.left + L.width / 2, py = L.top;
-    const dx = r.left + r.width / 2 - px, dy = r.top + r.height * 0.45 - py;
+    // the winner's banner is still rolled up (scaleY from its top) when the swing starts: aim at where its middle
+    // will hang (offsetHeight ignores the transform), not at the rolled-up strip
+    const dx = r.left + r.width / 2 - px, dy = r.top + (b!.offsetHeight || r.height) * 0.45 - py;
     return { ang: -Math.atan2(dx, dy) * 180 / Math.PI, len: Math.hypot(dx, dy) };
   };
   requestAnimationFrame(() => {
@@ -163,7 +165,16 @@ export function crowning(o: CrowningOpts): HTMLElement {
     }
   };
   window.addEventListener('keydown', key, true);
-  ov.addEventListener('fx-removed', () => { window.removeEventListener('keydown', key, true); timers.forEach(t => clearTimeout(t)); });
+  // a resize or a turned phone moves the winner's banner: the lamp follows it (a swing still under way just lands)
+  const reaim = () => {
+    if (!ov.isConnected) { window.removeEventListener('resize', reaim); return; }
+    lamp.getAnimations?.().forEach(a => a.cancel());
+    const { ang, len } = aim();
+    lamp.style.setProperty('--len', `${Math.round(len)}px`);
+    lamp.style.transform = `rotate(${ang}deg)`;
+  };
+  window.addEventListener('resize', reaim);
+  ov.addEventListener('fx-removed', () => { window.removeEventListener('keydown', key, true); window.removeEventListener('resize', reaim); timers.forEach(t => clearTimeout(t)); });
   ov.querySelector('[data-x]')!.addEventListener('click', () => { ov.remove(); o.onLook(); });
   ov.querySelector('[data-saga]')?.addEventListener('click', () => { ov.remove(); o.onSaga?.(); });
   ov.querySelector('[data-l]')!.addEventListener('click', () => { ov.remove(); o.onLobby(); });
