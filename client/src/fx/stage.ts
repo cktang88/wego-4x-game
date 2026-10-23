@@ -75,7 +75,7 @@ export class Stage {
 
   // ---------------------------------------------------------------- Act IV
   /** The 400 ms hold before a battle: both sides' ships, a balance needle on the hull each brought. */
-  hold(rep: BattleReport, at: Pt, color: (o: number) => string, name: (o: number) => string, dur = 420) {
+  hold(rep: BattleReport, at: Pt, color: (o: number) => string, name: (o: number) => string, dur = 420, face?: (owner: number, cmd: string) => string) {
     this.plate?.el.remove();
     const pw = battlePower(rep).sort((a, b) => (a.owner === -1 ? 1 : 0) - (b.owner === -1 ? 1 : 0));
     if (pw.length < 2) return;
@@ -87,7 +87,13 @@ export class Stage {
     const a = pw[0], b = pw[1];
     const share = pw.length === 2 && a.hp + b.hp > 0 ? a.hp / (a.hp + b.hp) : 0.5;
     const dial = `<span class="dl-dial"><svg viewBox="0 0 60 34" aria-hidden="true"><path d="M5 31a25 25 0 0 1 50 0" fill="none" stroke="url(#tc-gold)" stroke-width="2.2"/><path d="M30 6v4M9.6 17.8l3 2M50.4 17.8l-3 2" stroke="#e8d29a" stroke-width="1.4"/><g class="dl-needle"><path d="M30 31L30 9" stroke="#fbedc8" stroke-width="2" stroke-linecap="round"/><circle cx="30" cy="31" r="3.2" fill="#c8964a" stroke="#3a2810"/></g></svg><i class="dl-swords">${ic('battle')}</i></span>`;
-    el.innerHTML = pw.length === 2 ? `${side(a)}${dial}${side(b)}` : pw.map(side).join(`<i class="dl-swords solo">${ic('battle')}</i>`);
+    // two commanders face off across the balance (DELIGHT #45): each side's lead commander, the right one mirrored
+    const faceOf = (o: number, k: 'l' | 'r') => {
+      const cmd = rep.sides.find(x => x.owner === o)?.fleets[0]?.commander;
+      const h = cmd && face ? face(o, cmd) : '';
+      return h ? `<span class="dl-face ${k}">${h}</span>` : '';
+    };
+    el.innerHTML = pw.length === 2 ? `${faceOf(a.owner, 'l')}${side(a)}${dial}${side(b)}${faceOf(b.owner, 'r')}` : pw.map(side).join(`<i class="dl-swords solo">${ic('battle')}</i>`);
     this.layer.appendChild(el);
     this.plate = { el, at, t0: performance.now(), share };
     this.later(() => el.classList.add('out'), dur + 500);

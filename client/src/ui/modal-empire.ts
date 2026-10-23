@@ -92,7 +92,7 @@ export const EMPIRE_TABS: [string, string, string][] = [['research', icn('resear
 
 export function empireBody(c: Ctx): string {
   const g = c.g;
-  if (g.st.rules.empire?.enabled === false) return `<div class="m-empty">Empire layer off in these rules</div>`;
+  if (g.st.rules.empire?.enabled === false) return `<div class="m-empty">The Empire layer is off in these rules. Switch it on in Tweaks, then start a new game.</div>`;
   if (c.tab === 'laws') return lawsHtml(c);
   if (c.tab === 'ships') return shipsHtml(c);
   return researchHtml(c);

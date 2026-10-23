@@ -13,6 +13,8 @@ import { esc, overlay, toast } from '../ui/dom.ts';
 import { bannerSvg, sigilSvg } from '../art/sigils.ts';
 import { tip, shortWhy } from './util.ts';
 import { splitIds } from './card.ts';
+import { fleetPortrait, portraitTag } from './portrait.ts';
+import { barkFor } from './barks.ts';
 import { iconizeDom, ic, icFor } from '../art/icons.ts';
 
 // ------------------------------------------------------------------ short texts (≤ 6 words)
@@ -362,7 +364,11 @@ export function limpLine(g: GameScreen, f: Fleet): string {
 export function fleetStory(g: GameScreen, f: Fleet): string {
   const st = g.st, c = f.commander;
   const sec = (h: string, body: string) => body ? `<section><h4>${h}</h4>${body}</section>` : '';
-  let html = sec('Commander', `<p class="line"><b>${esc(c.name)}</b> <small>· ${esc(rankName(c.rank))} · ${c.deeds.wins}W ${c.deeds.losses}L · ${c.deeds.kills} kills</small></p>${c.traits.length ? `<div class="soulrow">${c.traits.map(t => `<span class="sp trait"${tip(CMD_TRAITS[t]?.desc ?? '')}>${esc(CMD_TRAITS[t]?.name ?? t)}</span>`).join('')}</div>` : ''}`);
+  const por = fleetPortrait(st, f, g.color(f.owner));
+  const scarNames = (f.scars ?? []).map(x => SCARS[x.id]?.name ?? x.id);
+  const worn = [scarNames.length ? `Bears ${scarNames.length > 1 ? `${scarNames.slice(0, -1).join(', ')} and ${scarNames[scarNames.length - 1]}` : scarNames[0]}.` : '',
+    por.maimed ? 'Lost an eye at the second rout.' : '', por.grey ? 'Grey in long service.' : '', por.legend ? 'Wears the Legend’s laurel.' : ''].filter(Boolean);
+  let html = sec('Commander', `<div class="cmd-por">${portraitTag(por, 64)}<div><p class="line"><b>${esc(c.name)}</b> <small>· ${esc(rankName(c.rank))} · ${c.deeds.wins}W ${c.deeds.losses}L · ${c.deeds.kills} kills</small></p>${worn.length ? `<p class="cmd-marks">${esc(worn.join(' '))}</p>` : ''}${(() => { const b = barkFor(g, f); return b ? `<p class="cmd-bark">“${esc(b)}”</p>` : ''; })()}</div></div>${c.traits.length ? `<div class="soulrow">${c.traits.map(t => `<span class="sp trait"${tip(CMD_TRAITS[t]?.desc ?? '')}>${esc(CMD_TRAITS[t]?.name ?? t)}</span>`).join('')}</div>` : ''}`);
   if (on(g) && f.banner) {
     const chips: string[] = [];
     for (const b of f.banner.boons) chips.push(`<span class="sp boon"${tip(BOON_SHORT[b] ?? '')}>${ic(icFor('boon', b, BOONS[b]?.icon))}${esc(BOONS[b]?.name ?? b)}</span>`);

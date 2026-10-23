@@ -1,0 +1,183 @@
+/* ============================================================================
+   THE SAGA: a leather-bound book on the war table (DELIGHT #78, ART-BIBLE §3 Vellum, §8 "Herald and Saga").
+   The boards are leather in the winner's enamel (--lea); the pages are vellum with the lamp's falloff, a gutter
+   shadow at the spine and a folio at the foot. Two pages open on a wide screen, one on a phone; every page scrolls
+   on its own, so nothing is ever cut. The leaf that turns is a pair of cloned pages on a 3D card (ui/saga.ts).
+   ============================================================================ */
+.saga-ov { position: fixed; inset: 0; z-index: 56; overflow: hidden; opacity: 0; transition: opacity 0.3s;
+  background:
+    radial-gradient(80% 70% at 30% 18%, rgba(255, 217, 160, 0.13), rgba(255, 217, 160, 0) 60%),
+    var(--k-grain) 0 0 / 160px,
+    radial-gradient(ellipse at 40% 30%, #2a2119 0%, #15110d 55%, #070605 100%);
+  background-blend-mode: normal, soft-light, normal; }
+.saga-ov.show { opacity: 1; }
+.saga-ov.out { opacity: 0; transition-duration: 0.2s; }
+.saga { height: 100%; display: flex; flex-direction: column; align-items: center; gap: 0.75rem; color: #2a1d10;
+  padding: calc(1rem + env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) calc(0.75rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left)); }
+
+/* ---- the book: leather boards, the pages inset, the light from the upper left */
+.sg-book { --pad: 0.875rem; position: relative; flex: 1 1 auto; min-height: 0; width: min(74rem, 100%); max-height: 54rem; padding: var(--pad);
+  border-radius: 7px; perspective: 2600px;
+  background:
+    radial-gradient(90% 80% at 18% 10%, rgba(255, 225, 180, 0.16), rgba(255, 225, 180, 0) 60%),
+    var(--k-leather) 0 0 / 420px,
+    linear-gradient(160deg, color-mix(in srgb, var(--lea, #8e1f1f) 62%, #24140a) 0%, color-mix(in srgb, var(--lea-lo, #4a0d0e) 78%, #0b0604) 100%);
+  background-blend-mode: normal, soft-light, normal;
+  box-shadow: inset 1px 1px 0 rgba(255, 235, 200, 0.22), inset -1px -2px 0 rgba(0, 0, 0, 0.6), inset 0 0 0 4px color-mix(in srgb, var(--lea-lo, #4a0d0e) 70%, #000),
+    inset 0 0 0 5px rgba(214, 170, 90, 0.35), 0.75rem 1.75rem 3.5rem rgba(0, 0, 0, 0.75), 0.15rem 0.35rem 0 rgba(0, 0, 0, 0.45); }
+.sg-spread { position: relative; height: 100%; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.sg-book.two .sg-spread { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+/* the spine: a fold shadow down the middle of an open spread */
+.sg-book.two .sg-spread::before { content: ''; position: absolute; z-index: 2; top: 0; bottom: 0; left: calc(50% - 1.25rem); width: 2.5rem; pointer-events: none;
+  background: linear-gradient(90deg, rgba(60, 38, 14, 0) 0%, rgba(60, 38, 14, 0.28) 42%, rgba(30, 18, 6, 0.5) 50%, rgba(60, 38, 14, 0.28) 58%, rgba(60, 38, 14, 0) 100%); }
+/* a blank endpaper when the last spread has one page */
+.sg-book.two.blank-r .sg-spread::after { content: ''; grid-row: 1; grid-column: 2; border-radius: 0 4px 4px 0;
+  background: var(--k-grain) 0 0 / 160px, url('/tex/parchment.webp') 0 0 / 520px, linear-gradient(170deg, #efe3c6, #d9c59a);
+  background-blend-mode: multiply, multiply, normal; opacity: 0.96; }
+
+/* ---- a page: vellum (the Herald's recipe), scrolls on its own */
+.sg-page { display: none; grid-row: 1; position: relative; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(107, 74, 28, 0.5) transparent;
+  padding: 1.5rem 1.75rem 2.5rem;
+  background:
+    radial-gradient(ellipse at 18% 6%, rgba(255, 248, 228, 0.7), rgba(255, 248, 228, 0) 55%),
+    radial-gradient(ellipse at 96% 100%, rgba(110, 74, 30, 0.3), rgba(110, 74, 30, 0) 60%),
+    var(--k-grain) 0 0 / 160px,
+    linear-gradient(170deg, rgba(241, 230, 202, 0.74) 0%, rgba(228, 211, 171, 0.74) 58%, rgba(205, 181, 136, 0.74) 100%),
+    url('/tex/parchment.webp') 0 0 / 520px,
+    linear-gradient(170deg, #f1e6ca 0%, #e4d3ab 58%, #cdb588 100%) #e4d3ab;
+  background-blend-mode: normal, normal, multiply, normal, multiply, normal;
+  background-attachment: local;
+  text-shadow: 0 0 0.4px rgba(35, 25, 14, 0.5); font-family: var(--k-prose, 'IM Fell English', Georgia, serif); font-size: 1rem; line-height: 1.42; }
+.sg-page[data-slot=l] { display: block; grid-column: 1; border-radius: 4px 0 0 4px; box-shadow: inset -1.75rem 0 1.75rem -1.5rem rgba(60, 40, 15, 0.45); }
+.sg-page[data-slot=r] { display: block; grid-column: 2; border-radius: 0 4px 4px 0; box-shadow: inset 1.75rem 0 1.75rem -1.5rem rgba(60, 40, 15, 0.45); }
+.sg-page[data-slot=one] { display: block; grid-column: 1; border-radius: 4px; }
+.sg-folio { position: absolute; bottom: 0.625rem; left: 0; right: 0; text-align: center; font: 600 var(--fs-xs)/1 var(--k-display, 'Cinzel', serif); letter-spacing: 0.12em; color: #6b5638; pointer-events: none; }
+.sg-book.fade .sg-page[data-slot] { animation: sg-fade 0.18s ease-out both; }
+@keyframes sg-fade { from { opacity: 0.25; } }
+
+/* ---- the turning leaf (two cloned faces on a card) and the cover that swings open */
+.sg-leaf, .sg-cover { position: absolute; z-index: 5; top: var(--pad); bottom: var(--pad); transform-style: preserve-3d; pointer-events: none; will-change: transform; }
+.sg-leaf.on-r { left: 50%; right: var(--pad); transform-origin: 0 50%; }
+.sg-leaf.on-l { left: var(--pad); right: 50%; transform-origin: 100% 50%; }
+.sg-leaf.on-one { left: var(--pad); right: var(--pad); transform-origin: 0 50%; }
+.sg-face { position: absolute !important; inset: 0; display: block !important; overflow: hidden !important; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 4px;
+  box-shadow: 0.5rem 0.5rem 1.5rem rgba(30, 18, 6, 0.35) !important; }
+.sg-face.back { transform: rotateY(180deg); }
+.sg-face.blank { background: linear-gradient(170deg, #efe3c6, #d9c59a); }
+.sg-cover { top: 0; bottom: 0; left: 50%; right: 0; transform-origin: 0 50%; }
+.sg-cover.on-one { left: 0; }
+.sg-cover-face, .sg-cover-in { position: absolute; inset: 0; border-radius: 0 7px 7px 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.sg-cover-face { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;
+  background:
+    radial-gradient(80% 70% at 20% 12%, rgba(255, 225, 180, 0.2), rgba(255, 225, 180, 0) 60%),
+    var(--k-leather) 0 0 / 420px,
+    linear-gradient(160deg, color-mix(in srgb, var(--lea, #8e1f1f) 70%, #24140a), color-mix(in srgb, var(--lea-lo, #4a0d0e) 80%, #0b0604));
+  background-blend-mode: normal, soft-light, normal;
+  box-shadow: inset 0 0 0 0.75rem transparent, inset 0 0 0 0.8125rem rgba(214, 170, 90, 0.55), inset 0 0 0 0.9375rem rgba(0, 0, 0, 0.35), inset 0.2rem 0 0.6rem rgba(0, 0, 0, 0.5); }
+.sg-cover-t { font: 400 clamp(2rem, 5vw, 3.5rem)/1 'UnifrakturMaguntia', var(--k-display, serif); color: #e9c97a; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.75), 0 -1px 0 rgba(255, 240, 200, 0.25); }
+.sg-cover-s { font: 700 var(--fs-sm)/1 var(--k-display, 'Cinzel', serif); letter-spacing: 0.24em; text-transform: uppercase; color: #e1c27a; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.75); }
+.sg-cover-in { transform: rotateY(180deg); background: radial-gradient(circle at 30% 30%, #6b4a2a, #3a2410 60%, #1e1208), var(--k-grain) 0 0 / 160px; border-radius: 7px 0 0 7px; }
+
+/* ---- the frontispiece: an engraved plate of the winner */
+.sg-front { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; text-align: center; padding: 0.5rem 0; }
+.sg-plate { position: relative; padding: 1.1rem 1.4rem 1.3rem; border-radius: 3px;
+  background: linear-gradient(170deg, rgba(255, 250, 235, 0.35), rgba(110, 74, 30, 0.12));
+  box-shadow: inset 0 0 0 1px rgba(107, 74, 28, 0.55), inset 0 0 0 4px rgba(243, 232, 204, 0.5), inset 0 0 0 5px rgba(107, 74, 28, 0.3), 0.15rem 0.3rem 0.6rem rgba(60, 40, 15, 0.25); }
+.sg-plate .sg-hero { display: block; width: 10.5rem; height: 13.125rem; filter: drop-shadow(0.2rem 0.4rem 0.4rem rgba(40, 24, 8, 0.55)); }
+.sg-plate .sg-hero-ban { display: grid; place-items: center; width: 10.5rem; height: 13.125rem; }
+.sg-plate-ban { position: absolute; right: -0.9rem; bottom: -0.6rem; line-height: 0; filter: drop-shadow(0.1rem 0.2rem 0.15rem rgba(40, 24, 8, 0.6)); }
+.sg-cap { margin: 0.25rem 0 0; max-width: 22rem; font-style: italic; font-size: var(--fs-md); color: #4a3720; }
+.sg-crowned { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
+.sg-crowned small { font: 700 var(--fs-xs)/1.2 var(--k-display, 'Cinzel', serif); letter-spacing: 0.24em; text-transform: uppercase; color: #8e1f1f; }
+.sg-crowned b { font: 800 clamp(1.4rem, 3vw, 2rem)/1.15 var(--k-display, 'Cinzel', serif); letter-spacing: 0.06em; color: var(--pc, #2a1d10); overflow-wrap: anywhere; }
+.sg-crowned em { font-size: 1.125rem; color: #3a2a18; }
+
+/* ---- the title page */
+.sg-title { text-align: center; }
+.sg-title .kicker { display: block; font: 700 var(--fs-xs)/1 var(--k-display, 'Cinzel', serif); letter-spacing: 0.3em; text-transform: uppercase; color: #8e1f1f; margin-top: 0.5rem; }
+.sg-title h1 { margin: 0.4rem 0 0.25rem; font: 400 clamp(2.2rem, 4.6vw, 3.4rem)/1.05 'UnifrakturMaguntia', var(--k-display, serif); color: #2a1d10; letter-spacing: 0.01em; text-shadow: none; }
+.sg-sub { margin: 0 auto 1rem; max-width: 26rem; font-style: italic; color: #4a3720; }
+.sg-ranks { list-style: none; display: flex; justify-content: center; align-items: flex-end; flex-wrap: wrap; gap: 0.75rem 1.5rem; padding: 0.75rem 0 1rem; margin: 0;
+  border-top: 1px solid rgba(107, 74, 28, 0.4); border-bottom: 1px solid rgba(107, 74, 28, 0.4); }
+.sg-ranks li { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; min-width: 6rem; max-width: 11rem; }
+.sg-ranks li b { font: 700 var(--fs-sm)/1.15 var(--k-display, 'Cinzel', serif); letter-spacing: 0.04em; color: var(--pc, #2a1d10); overflow-wrap: anywhere; }
+.sg-ranks li .k-num { font-size: var(--fs-md); color: #6b4a1c; display: inline-flex; align-items: center; gap: 0.2rem; }
+.sg-ranks li .k-num .ic { width: 1em; height: 1em; color: #8a5f22; }
+.sg-ranks li em { font: 700 var(--fs-xs)/1 var(--k-display, 'Cinzel', serif); font-style: normal; letter-spacing: 0.12em; text-transform: uppercase; color: #8e1f1f; }
+.sg-h { display: flex; align-items: center; gap: 0.75rem; margin: 1.25rem 0 0.6rem; font: 700 var(--fs-sm)/1.2 var(--k-display, 'Cinzel', serif); letter-spacing: 0.24em; text-transform: uppercase; color: #8e1f1f; text-shadow: none; }
+.sg-h::before, .sg-h::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, rgba(107, 74, 28, 0), rgba(107, 74, 28, 0.55)); }
+.sg-h::after { background: linear-gradient(90deg, rgba(107, 74, 28, 0.55), rgba(107, 74, 28, 0)); }
+.sg-page > .sg-pin > .sg-h:first-child { margin-top: 0.5rem; }
+.sg-moments { display: flex; flex-direction: column; gap: 0.75rem; text-align: left; }
+.sg-moment { margin: 0; display: grid; grid-template-columns: 1.75rem minmax(0, 1fr); column-gap: 0.6rem; }
+.sg-moment .mic { grid-row: 1 / 3; color: #8e1f1f; line-height: 0; padding-top: 0.2rem; }
+.sg-moment .mic .ic { width: 1.4rem; height: 1.4rem; }
+.sg-moment blockquote { margin: 0; font-style: italic; font-size: 1.125rem; line-height: 1.3; color: #2a1d10; }
+.sg-moment figcaption { font: 700 var(--fs-xs)/1.4 var(--k-display, 'Cinzel', serif); letter-spacing: 0.18em; text-transform: uppercase; color: #6b5638; }
+.sg-none { margin: 0.25rem 0; font-style: italic; color: #5d4a30; }
+
+/* ---- the Throne, oaths, debts, worlds, the memorial roll */
+.sg-reigns .bar { position: relative; height: 1rem; border-radius: 2px; background: rgba(42, 29, 16, 0.12); box-shadow: inset 1px 1px 0.2rem rgba(42, 29, 16, 0.45); overflow: hidden; }
+.sg-reigns .bar i { position: absolute; top: 0; bottom: 0; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 -1px 0 rgba(0, 0, 0, 0.3); }
+.sg-reigns .axis { display: flex; justify-content: space-between; font: 600 var(--fs-xs)/1.4 var(--k-display, 'Cinzel', serif); color: #6b5638; margin-top: 0.15rem; }
+.sg-reigns ul { list-style: none; display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; padding: 0; margin: 0.4rem 0 0; }
+.sg-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+.sg-list small, .sg-reigns small { font: 600 var(--fs-xs)/1 var(--k-display, 'Cinzel', serif); letter-spacing: 0.06em; color: #6b5638; margin-left: 0.2rem; }
+.sg-list q { display: block; font-style: italic; color: #4a3720; margin-top: 0.1rem; }
+.sg-list em { font-style: italic; color: #6b4a1c; }
+.sg-who { font: 700 var(--fs-sm)/1.2 var(--k-display, 'Cinzel', serif); color: var(--pc, #2a1d10); letter-spacing: 0.03em; }
+.sg-page .dim { color: #5d4a30; }
+.sg-page .paid { color: #3f6a46; font-style: italic; } .sg-page .unpaid { color: #8e1f1f; font-style: italic; }
+.sg-mem { list-style: none; padding: 0; margin: 0; columns: 1; }
+.sg-mem li { padding: 0.15rem 0 0.15rem 1.1rem; position: relative; break-inside: avoid; }
+.sg-mem li::before { content: ''; position: absolute; left: 0.2rem; top: 0.55rem; width: 0.4rem; height: 0.55rem; background: #6b4a1c; clip-path: polygon(35% 0, 65% 0, 65% 30%, 100% 30%, 100% 50%, 65% 50%, 65% 100%, 35% 100%, 35% 50%, 0 50%, 0 30%, 35% 30%); }
+.sg-finis { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; margin-top: 2rem; font: 700 var(--fs-sm)/1 var(--k-display, 'Cinzel', serif); letter-spacing: 0.3em; text-transform: uppercase; color: #6b4a1c; }
+
+/* ---- a banner's chapter */
+.sg-fleet .sg-ch { display: block; text-align: center; font: 700 var(--fs-xs)/1 var(--k-display, 'Cinzel', serif); letter-spacing: 0.3em; text-transform: uppercase; color: #8e1f1f; margin: 0.25rem 0 0.9rem; }
+.sg-fleet header { display: flex; gap: 1rem; align-items: center; margin-bottom: 0.6rem; }
+.sg-fleet .sg-por { flex: none; width: 5.75rem; height: 7.1875rem; filter: drop-shadow(0.15rem 0.3rem 0.3rem rgba(40, 24, 8, 0.5)); }
+.sg-fleet header > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
+.sg-fleet h3 { margin: 0; font: 800 1.375rem/1.15 var(--k-display, 'Cinzel', serif); letter-spacing: 0.04em; color: var(--pc, #2a1d10); text-shadow: none; text-transform: none; overflow-wrap: anywhere; }
+.sg-fleet header em { font: 700 var(--fs-sm)/1.2 var(--k-display, 'Cinzel', serif); font-style: normal; color: #8a5f22; letter-spacing: 0.04em; }
+.sg-fleet header small { font-size: var(--fs-sm); color: #4a3720; font-style: italic; }
+.sg-house { display: inline-flex; align-items: center; gap: 0.35rem; font: 600 var(--fs-xs)/1.2 var(--k-display, 'Cinzel', serif); letter-spacing: 0.06em; color: #5d4a30; }
+.sg-fate { display: inline-block; margin: 0 0 0.4rem; padding: 0.15rem 0.5rem; font: 700 var(--fs-xs)/1.2 var(--k-display, 'Cinzel', serif); letter-spacing: 0.16em; text-transform: uppercase;
+  color: #3f6a46; box-shadow: inset 0 0 0 1.5px currentColor; border-radius: 2px; transform: rotate(-1.5deg); }
+.sg-fleet.dead .sg-fate { color: #8e1f1f; } .sg-fleet.retired .sg-fate { color: #8a5f22; } .sg-fleet.merged .sg-fate { color: #6b5638; }
+.sg-para { margin: 0.25rem 0 0.6rem; font-size: 1.0625rem; line-height: 1.45; color: #2a1d10; }
+.sg-para::first-letter { float: left; font: 400 2.6rem/0.9 'UnifrakturMaguntia', var(--k-display, serif); color: #8e1f1f; margin: 0.15rem 0.35rem 0 0; }
+.sg-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.sg-tags .t { display: inline-flex; align-items: center; gap: 0.25rem; font: 600 var(--fs-xs)/1.3 var(--font); padding: 0.1rem 0.45rem; border-radius: 2px; color: #4a3014; box-shadow: inset 0 0 0 1px rgba(107, 74, 28, 0.45); background: rgba(255, 250, 235, 0.35); }
+.sg-tags .t .ic { width: 1em; height: 1em; }
+.sg-tags .t.bane { color: #3d3a40; box-shadow: inset 0 0 0 1px rgba(60, 58, 66, 0.4); }
+.sg-tags .t.scar { color: #8e1f1f; box-shadow: inset 0 0 0 1px rgba(142, 31, 31, 0.45); }
+.sg-beats { list-style: none; margin: 0.75rem 0 0; padding: 0.5rem 0 0; border-top: 1px solid rgba(107, 74, 28, 0.35); display: flex; flex-direction: column; gap: 0.25rem; font-size: var(--fs-sm); color: #3a2a18; }
+.sg-beats li { display: grid; grid-template-columns: 1.25rem auto minmax(0, 1fr); column-gap: 0.4rem; align-items: baseline; }
+.sg-beats .bi { color: #8a5f22; line-height: 0; } .sg-beats .bi .ic { width: 1rem; height: 1rem; }
+.sg-beats small { font: 600 var(--fs-xs)/1 var(--k-display, 'Cinzel', serif); color: #6b5638; white-space: nowrap; }
+
+/* ---- the footer: steel plates on the table edge */
+.sg-foot { flex: none; width: min(74rem, 100%); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; }
+.sg-nav, .sg-acts { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.sg-acts { justify-content: flex-end; }
+.sg-nav .nav { width: 2.75rem; padding: 0; }
+.sg-nav .nav[data-s=prev] .ic { transform: scaleX(-1); }
+.sg-nav .nav:disabled { --face: linear-gradient(162deg, #24262c, #17181c); color: #6d6556; filter: none; cursor: default; }
+.sg-at { min-width: 9.5rem; text-align: center; font: 600 var(--fs-sm)/1.2 var(--k-display, 'Cinzel', serif); letter-spacing: 0.08em; color: #c4b89c; }
+
+@media (max-width: 54rem), (max-height: 30rem) {
+  .sg-book { --pad: 0.5rem; }
+  .sg-page { padding: 1.1rem 1.1rem 2.25rem; }
+  .sg-foot { justify-content: center; }
+  .sg-acts { justify-content: center; }
+  .sg-acts .k-btn { flex: 1 1 40%; padding: 0 0.6em; letter-spacing: 0.06em; }
+  .sg-fleet .sg-por { width: 4.75rem; height: 5.9375rem; }
+}
+@media (max-height: 30rem) { .saga { flex-direction: row; } .sg-foot { width: 15rem; flex-direction: column; } .sg-acts { flex-direction: column; } .sg-acts .k-btn { width: 100%; flex: none; } }
+@media (prefers-reduced-motion: reduce) { .saga-ov { transition: none; } }
+.sg-page > .sg-pin { min-height: 100%; display: flow-root; }
+.sg-pin:has(> .sg-front) { display: flex; flex-direction: column; }
+.sg-pin > .sg-front { flex: 1 0 auto; min-height: 0; }
+.sg-beats li > span:last-child .ic { width: 1em; height: 1em; vertical-align: -0.12em; }
+.sg-acts .k-btn.primary { background-color: #c8964a; }

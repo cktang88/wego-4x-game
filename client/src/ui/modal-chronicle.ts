@@ -89,7 +89,7 @@ export function chronicleBody(c: Ctx): string {
     return `<section class="ct"><header class="ct-h"><span class="ct-n"><small>${T}</small><b>${turn}</b></span><button class="mbtn m-ghost sm" data-a="replay" data-id="${turn}" title="Replay ${T.toLowerCase()} ${turn}">▶ Replay</button></header>${battles ? `<div class="ct-bs">${battles}</div>` : ''}
       ${entries ? `<div class="ct-es">${entries}</div>` : bsShown.length ? '' : `<div class="ct-es"><div class="dim ce-quiet">Quiet</div></div>`}</section>`;
   }).join('');
-  return `<div class="chron">${rows || '<div class="m-empty">The chronicle is empty</div>'}</div>`;
+  return `<div class="chron">${rows || '<div class="m-empty">Nothing is written yet. Seal your first orders: every deed of the war is set down here.</div>'}</div>`;
 }
 
 export function chronicleAct(c: Ctx, a: string, el: HTMLElement): boolean {

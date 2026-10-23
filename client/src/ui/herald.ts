@@ -10,7 +10,12 @@ import { sigilSvg } from '../art/sigils.ts';
 import { iconizeDom, ic, icFor, glyphHtml, type IconKey } from '../art/icons.ts';
 import '../herald.css';
 import { audio } from '../audio/audio.ts';
-import { ownerHi } from '../art/bible.ts';
+import { ownerHi, enamel } from '../art/bible.ts';
+import { TEMPERS, rulerImg, aiHouseLine } from './houses.ts';
+import { smudgesFor } from './ink.ts';
+import { portraitImg, portraitCaption } from '../art/portraits.ts';
+import { MAIMED_AT, GREY_AFTER } from '../hud/portrait.ts';
+import { SCARS } from '../../../shared/config/content.ts';
 
 const KIND_ICON: Record<string, string> = {
   rout: '⤺', caught: '✝', destroyed: '✝', broken: '✝', death: '✝', vengeance: '⚔', debt: '✠', vow_broken: '✗', vow_kept: '✦',
@@ -35,7 +40,7 @@ const autoOff = () => { try { return localStorage.getItem('tc.herald.auto') === 
 export function editions(g: GameScreen): HeraldEdition[] { return g.st.soul?.herald ?? []; }
 const visible = (g: GameScreen, h: Headline) => (g.you === null ? h.public || g.st.winner !== null : headlineVisible(h, g.you));
 
-let open: { el: HTMLElement; turn: number } | null = null;
+let open: { el: HTMLElement; turn: number; inked?: boolean } | null = null;
 export const heraldOpen = () => !!open?.el.isConnected;
 
 /** Open the newest unseen edition (start of a turn / cycle). Returns whether it opened. */
@@ -160,12 +165,24 @@ function render(g: GameScreen, ed: HeraldEdition) {
     const head = `<h2>${reg ? `<button class="hl-go"${go}>${esc(h.text)}</button>` : esc(h.text)}</h2>`;
     const paras = (h.body ?? '').split(/\n+/).map(x => x.trim()).filter(Boolean);
     const dl = paras.length ? (h.dateline ?? (reg ? `${reg.name}, ${T} ${ed.turn}` : `${T} ${ed.turn}`)).replace(/\s*[—–-]+\s*$/, '') : '';
+    // an obituary carries the fallen commander's portrait, mourning sash and every scar it earned
+    const por = h.kind === 'obituary' ? obituaryPortrait(g, h) : '';
     const body = paras.length
-      ? `<div class="hl-body">${h.byline ? `<p class="hl-byl">${glyphHtml(esc(h.byline))}</p>` : ''}<p class="hl-dl">${glyphHtml(esc(dl))} —</p>${paras.map((x, i) => `<p${i === 0 ? ' class="first"' : ''}>${glyphHtml(esc(x))}</p>`).join('')}</div>`
-      : '';
+      ? `<div class="hl-body">${por}${h.byline ? `<p class="hl-byl">${glyphHtml(esc(h.byline))}</p>` : ''}<p class="hl-dl">${glyphHtml(esc(dl))} —</p>${paras.map((x, i) => `<p${i === 0 ? ' class="first"' : ''}>${glyphHtml(esc(x))}</p>`).join('')}</div>`
+      : por;
     return `<section class="hl ${cls} k-${esc(h.kind)}${paras.length ? ' has-body' : ''}"><span class="hl-ic">${headlineIcon(h.kind)}</span>${head}${by ? `<span class="hl-by">${by}</span>` : ''}${body}</section>`;
   };
-  const disp = ed.dispatches.map(d => `<blockquote class="dsp" style="--pc:${esc(ownerHi(g.color(d.player)))}"><p>“${esc(d.text)}”</p><cite>— ${esc(d.byline)}</cite></blockquote>`).join('');
+  // dispatches: an AI house writes in its ruler's hand and signs with its motto (ui/houses.ts); in your copy the ink
+  // runs where your own intel contradicts the words (ui/ink.ts), and only there
+  const smudge = smudgesFor(g, ed, ed === eds[eds.length - 1]);
+  const disp = ed.dispatches.map((d, i) => {
+    const p = st.players[d.player];
+    const temper = p?.kind === 'ai' ? TEMPERS[p.aiLevel] ?? TEMPERS.standard : null;
+    const signed = !!temper && d.as === 'house';
+    const why = smudge.get(i);
+    return `<blockquote class="dsp${temper ? ` hand-${temper.hand}` : ''}${why ? ' smudged' : ''}${signed ? ' signed' : ''}" style="--pc:${esc(ownerHi(g.color(d.player)))}">${signed ? `<span class="dsp-ruler">${rulerImg(p.aiLevel, enamel(p.color).base, 40)}</span>` : ''}<p>“${esc(d.text)}”</p><cite>— ${esc(d.byline)}${signed ? `<small>${esc(aiHouseLine(p) ?? '')} · “${esc(temper!.motto)}”</small>` : ''}</cite>${why ? `<aside class="dsp-note" role="note">${ic('eye')}<span><b>The ink runs.</b> ${esc(why)}</span></aside>` : ''}</blockquote>`;
+  }).join('');
+  if (smudge.size && ed === eds[eds.length - 1] && open && !open.inked) { open.inked = true; audio.touch('smudge'); }
   const pend = g.you !== null ? pending(g) : null;
   const can = g.you !== null && g.canPlan && st.winner === null;
   const me = g.you !== null ? st.players[g.you] : null;
@@ -188,8 +205,23 @@ function render(g: GameScreen, ed: HeraldEdition) {
     <div class="hd-date"><span>${T} ${ed.turn}</span><span class="hd-of">of the Three Crowns</span>${ed.correspondent ? `<span class="hd-corr">${esc(ed.correspondent)}, at the front</span>` : ''}<span class="hd-stand">${esc(st.players.filter(p => !p.eliminated).length)} houses stand</span></div>
     <div class="hd-body">
       <div class="hd-main">${hl(lead, 'lead')}<div class="hd-rule" style="--ink:${esc(ink)}"></div><div class="hd-cols">${rest.map(h => hl(h, '')).join('')}</div></div>
-      <aside class="hd-side"><h3>Dispatches</h3>${disp || '<p class="hd-none">No house wrote in.</p>'}${plant}</aside>
+      <aside class="hd-side"><h3>Dispatches</h3>${disp || `<p class="hd-none">${can ? 'No house wrote in. Plant the first word below: a boast, a threat, a lie.' : 'No house wrote in to this edition.'}</p>`}${plant}</aside>
     </div>
     <footer class="hd-foot">${nav}<button class="hb go" data-h="close">To the board ▸</button></footer>`;
   iconizeDom(art);
+}
+
+/** The fallen commander of an obituary ("Obituary: <name>"), from the record of its banner when the reader has it. */
+function obituaryPortrait(g: GameScreen, h: Headline): string {
+  const name = h.text.replace(/^Obituary:\s*/i, '').trim();
+  if (!name) return '';
+  const rec = (g.st.soul?.fallen ?? []).find(r => r.commander === name);
+  const owner = rec?.owner ?? h.players[0];
+  const spec = {
+    name, color: g.color(owner ?? -1), dead: true,
+    scars: rec?.scars.map(x => x.id) ?? [], maimed: (rec?.routs ?? 0) >= MAIMED_AT, legend: (rec?.rank ?? 0) >= 5, rank: rec?.rank ?? 1,
+    grey: !!rec && rec.fateTurn - rec.foundedTurn >= GREY_AFTER,
+  };
+  const cap = portraitCaption(spec, SCARS);
+  return `<figure class="hl-por">${portraitImg(spec, 84, 'portrait', cap).replace('<img ', `<img title="${esc(cap)}" `)}<figcaption>${esc(name)}</figcaption></figure>`;
 }

@@ -1,0 +1,127 @@
+/* ============================================================================
+   The Court modules (client/src/court/): the captive card, the ransom letter, the Coronation decree and the exile's
+   panel. Built on the kit (art/kit.css: .k-card plates, .k-btn plates, the .k-seal for the irreversible, .k-token
+   enamels, .k-seg stops). Everything is scoped under .ct-card; nothing here restyles the rest of the app.
+   Floors: prose 1rem (IM Fell, never below 15px on phone), labels 0.875rem, touch targets 2.75rem.
+   ============================================================================ */
+.ct-card { --ct-gap: 0.75rem; display: grid; gap: var(--ct-gap); width: min(100%, 30rem); box-sizing: border-box; font-size: 1rem; color: var(--k-ivory); }
+.ct-card * { box-sizing: border-box; }
+.ct-card p, .ct-card h3, .ct-card h4, .ct-card ul { margin: 0; }
+.ct-card .ic { width: 1.15em; height: 1.15em; vertical-align: -0.2em; flex: none; }
+.ct-house { font-family: var(--k-display); font-weight: 700; letter-spacing: 0.04em; }
+.ct-crest { vertical-align: middle; flex: none; filter: drop-shadow(0.06rem 0.12rem 0.1rem rgba(0, 0, 0, 0.6)); }
+.ct-empty { font: italic 1rem/1.4 var(--k-prose); color: var(--k-parchment); }
+
+/* ---- header: an engraved label and the clock (an hourglass with brass pips, one per turn left) */
+.ct-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; min-height: 1.75rem; }
+.ct-head .k-engraved { font-size: 0.875rem; display: inline-flex; align-items: center; gap: 0.45em; }
+.ct-clock { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--k-brass-300); font-size: 0.95rem; }
+.ct-pips { display: inline-flex; gap: 3px; }
+.ct-pips i { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #3a3328, #15130f); box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 230, 170, 0.1); }
+.ct-pips i.on { background: radial-gradient(circle at 35% 30%, #fff1c2, #dcb46c 45%, #6b4a1c); box-shadow: 0 0 0.3rem rgba(255, 200, 120, 0.35); }
+
+/* ---- who: a portrait in a brass frame, name, house, history */
+.ct-who { display: grid; grid-template-columns: auto 1fr; gap: 0.85rem; align-items: start; }
+.ct-portrait { width: 72px; height: auto; border-radius: 3px; box-shadow: 0 0 0 2px var(--k-brass-500), 0 0 0 3px rgba(0, 0, 0, 0.7), var(--k-cast); filter: saturate(0.85) sepia(0.12); }
+.ct-name { font: 700 1.15rem/1.2 var(--k-display); letter-spacing: 0.04em; color: var(--k-ivory); text-shadow: 0 1px 0 #000; overflow-wrap: anywhere; }
+.ct-sub { font: 500 0.95rem/1.35 var(--k-ui); color: var(--k-parchment); display: flex; align-items: center; gap: 0.35em; flex-wrap: wrap; }
+.ct-tokens { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.35rem; }
+.ct-tokens .k-token { font-size: 0.875rem; }
+.ct-prose { font: 1rem/1.4 var(--k-prose); color: var(--k-parchment); }
+.ct-note { font: 1rem/1.4 var(--k-prose); color: var(--k-ivory); display: flex; gap: 0.4em; align-items: baseline; flex-wrap: wrap; }
+.ct-note.bad .ic { color: var(--k-bad); }
+.ct-why { display: block; font: 500 0.875rem/1.35 var(--k-ui); color: var(--k-faded); }
+.ct-why b { color: var(--k-parchment); }
+.ct-h4 { font: 700 0.875rem/1.2 var(--k-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--k-engraved); display: flex; gap: 0.45em; align-items: center; margin-top: 0.25rem; }
+
+/* ---- the choices: plates side by side, the seal last; stacked on a phone */
+.ct-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; align-items: start; }
+.ct-choices.two { grid-template-columns: 1fr auto; }
+/* the captive's execute seal sits on its own row under the two plates, away from them (it cannot be undone) */
+.ct-captive .ct-exec { grid-column: 1 / -1; max-width: none; grid-template-columns: auto 1fr; justify-items: start; align-items: center; text-align: left; column-gap: 0.85rem;
+  padding-top: 0.6rem; background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.6) 10%, rgba(0, 0, 0, 0.6) 90%, transparent) 0 0 / 100% 1px no-repeat,
+  linear-gradient(90deg, transparent, rgba(220, 180, 108, 0.25) 10%, rgba(220, 180, 108, 0.25) 90%, transparent) 0 1px / 100% 1px no-repeat; }
+.ct-choice { display: grid; gap: 0.4rem; justify-items: start; align-content: start; }
+.ct-choice .k-btn { width: 100%; min-height: 2.75rem; }
+.ct-choice .k-seg { width: 100%; }
+.ct-choice .k-seg button { flex: 1; min-height: 2.75rem; font-size: 0.875rem; letter-spacing: 0.06em; text-transform: none; display: inline-flex; align-items: center; justify-content: center; gap: 0.25em; }
+.ct-exec { justify-items: center; text-align: center; max-width: 8.5rem; }
+.ct-exec .k-seal { width: 3.6rem; height: 3.6rem; }
+.ct-exec .k-seal .ic { width: 1.8rem; height: 1.8rem; }
+.ct-exec .k-seal.armed { --wax: #b32a22; animation: ct-arm 1.2s var(--k-ease-heavy) infinite alternate; }
+.ct-exec .k-seal[aria-disabled=true] { --wax: #4a2b28; cursor: not-allowed; filter: grayscale(0.6) drop-shadow(0.1rem 0.2rem 0.2rem rgba(0, 0, 0, 0.6)); }
+.ct-exec .k-seal:focus-visible { outline: 2px solid var(--k-brass-200); outline-offset: 4px; }
+@keyframes ct-arm { from { filter: drop-shadow(0.15rem 0.35rem 0.35rem rgba(0, 0, 0, 0.7)); } to { filter: drop-shadow(0 0 0.6rem rgba(226, 114, 93, 0.75)) brightness(1.08); } }
+
+/* ---- a decision already in the plan: a brass-ruled strip with Undo */
+.ct-chosen { display: flex; align-items: center; gap: 0.5rem; min-height: 2.75rem; padding: 0.35rem 0.4rem 0.35rem 0.75rem; border-radius: 3px;
+  font: 1rem/1.3 var(--k-prose); color: var(--k-ivory);
+  background: linear-gradient(180deg, rgba(220, 180, 108, 0.12), rgba(220, 180, 108, 0.04)); box-shadow: inset 0 0 0 1px rgba(220, 180, 108, 0.3), var(--k-bevel); }
+.ct-chosen > span { flex: 1; }
+.ct-chosen .ic { color: var(--k-brass-300); }
+.ct-chosen.grim { background: linear-gradient(180deg, rgba(142, 31, 31, 0.28), rgba(142, 31, 31, 0.1)); box-shadow: inset 0 0 0 1px rgba(194, 69, 58, 0.45), var(--k-bevel); }
+.ct-chosen.grim .ic { color: var(--k-wax-hi); }
+.ct-chosen .k-btn { min-height: 2.75rem; padding: 0 0.8em; font-size: 0.875rem; }
+
+/* ---- the ransom letter: vellum, deckled, ink */
+.ct-ransom .ct-letter { position: relative; isolation: isolate; display: grid; gap: 0.7rem; padding: 1.1rem 1.2rem 1rem; color: var(--k-ink-text);
+  background: var(--k-grain) 0 0 / 160px, radial-gradient(130% 120% at 30% 20%, #f3e8cc 0%, #e4d3ab 60%, #cdb588 100%) #e4d3ab; background-blend-mode: multiply, normal;
+  clip-path: polygon(0% 1.5%, 6% 0%, 14% 1%, 23% 0%, 34% 0.6%, 46% 0%, 58% 1%, 70% 0%, 82% 0.6%, 93% 0%, 100% 1%, 99.4% 20%, 100% 42%, 99.4% 64%, 100% 86%, 99% 100%, 86% 99%, 74% 100%, 61% 99.4%, 48% 100%, 35% 99%, 22% 100%, 10% 99%, 0% 100%, 0.6% 78%, 0% 56%, 0.6% 32%);
+  filter: drop-shadow(0.15rem 0.4rem 0.45rem rgba(0, 0, 0, 0.7)); }
+.ct-ransom .ct-letter::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--k-paper) 0 0 / 520px; mix-blend-mode: multiply; opacity: 0.28; }
+.ct-letterhead { display: flex; align-items: center; gap: 0.6rem; padding-bottom: 0.5rem;
+  background: linear-gradient(90deg, transparent, rgba(74, 44, 16, 0.45) 10%, rgba(74, 44, 16, 0.45) 90%, transparent) 0 100% / 100% 1px no-repeat; }
+.ct-letterhead .ct-house { color: #4a2c10 !important; font-size: 1.05rem; }
+.ct-from { display: block; font: italic 0.95rem/1.2 var(--k-prose); color: var(--k-ink-faded); }
+.ct-letter-p { font: 1rem/1.45 var(--k-prose); color: var(--k-ink-text); }
+.ct-letter-p.small { font-size: 0.95rem; color: var(--k-ink-faded); }
+.ct-letter-p b { font-family: var(--k-display); font-size: 0.95em; letter-spacing: 0.03em; color: #3a2408; }
+.ct-terms { font: 700 1.6rem/1 var(--k-display); color: #3a2408; text-align: center; letter-spacing: 0.04em; padding: 0.2rem 0; }
+.ct-terms .k-num { font-family: var(--k-display); font-size: 1.15em; }
+.ct-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+.ct-actions .k-btn.primary { flex: 1; min-width: 10rem; }
+.ct-ransom .k-btn.ghost { color: #4a2c10; text-shadow: none; }
+.ct-ransom .ct-why { color: var(--k-ink-faded); }
+.ct-ransom .ct-chosen { color: var(--k-ink-text); background: rgba(74, 44, 16, 0.08); box-shadow: inset 0 0 0 1px rgba(74, 44, 16, 0.35); }
+.ct-ransom .ct-chosen .ic { color: #6b4a1c; }
+.ct-ransom .ct-chosen.grim .ic { color: var(--k-wax); }
+
+/* ---- the Coronation: a proclamation and the public answers */
+.ct-procl { display: grid; grid-template-columns: auto 1fr; gap: 0.8rem; align-items: center; }
+.ct-procl .ct-name .ct-house { font-size: 1em; }
+.ct-answers { list-style: none; padding: 0; display: grid; gap: 0.35rem; }
+.ct-answers li { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; font: 500 0.95rem/1.3 var(--k-ui); }
+.ct-answers .k-token { margin-left: auto; font-size: 0.875rem; }
+
+/* ---- exile: picks are enamel crests on steel plates, 44px+ targets */
+.ct-picks { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.5rem; }
+.ct-pick { position: relative; display: grid; grid-template-columns: auto 1fr auto; grid-template-rows: auto auto; column-gap: 0.55rem; align-items: center; text-align: left;
+  min-height: 3.25rem; padding: 0.45rem 0.7rem; border: 1px solid transparent; border-radius: 3px; cursor: pointer; color: var(--k-ivory);
+  background: var(--k-grain) 0 0 / 160px, var(--k-steel-face) padding-box, var(--k-steel-rim) border-box; background-blend-mode: soft-light, normal, normal;
+  box-shadow: var(--k-bevel), var(--k-cast); transition: transform var(--k-t-press) var(--k-ease-heavy), filter var(--k-t-tick); }
+.ct-pick .ct-crest { grid-row: 1 / span 2; }
+.ct-pick-name { font-size: 0.95rem; overflow-wrap: anywhere; }
+.ct-pick-vp { font: 500 0.875rem/1 var(--k-ui); color: var(--k-parchment); }
+.ct-pick-note { grid-column: 2 / span 2; font: 500 0.875rem/1.2 var(--k-ui); color: var(--k-faded); }
+.ct-pick:hover:not([aria-disabled=true]) { filter: brightness(1.12); background: var(--k-grain) 0 0 / 160px, var(--k-steel-face-hi) padding-box, var(--k-steel-rim) border-box; }
+.ct-pick:active:not([aria-disabled=true]) { transform: translate(1px, 2px); box-shadow: var(--k-press); }
+.ct-pick:focus-visible { outline: 2px solid var(--k-brass-200); outline-offset: 3px; }
+.ct-pick.on { background: var(--k-grain) 0 0 / 160px, var(--k-steel-face-hi) padding-box, var(--k-brass-rim) border-box; box-shadow: var(--k-bevel), var(--k-cast), 0 0 0.9rem -0.2rem rgba(255, 200, 120, 0.4); }
+.ct-pick.on .ct-pick-note { color: var(--k-brass-200); }
+.ct-pick[aria-disabled=true] { cursor: not-allowed; filter: saturate(0.4) brightness(0.8); }
+.ct-tally { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; }
+.ct-tally li { display: flex; align-items: center; gap: 0.35rem; font: 500 0.95rem/1.3 var(--k-ui); }
+.ct-tally b { font-size: 1.05rem; color: var(--k-brass-200); }
+
+/* ---- phone: one column, the seal centred under the plates */
+@media (max-width: 520px) {
+  .ct-card { width: 100%; }
+  .ct-choices, .ct-choices.two { grid-template-columns: 1fr; }
+  .ct-exec { max-width: none; grid-template-columns: auto 1fr; justify-items: start; align-items: center; text-align: left; column-gap: 0.75rem; }
+  .ct-picks { grid-template-columns: 1fr; }
+  .ct-terms { font-size: 1.45rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ct-exec .k-seal.armed { animation: none; filter: drop-shadow(0 0 0.5rem rgba(226, 114, 93, 0.7)); }
+  .ct-pick { transition: none; }
+}

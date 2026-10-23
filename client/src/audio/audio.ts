@@ -340,6 +340,21 @@ export class AudioEngine {
   }
 
   /**
+   * Small touches paired from the existing set (no new files; docs/ASSETS.md): a heavy book leaf for the Saga, the
+   * cover laid open, a house's banner set at a chair in the lobby, a brass plate pressed, a lie caught in the ink.
+   */
+  touch(kind: 'leaf' | 'cover' | 'cloth' | 'brass' | 'smudge' | 'tok'): void {
+    switch (kind) {
+      case 'leaf': this.sfx('ui_page', { rate: 0.82, vol: 0.9 }); break;
+      case 'cover': this.sfx('ui_close', { rate: 0.62, vol: 0.9 }); this.sfx('ui_page', { rate: 0.7, vol: 0.5, delay: 0.07 }); break;
+      case 'cloth': this.sfx('ui_banner', { rate: 1.2, vol: 0.4 }); break;
+      case 'brass': this.sfx('ui_click', { rate: 0.78, vol: 0.6 }); break;
+      case 'smudge': this.sfx('ui_page', { rate: 1.5, vol: 0.25 }); break;
+      case 'tok': this.sfx('ui_click', { rate: 0.55, vol: 0.7, pitchJitter: 0.4 }); break;
+    }
+  }
+
+  /**
    * Map one sim event to a sound. Call once per event as the replay reaches it (pulse by pulse), or pass a
    * whole batch to `onGameEvents`. Perspective-aware when `me` is set: your own fleet blocked = error, a
    * posture you won = CALLED IT, a posture that caught you (or you lost) = CAUGHT OUT.
@@ -496,6 +511,31 @@ export class AudioEngine {
       } catch { /* */ }
     } else void this.load('ui_coin');
     dbg(o.down ? 'syn_coin_down' : `syn_coin_${i}`);
+  }
+  /**
+   * An order chip dropping into socket `i` of the plan strip (DELIGHT #11): the recorded clack, pitched up the major
+   * scale I → V; when the last socket fills (`full`), a soft brass triad under it resolves the phrase.
+   */
+  chip(i: number, full = false): void {
+    const STEP = [0, 2, 4, 5, 7, 9, 11, 12];
+    const s = STEP[Math.max(0, Math.min(STEP.length - 1, i))];
+    this.sfx('game_order', { rate: Math.pow(2, s / 12), pitchJitter: 0 });
+    if (!full) return;
+    const b = this.synthBus(); if (!b) return;
+    const { ctx, out } = b;
+    const at = ctx.currentTime + 0.09;
+    // the tonic triad an octave up from the chip's root, struck softly, the fifth a hair late like a hand on a bell
+    for (const [k, semi] of [[0, 0], [1, 4], [2, 7], [3, 12]] as const) this.tone(ctx, out, at + k * 0.018, 523.25 * Math.pow(2, semi / 12), 523.25 * Math.pow(2, semi / 12), 0.055 - k * 0.008, 1.1, 'triangle', 0.01);
+    dbg('syn_chord');
+  }
+  /** One heartbeat, lub-dub, low under everything: a ship that survived by a thread. */
+  heartbeat(o: { delay?: number } = {}): void {
+    const b = this.synthBus(); if (!b) return;
+    const { ctx, out } = b;
+    const at = ctx.currentTime + Math.max(0, o.delay ?? 0);
+    this.tone(ctx, out, at, 78, 46, 0.32, 0.16);
+    this.tone(ctx, out, at + 0.19, 70, 42, 0.24, 0.18);
+    dbg('syn_heartbeat');
   }
   /** A wax seal cracking open (Act I of the reveal); `i` = which seal (each a little different). */
   waxCrack(i = 0, o: { delay?: number } = {}): void {

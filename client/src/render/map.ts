@@ -126,6 +126,8 @@ export interface DrawInput {
   unsupplied?: Set<number> | null;
   /** the arrow under a drag gesture (DOM preview card is the shell's) */
   drag?: DragArrow | null;
+  /** the fleet picked up by a drag: its miniature lifts off the felt (DELIGHT #10) */
+  lift?: number | null;
   /** map lens (default political) */
   lens?: Lens;
   /** region whose own fleet stack is fanned out into per-fleet tokens */
@@ -1011,16 +1013,25 @@ export class MapRenderer {
       const core = STAR_NODE[kind].core * (1 - 0.38 * W.d);
       const nb = Math.min(3, (r.bodies?.length ?? 0) + ((r.buildings.station ?? 0) > 0 ? 1 : 0));
       if (W.d > 0.02 && nb) { ctx.save(); ctx.globalAlpha = W.d; drawOrbitLines(ctx, p.x, p.y, pr, nb, 0.8 * S, fog); ctx.restore(); }
+      // tenure (DELIGHT #26): a star held without a break burns brighter, with a faint ring for each tier it has
+      // reached (3, 6, 10 turns); public, from the world's own story, so every house sees how long it has been held
+      const ten = !fog && r.owner !== null && r.owner >= 0 && r.story ? tenureTier(st, r) : 0;
+      if (ten) drawGlow(ctx, p.x, p.y, pr * core * (2.2 + ten * 0.5), [255, 214, 150], 0.1 + ten * 0.06);
+      // a blockaded world's light dims to match its blockaded output (DELIGHT #34)
+      const dim = !fog ? this.blockadeDim(st, r) : 1;
+      if (dim < 1) { ctx.save(); ctx.globalAlpha *= dim; }
       drawStarNode(ctx, p.x, p.y, pr * core, R * core * this.rdpr, kind, fog);
+      if (dim < 1) ctx.restore();
+      if (ten) this.tenureRings(p, pr * core, ten, this.colorOf(st, r.owner));
       // the GL corona: light on the painted sprite (fogged stars are pewter and get none)
       if (this.stage && !fog) {
         const sp = this.toScreen(p);
         if (sp.x > -80 && sp.y > -80 && sp.x < this.w + 80 && sp.y < this.h + 80)
-          this.coronas.push({ x: sp.x, y: sp.y, r: pr * core * this.cam.z, amp: CORONA_AMP[kind] ?? 0.55, color: CORONA[kind] ?? LAMP.color, seed: r.id * 37 + 11 });
+          this.coronas.push({ x: sp.x, y: sp.y, r: pr * core * this.cam.z * (1 + ten * 0.08), amp: Math.min(1, (CORONA_AMP[kind] ?? 0.55) * (1 + ten * 0.14)) * dim, color: r.kind === 'throne' && r.owner !== null && r.owner >= 0 ? this.throneLight(st, r.owner) : CORONA[kind] ?? LAMP.color, seed: r.id * 37 + 11 });
       }
       if (reducedMotion() && kind === 'pulsar') drawPulsarBeams(ctx, p.x, p.y, pr * core, 0.6, r.id, fog ? 0.35 : 1);
       // objectives: a Crown wears a gold ring, the Throne a larger double ring (hover says what they are worth)
-      if (r.kind === 'crown' || r.kind === 'throne') this.goldRing(r, R, fog);
+      if (r.kind === 'crown' || r.kind === 'throne') this.goldRing(r, R, fog, st);
       if (r.kind === 'relic' && r.relic && W.d > 0.02) {
         // an unexcavated relic: a glinting monolith drifting by the star (detail only)
         const mx = p.x + pr * 1.1, my = p.y + pr * 0.5;
@@ -1069,15 +1080,53 @@ export class MapRenderer {
     }
   }
 
+  /** Tenure rings: thin enamel-coloured rings in the owner's colour, one per tier, each catching the lamp on its
+   *  upper-left arc. Cheap (three arcs), drawn with the star each frame. */
+  private tenureRings(p: Pt, core: number, tier: number, color: string) {
+    const { ctx } = this;
+    const S = this.px(1);
+    const c = rgbA(color);
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (let i = 0; i < tier; i++) {
+      const rad = core * 1.85 + (5 + i * 3.6) * S;
+      ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, TAU);
+      ctx.strokeStyle = 'rgba(8,6,4,0.55)'; ctx.lineWidth = 2.1 * S; ctx.stroke();
+      ctx.strokeStyle = cssA(c, 0.42 + i * 0.1); ctx.lineWidth = 0.9 * S; ctx.stroke();
+      // the lamp catches the upper-left of each ring
+      ctx.beginPath(); ctx.arc(p.x, p.y, rad, Math.PI * 1.02, Math.PI * 1.55);
+      ctx.strokeStyle = cssA(mixA(c, [255, 236, 200], 0.55), 0.75); ctx.lineWidth = 0.9 * S; ctx.stroke();
+    }
+    ctx.restore();
+  }
+  /** Blockaded worlds (memoized per state): the light factor is the rules' blockaded industry share, never below 0.35. */
+  private blockMemo: { st: GameState | null; m: Map<number, number> } = { st: null, m: new Map() };
+  private blockadeDim(st: GameState, r: Region): number {
+    const B = this.blockMemo;
+    if (B.st !== st) {
+      B.st = st; B.m = new Map();
+      if (contestOn(st)) {
+        const k = Math.max(0.35, Math.min(1, (st.rules as unknown as { systems?: { blockadeIndustry?: number } }).systems?.blockadeIndustry ?? 0.5));
+        for (const x of st.regions) if (x.owner !== null && x.owner >= 0 && x.bodies) { try { if (systemStatus(st, x).blockaded) B.m.set(x.id, k); } catch { /* an old save */ } }
+      }
+    }
+    return B.m.get(r.id) ?? 1;
+  }
+  /** The Throne burns in its holder's colour (DELIGHT #32): its corona and glow lean to the holder's enamel. */
+  private throneLight(st: GameState, owner: number): string {
+    return cssA(mixA(rgbA('#ffe2a0'), rgbA(this.colorOf(st, owner)), 0.55));
+  }
+
   /** A Crown's gold ring / the Throne's double ring and broken Ring Ruin, with a faint regal glow. */
-  private goldRing(r: Region, R: number, fog: boolean) {
+  private goldRing(r: Region, R: number, fog: boolean, st: GameState) {
     const { ctx } = this;
     const S = this.px(1), W = this.zw, p = r.site;
     const throne = r.kind === 'throne';
     const rr = Math.max(R * (throne ? 1.45 : 1.32), throne ? 10 : 7.5) * S;
     ctx.save();
     if (fog) ctx.globalAlpha = 0.6;
-    drawGlow(ctx, p.x, p.y, rr * 2, [255, 206, 120], (throne ? 0.3 : 0.2) * (fog ? 0.5 : 1));
+    const holder = throne && !fog && r.owner !== null && r.owner >= 0 ? rgbA(this.colorOf(st, r.owner)) : null;
+    drawGlow(ctx, p.x, p.y, rr * 2, holder ? mixA([255, 206, 120], holder, 0.6) as [number, number, number] : [255, 206, 120], (throne ? (holder ? 0.42 : 0.3) : 0.2) * (fog ? 0.5 : 1));
     const g = ctx.createLinearGradient(p.x, p.y - rr, p.x, p.y + rr);
     g.addColorStop(0, '#fff3b8'); g.addColorStop(0.5, '#e2aa3a'); g.addColorStop(1, '#9a6618');
     const ring = (rad: number, w: number) => {
@@ -1086,6 +1135,8 @@ export class MapRenderer {
     };
     ring(rr, throne ? 2.2 : 1.6);
     if (throne) ring(rr + 4 * S, 1.1);
+    // the holder's enamel set inside the Throne's gold ring
+    if (holder) { ctx.beginPath(); ctx.arc(p.x, p.y, rr - 2.4 * S, 0, TAU); ctx.strokeStyle = cssA(holder, 0.85); ctx.lineWidth = 1.6 * S; ctx.stroke(); }
     if (throne && W.s < 0.98) {
       // the Ring Ruin: broken golden arcs around the throne star (operational and closer)
       ctx.globalAlpha *= 1 - W.s;
@@ -1710,6 +1761,19 @@ export class MapRenderer {
    *  counter with a ship arrow in the middle, painted miniatures on a base up close. A parked piece is tethered to
    *  its star. A stack of 2+ fleets carries a small count chip. Strength is shown only when selected (and in the
    *  hover tooltip); status is encoded on the piece (idle breathes, out of supply has an amber dashed rim). */
+  /** The lift of a picked-up fleet: rises over 120 ms, settles back over 140 ms when it is put down. */
+  private liftSt: { fleet: number | null; t0: number; up: boolean } = { fleet: null, t0: 0, up: false };
+  private liftOf(I: DrawInput, t: Tok, now: number): number {
+    const want = I.lift ?? null, L = this.liftSt;
+    if (want !== null && (L.fleet !== want || !L.up)) this.liftSt = { fleet: want, t0: now, up: true };
+    else if (want === null && L.up) this.liftSt = { fleet: L.fleet, t0: now, up: false };
+    const S2 = this.liftSt;
+    if (S2.fleet === null || !t.fleets.some(f => f.id === S2.fleet)) return 0;
+    if (reducedMotion()) return S2.up ? 1 : 0;
+    const k = Math.min(1, (now - S2.t0) / (S2.up ? 120 : 140));
+    const e = 1 - Math.pow(1 - k, 3);
+    return S2.up ? e : 1 - e;
+  }
   private drawToken(t: Tok, d: { x: number; y: number; ang: number; bank?: number }, c: string, now: number, scale: number, alpha: number, I: DrawInput, hit = true) {
     const { ctx } = this;
     const S = this.px(1);
@@ -1747,6 +1811,15 @@ export class MapRenderer {
     ctx.save();
     ctx.translate(d.x, d.y);
     if (scale !== 1) ctx.scale(scale, scale);
+    // picked up: the piece rises 4 px off the felt and its shadow widens and softens beneath it
+    const lk = hit ? this.liftOf(I, t, now) : 0;
+    if (lk > 0.001) {
+      const sr = tr * S * (1.05 + 0.4 * lk);
+      const sg = ctx.createRadialGradient(1.5 * S * lk, 3 * S * lk, 0, 1.5 * S * lk, 3 * S * lk, sr);
+      sg.addColorStop(0, `rgba(6,4,2,${(0.42 - 0.12 * lk).toFixed(3)})`); sg.addColorStop(1, 'rgba(6,4,2,0)');
+      ctx.save(); ctx.globalAlpha = A; ctx.fillStyle = sg; ctx.beginPath(); ctx.ellipse(1.5 * S * lk, 3 * S * lk, sr, sr * 0.7, 0, 0, TAU); ctx.fill(); ctx.restore();
+      ctx.translate(0, -4 * S * lk);
+    }
     if (fated && !reduced && W.d > 0.02) {
       const k = 0.5 + 0.5 * Math.sin(now / 420);
       ctx.globalAlpha = A * W.d;
@@ -1874,13 +1947,17 @@ export class MapRenderer {
     const bob = reduced || t.moving ? 0 : Math.sin(now / 850 + (t.fleets[0]?.id ?? 0) * 1.7) * 1.3;
     const order = pos.map((q, i) => ({ ...q, i })).sort((a, b) => a.y - b.y);
     const eng = t.moving ? 1.1 : 0.3;
+    // a limping fleet lists 8° on its stands (DELIGHT #40)
+    const listing = t.fleets.some(f => !!this.fleetById(I.state, f.id)?.limping);
     for (const q of order) {
       const gx = q.x * S, gy = q.y * BASE_SQUASH * S;
       const L = len0 * q.s * (0.78 + 0.22 * classLen(q.cls) / classLen(lead));
       const stH = (G.stand + (q.i === 0 ? 2 : 0)) * S;
       const sy = gy - stH + bob * S * (q.i % 2 ? 0.7 : 1);
       drawStand(ctx, gx, gy, sy + L * S * 0.05, Math.max(1.2, L * 0.07) * S);
-      drawShip(ctx, gx, sy, L * S, L * this.rdpr, q.cls, owner, fill, d.ang, { shadow: { dx: stH * 0.3, dy: stH * 0.95, alpha: 0.42 }, engine: eng, bank: d.bank ?? 0 });
+      if (listing) { ctx.save(); ctx.translate(gx, sy); ctx.rotate(0.14 * -t.side || 0.14); ctx.translate(-gx, -sy); }
+      drawShip(ctx, gx, sy, L * S, L * this.rdpr, q.cls, owner, fill, d.ang, { shadow: { dx: stH * 0.3, dy: stH * 0.95, alpha: 0.42 }, engine: eng * (listing ? 0.4 : 1), bank: d.bank ?? 0 });
+      if (listing) ctx.restore();
     }
     if (owner < 0) return;
     const sfs = t.fleets.map(f => this.fleetById(I.state, f.id)).filter((x): x is Fleet => !!x && !!x.banner && x.ships.length > 0);
@@ -2322,7 +2399,8 @@ export class MapRenderer {
         const br = 0.5 + 0.5 * Math.sin(t * 1.4);
         const gr = Math.max(pr * 4.5, 30 * S);
         const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, gr);
-        g.addColorStop(0, `rgba(255,236,170,${0.2 + 0.14 * br})`); g.addColorStop(1, 'rgba(255,200,90,0)');
+        const hc = r.owner !== null && r.owner >= 0 && !fog ? mixA([255, 236, 170], rgbA(this.colorOf(I.state, r.owner)), 0.5) : [255, 236, 170] as [number, number, number];
+        g.addColorStop(0, cssA(hc, 0.2 + 0.14 * br)); g.addColorStop(1, cssA(hc, 0));
         ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, gr, 0, TAU); ctx.fill();
       } else if (kind === 'pulsar') drawPulsarBeams(ctx, p.x, p.y, core, t, r.id, fog ? 0.35 : 1);
       else if (kind === 'blackhole') drawAccretionShimmer(ctx, p.x, p.y, core, t, r.id, fog ? 0.4 : 1);
@@ -2570,7 +2648,18 @@ export class MapRenderer {
     const kindWord = r.kind === 'throne' ? 'The Throne' : r.kind === 'crown' ? 'Crown world' : r.kind === 'home' ? 'Capital' : r.kind === 'relic' ? 'Relic site' : r.kind === 'void' ? 'Empty space' : 'Colony world';
     lines.push(`${kindWord} · ${owner === I.you && I.you !== null ? 'yours' : this.ownerName(I, owner)}`);
     if (r.kind === 'crown') lines.push(`Hold it to score ${V.vpPerCrownPerTurn ?? 1} victory point each turn${V.crownMajorityVp ? ` (+${V.crownMajorityVp} more while you hold 2 or more Crowns)` : ''}.`);
-    if (r.kind === 'throne') lines.push('Hold it to score victory points every turn, more the longer you keep it.');
+    if (r.kind === 'throne') {
+      lines.push('Hold it to score victory points every turn, more the longer you keep it.');
+      // the King's Seat (DELIGHT #32): every reign so far, carved on the plaque
+      const reigns = st.soul?.reigns ?? [];
+      if (reigns.length) lines.push(`King's Seat: ${reigns.slice(-4).map(x => `${st.players[x.p]?.name.split(' ')[0] ?? '?'} T${x.from}${x.to === null ? '–now' : x.to !== x.from ? `–${x.to}` : ''}`).join(' · ')}.`);
+    }
+    if (this.blockadeDim(st, r) < 1 && !this.starFogged(r, I)) lines.push('Blockaded: its light, and its output, at half.');
+    // tenure (DELIGHT #26): what the rings round a long-held star mean
+    if (r.owner !== null && r.owner >= 0 && r.story && !this.starFogged(r, I)) {
+      const tt = tenureTier(st, r);
+      if (tt) lines.push(`Held ${Math.max(0, st.turn - r.story.tenureFrom)} turns unbroken: ${['', 'one ring', 'two rings', 'three rings'][tt]} of tenure.`);
+    }
     if (r.kind === 'relic' && r.relic) lines.push(`An unexcavated relic: excavate it for ${V.vpPerRelic ?? 2} victory points.`);
     if (r.kind !== 'void') {
       const g = this.garrisonText(r, I);

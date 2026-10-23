@@ -14,6 +14,7 @@ import { intentFor, commitIntent, type Intent } from './verbs.ts';
 import { tip, fmtDur, shortName, shortWhy } from './util.ts';
 import { chevrons, fleetEpi, vowQuote, honourPrompt, limpLine, fleetStory, fleetSoulActs, shipTraitBits, soulAction, openFounding, resetSoul } from './soul.ts';
 import { bannerSvg } from '../art/sigils.ts';
+import { fleetPortrait, portraitTag } from './portrait.ts';
 import { postureStatus, fleetGambit, sigAction, toggleGambit, betPeek, resetSignature } from './signature.ts';
 import { tributeAction, roleKey, paintArt, artPeek, resetSystems } from './systems.ts';
 import { ownWorld, foreignWorld, tabOf, setWorldTab, toggleLocks, toggleTrack, intoNext, buildInto, hullPeek, trackPeek, resetWorldCard, type WorldTab } from './worldcard.ts';
@@ -102,14 +103,17 @@ function place(g: GameScreen, el: HTMLElement) {
 /** A commander's surname: the last capitalised word ("Admiral Theodora Vasquez of the" → "Vasquez"). */
 export const lastName = (n: string) => n.split(/\s+/).filter(w => /^[A-Z]/.test(w)).slice(-1)[0] ?? n;
 const shortOwner = (g: GameScreen, o: number | null) => shortName(g.pname(o), 1);
+/** "Theodora Vasquez" → "Cdr Vasquez" (the face beside it says the rest; the Story verb has the full name). */
+const cmdShort = (n: string) => `Cdr ${lastName(n)}`;
 
 function fleetArt(g: GameScreen, f: Fleet, extra = ''): string {
-  const ban = f.banner ? bannerSvg(f.banner.sigil, g.color(f.owner), 48, { rim: f.commander.rank >= 4 ? 'gold' : 'silver', broken: !!f.oathbreaker })
+  // the commander's painted miniature with the banner pinned at its foot (DELIGHT #37); pickets fly no banner
+  const ban = f.banner ? `<span class="fl-port">${portraitTag(fleetPortrait(g.st, f, g.color(f.owner)), 46)}<span class="fl-pin">${bannerSvg(f.banner.sigil, g.color(f.owner), 26, { rim: f.commander.rank >= 4 ? 'gold' : 'silver', broken: !!f.oathbreaker })}</span></span>`
     : `<span class="picket">${ic('ships')}</span>`;
   const siblings = g.st.fleets.filter(x => x.owner === f.owner && x.region === f.region && x.ships.length);
   const sib = siblings.length > 1 ? `<span class="sib"><button data-a="sib" data-d="-1" aria-label="Previous fleet here">${ic('caret')}</button><small>${siblings.indexOf(f) + 1}/${siblings.length}</small><button data-a="sib" data-d="1" aria-label="Next fleet here">${ic('caret')}</button></span>` : '';
   const epi = fleetEpi(g, f);
-  return `<div class="wc-art fl-art"><span class="bn">${ban}</span><div class="fl-id"><div class="wc-name" style="--pc:${esc(g.color(f.owner))}"><span>${esc(g.pendingName(f))}</span>${chevrons(f.commander.rank)}</div>${epi ? `<div class="wc-epi">${epi}</div>` : ''}</div>${extra}${sib}<button class="x" data-a="close" aria-label="Close">${ic('close')}</button></div>`;
+  return `<div class="wc-art fl-art"><span class="bn">${ban}</span><div class="fl-id"><div class="wc-name" style="--pc:${esc(g.color(f.owner))}"><span>${esc(g.pendingName(f))}</span>${chevrons(f.commander.rank)}</div>${epi ? `<div class="wc-epi">${epi}</div>` : ''}${f.banner ? `<div class="fl-cmd">${esc(cmdShort(f.commander.name))}</div>` : ''}</div>${extra}${sib}<button class="x" data-a="close" aria-label="Close">${ic('close')}</button></div>`;
 }
 function fleetStats(g: GameScreen, f: Fleet, own: boolean): string {
   const st = g.st;

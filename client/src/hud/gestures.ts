@@ -2,6 +2,7 @@
 // verb, with a live preview card at the arrow head; tap-then-tap and hover previews for the same orders;
 // right-click / long-press opens the context ring; empty-space drags pan, two fingers pinch (and cancel a drag).
 // Phone drags put a ghost 48px above the finger, show a 2x loupe and auto-pan at the screen edges.
+import { audio } from '../audio/audio.ts';
 import type { GameScreen } from '../game.ts';
 import type { Order, Pt } from '../../../shared/sim/types.ts';
 import { MAX_JOINERS, orderCost, costText } from '../../../shared/sim/orders.ts';
@@ -111,6 +112,8 @@ export class Gestures {
     return r.items.find(i => i.a === r.hover)?.region ?? null;
   }
   /** DrawInput.drag for the renderer (docs/UX-V2.md §8). */
+  /** The fleet a drag has picked up (the map lifts its miniature), or null. */
+  liftedFleet(): number | null { return this.drag && !this.drag.ship ? this.drag.src.fleet : null; }
   drawDrag(now: number): unknown {
     const g = this.g, st = g.st;
     const a = this.active();
@@ -200,7 +203,7 @@ export class Gestures {
     if ((slot >= 0 ? slot : null) !== g.hoverSlot && !g.live) { g.hoverSlot = slot >= 0 ? slot : null; g.hud.h.strip.querySelectorAll('.chip.hot').forEach(c => c.classList.remove('hot')); if (slot >= 0) g.hud.h.strip.querySelector(`[data-slot="${slot}"]`)?.classList.add('hot'); }
     const s = this.selFleet();
     const tok = g.tokenHit(x, y);
-    if (s === null || rid === null || (tok && tok.fleetIds.includes(s))) { this.hover = null; this.hidePreview(); this.c.style.cursor = tok ? 'grab' : ''; return; }
+    if (s === null || rid === null || (tok && tok.fleetIds.includes(s))) { this.hover = null; this.hidePreview(); this.c.style.cursor = tok ? (tok.owner === g.you && g.canPlan ? 'grab' : 'pointer') : ''; return; }
     const force = g.mode && g.mode.fleet === s ? g.mode.type : null;
     const key = `${rid}|${g.objKey(g.st)}|${g.planVersion}|${g.queue.length}|${force}|${liftedOf(g)?.join(',') ?? ''}`;
     if (this.hover?.key !== key) this.hover = { rid, key, intent: intentFor(g, { fleet: s, ships: liftedOf(g) }, rid, null, force) };
@@ -361,7 +364,8 @@ export class Gestures {
       if (commitIntent(g, it) && it.verb === 'seize' && !it.full) offerCharge(g, d.src.fleet, it.to);
       return;
     }
-    // invalid / nothing: spring back (nothing to undo)
+    // invalid / nothing: spring back (nothing to undo); the piece is set down on the felt with a wooden tok
+    if (!d.ship) audio.touch('tok');
     g.renderAll();
   }
 

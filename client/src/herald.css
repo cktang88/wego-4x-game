@@ -178,3 +178,42 @@
 .herald-ov .hl.k-fate h2, .herald-ov .hl.k-fate_bonus h2 { color: #6b4a1c; }
 /* bylines in the darker ink: they sit beside the coloured dashes */
 .herald-ov .dsp cite { color: #2a1d10; }
+
+/* ============================================================================
+   Obituaries carry the fallen commander's portrait (DELIGHT #68 + #37), set into the column like an engraving.
+   ============================================================================ */
+.herald-ov .hl-por { float: left; margin: 0.2rem 0.9rem 0.4rem 0; display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
+.herald-ov .hl-por .portrait { display: block; width: 5.25rem; height: 6.5625rem; filter: sepia(0.35) drop-shadow(0.12rem 0.25rem 0.22rem rgba(42, 29, 16, 0.45)); }
+.herald-ov .hl-por figcaption { max-width: 6.5rem; text-align: center; font: 700 var(--fs-xs)/1.15 var(--display); letter-spacing: 0.06em; color: #3a2a18; overflow-wrap: anywhere; }
+
+/* ============================================================================
+   The rival houses write in their rulers' hands (DELIGHT #3, ui/houses.ts): the Young Heir in a flourished italic,
+   the Steward in a clerk's upright roman, the Old Admiral in terse telegraph capitals. A signed dispatch carries the
+   ruler's face and the house's motto.
+   ============================================================================ */
+.herald-ov .dsp.signed { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 0.6rem; align-items: start; }
+.herald-ov .dsp.signed > :not(.dsp-ruler) { grid-column: 2; }
+.herald-ov .dsp-ruler { grid-row: 1 / span 3; line-height: 0; }
+.herald-ov .dsp-ruler .portrait { width: 2.5rem; height: 3.125rem; filter: sepia(0.3) drop-shadow(0.08rem 0.18rem 0.15rem rgba(42, 29, 16, 0.45)); }
+.herald-ov .dsp cite small { display: block; margin-top: 0.1rem; font: italic var(--fs-xs)/1.3 var(--prose, "IM Fell English", Georgia, serif); color: #2a1d10; }
+.herald-ov .dsp.hand-flourish p { font-style: italic; letter-spacing: 0.01em; word-spacing: 0.06em; }
+.herald-ov .dsp.hand-clerk p { font-style: normal; }
+.herald-ov .dsp.hand-terse p { font: 700 var(--fs-sm)/1.4 var(--display); letter-spacing: 0.07em; text-transform: uppercase; }
+
+/* ============================================================================
+   The ink runs (DELIGHT #66, ui/ink.ts): only in your copy, only where your own intel says the dispatch is false.
+   The words bleed into the fibre under a blot; a pencilled note in the margin says what you saw.
+   ============================================================================ */
+.herald-ov .dsp.smudged { position: relative; }
+.herald-ov .dsp.smudged p { position: relative; color: #2f2114; text-shadow: 0 0 1.1px rgba(42, 29, 16, 0.85), 0.5px 0.6px 2.2px rgba(42, 29, 16, 0.5); animation: ink-run 1.1s ease-out 0.35s both; }
+.herald-ov .dsp.smudged p::after { content: ''; position: absolute; z-index: -1; left: 38%; top: 8%; width: 46%; height: 80%; pointer-events: none; transform: rotate(-7deg);
+  background: radial-gradient(42% 38% at 46% 52%, rgba(42, 29, 16, 0.42), rgba(42, 29, 16, 0.18) 55%, rgba(42, 29, 16, 0) 72%),
+    radial-gradient(14% 12% at 82% 30%, rgba(42, 29, 16, 0.22), rgba(42, 29, 16, 0) 100%); filter: blur(1px); }
+@keyframes ink-run { from { text-shadow: 0 0 0 rgba(42, 29, 16, 0), 0 0 0 rgba(42, 29, 16, 0); } }
+.herald-ov .dsp-note { display: flex; align-items: flex-start; gap: 0.35rem; margin-top: 0.4rem; padding: 0.3rem 0.45rem; transform: rotate(-0.8deg);
+  font: italic var(--fs-sm)/1.3 var(--prose, 'IM Fell English', Georgia, serif); color: #4a3720;
+  background: rgba(255, 250, 235, 0.35); box-shadow: inset 0 0 0 1px rgba(90, 70, 40, 0.35); }
+.herald-ov .dsp-note .ic { flex: none; width: 1.05rem; height: 1.05rem; margin-top: 0.1rem; color: #6b4a1c; }
+.herald-ov .dsp-note b { font: 700 var(--fs-xs)/1.3 var(--display); font-style: normal; letter-spacing: 0.08em; text-transform: uppercase; color: #8e1f1f; }
+@media (prefers-reduced-motion: reduce) { .herald-ov .dsp.smudged p { animation: none; } }
+.herald-ov .hl.k-obituary, .herald-ov .hl.k-obituary .hl-body { display: flow-root; }

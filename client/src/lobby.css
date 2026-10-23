@@ -306,3 +306,36 @@ button.primary .lb-count { color: #2a1a06; background: rgba(255, 245, 210, 0.35)
 .lb-notify .tcp-settings { margin: 0.25rem 0 1rem; }
 .lb-notify .row { justify-content: flex-end; }
 .lb-notify .row button { min-width: 6rem; min-height: 2.75rem; }
+
+/* ---- the rival houses (DELIGHT #3): the ruler who takes the chair, the house's temper and motto, inked on the
+   articles beside the choice; a friend's chair shows the house banner instead */
+.lobby .form > .lb-house-slot { grid-column: 2; min-width: 0; margin: -0.125rem 0 0.25rem; }
+.lb-house { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+.lb-house .portrait { flex: none; width: 3.25rem; height: 4.0625rem; filter: drop-shadow(0.1rem 0.22rem 0.18rem rgba(42, 29, 16, 0.55)); }
+.lb-house .lb-chair { flex: none; display: grid; place-items: center; width: 3.25rem; height: 3.25rem; filter: drop-shadow(0.08rem 0.18rem 0.14rem rgba(42, 29, 16, 0.5)); }
+.lb-house > div { min-width: 0; display: flex; flex-direction: column; gap: 0.0625rem; }
+.lb-house b { font: 700 var(--fs-sm)/1.2 var(--display); letter-spacing: 0.04em; color: #2a1d10; overflow-wrap: anywhere; }
+.lb-house b::first-letter { color: #8e1f1f; }
+.lb-house small { font: 600 var(--fs-xs)/1.25 var(--font); color: #5d4a30; }
+.lb-house em { font: italic var(--fs-sm)/1.3 var(--prose, 'IM Fell English', Georgia, serif); color: #3a2a18; }
+/* set at the chair: the plate is laid down on the sheet (settle, one small overshoot in the tilt) */
+.lb-house.set { animation: lb-house-set 0.34s cubic-bezier(0.22, 0.9, 0.25, 1) both; }
+@keyframes lb-house-set { from { opacity: 0; transform: translate(-0.4rem, -0.35rem) rotate(-1.2deg); } 70% { transform: translate(0, 0) rotate(0.25deg); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .lb-house.set { animation: lb-fade 0.2s both; } @keyframes lb-fade { from { opacity: 0; } } }
+@media (max-width: 760px), (max-height: 500px) { .lobby .lb-sheet .form > .lb-house-slot { grid-column: 1; margin-top: 0.25rem; } }
+
+/* ---- a game waiting on you is a sealed letter (DELIGHT #4): folded vellum with the waiting friend's wax on it; near
+   the deadline its corner curls up */
+.lobby .gamerow.letter { grid-template-columns: auto minmax(0, 1fr) auto; }
+.lobby .gamerow.letter .lb-ghead, .lobby .gamerow.letter .seatline { grid-column: 2; }
+.lobby .gamerow.letter .lb-btn { grid-column: 3; }
+.lb-letter { grid-column: 1; grid-row: 1 / span 2; position: relative; display: grid; place-items: center; width: 3rem; height: 2.25rem; transform: rotate(-3deg);
+  background: linear-gradient(160deg, #f3e8cc, #e4d3ab 60%, #cdb588); border-radius: 2px;
+  box-shadow: 0.1rem 0.2rem 0.3rem rgba(0, 0, 0, 0.6), inset 0 0 0.5rem rgba(110, 76, 30, 0.3); }
+.lb-letter::before { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(32deg, transparent 49%, rgba(107, 74, 28, 0.35) 50%, transparent 51%), linear-gradient(-32deg, transparent 49%, rgba(107, 74, 28, 0.35) 50%, transparent 51%);
+  background-size: 100% 200%; background-position: 0 100%; }
+.lb-letter .dl-wax { position: relative; z-index: 1; }
+.lb-letter.curl::after { content: ''; position: absolute; right: 0; bottom: 0; width: 0.875rem; height: 0.875rem; border-top-left-radius: 0.6rem;
+  background: linear-gradient(135deg, #b8a074 0%, #f3e8cc 45%, #d9c49a 100%); box-shadow: -0.1rem -0.1rem 0.2rem rgba(0, 0, 0, 0.35); }
+.lb-yours { color: var(--k-fate, #f1d488); font-weight: 700; }

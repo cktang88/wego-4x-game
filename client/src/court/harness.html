@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Court modules: harness</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Alegreya+Sans:ital,wght@0,500;0,700;0,800;1,500&family=Cinzel:wght@500;600;700;800;900&family=IM+Fell+English:ital@0;1&family=UnifrakturMaguntia&display=swap" rel="stylesheet" />
+  <style>
+    html, body { margin: 0; background: radial-gradient(120% 90% at 30% 10%, #2a1d14 0%, #120c08 60%, #070505 100%); min-height: 100%; }
+    body { padding: 24px; box-sizing: border-box; }
+    .hz-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 28px; align-items: start; max-width: 1400px; margin: 0 auto; }
+    .hz-cell { display: grid; gap: 10px; justify-items: center; }
+    .hz-label { font: 700 13px/1 'Cinzel', serif; letter-spacing: .16em; text-transform: uppercase; color: #958a74; justify-self: start; }
+    .hz-log { font: 14px/1.4 'Alegreya Sans', sans-serif; color: #c4b89c; max-width: 1400px; margin: 20px auto 0; }
+    @media (max-width: 520px) { body { padding: 16px; } .hz-grid { gap: 22px; } }
+  </style>
+</head>
+<body>
+  <main class="hz-grid" id="grid"></main>
+  <p class="hz-log" id="log">Plan: (empty)</p>
+  <script type="module" src="./harness.ts"></script>
+</body>
+</html>

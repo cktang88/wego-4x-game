@@ -419,3 +419,17 @@
 /* touch tablets: the "to do" tab above the strip is 44px tall; the card and the notices stand above it */
 .touch:not(.phone) .hud > .card { bottom: calc(7.75rem + var(--safe-b)); max-height: calc(100% - 13rem - var(--safe-t) - var(--safe-b)); }
 .touch.lay-mid .hud-bl, .touch.lay-narrow .hud-bl { bottom: calc(7.75rem + var(--safe-b)); }
+
+/* ---- the turn candle (DELIGHT #20): wax burning down with the turns; the flame is light, so it may breathe */
+.turnbox .tcandle { position: relative; flex: none; width: 0.5rem; height: 1.75rem; align-self: flex-end; margin-bottom: 0.0625rem; }
+.turnbox .tcandle::before { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: calc(0.25rem + 1.15rem * var(--wax, 1)); border-radius: 0.15rem 0.15rem 0.1rem 0.1rem;
+  background: linear-gradient(90deg, #f3e6c4, #d9c49a 55%, #9c845a); box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.25), 0 1px 1px rgba(0, 0, 0, 0.6); }
+.turnbox .tcandle .fl { position: absolute; left: 50%; bottom: calc(0.3rem + 1.15rem * var(--wax, 1)); width: 0.4rem; height: 0.6rem; margin-left: -0.2rem; border-radius: 50% 50% 45% 45% / 62% 62% 38% 38%;
+  background: radial-gradient(ellipse at 50% 72%, #fffbe6 0 22%, #ffd27a 46%, rgba(232, 130, 40, 0.85) 70%, rgba(232, 130, 40, 0) 100%);
+  filter: drop-shadow(0 0 0.25rem rgba(255, 200, 110, 0.75)); transform-origin: 50% 100%; animation: tc-flame 2.8s ease-in-out infinite; }
+.turnbox .tcandle.gutter .fl { animation: tc-gutter 0.9s steps(6, jump-none) infinite; height: 0.5rem; }
+.turnbox .tcandle.out .fl { display: none; }
+@keyframes tc-flame { 50% { transform: scale(0.94, 1.05) rotate(-2deg); } }
+@keyframes tc-gutter { 0% { transform: scale(1, 1) rotate(-6deg); opacity: 1; } 30% { transform: scale(0.8, 0.6) rotate(8deg); opacity: 0.7; } 55% { transform: scale(1.05, 1.15) rotate(-3deg); opacity: 1; } 80% { transform: scale(0.7, 0.5) rotate(5deg); opacity: 0.55; } 100% { transform: scale(1, 0.9) rotate(-6deg); opacity: 1; } }
+.phone .turnbox .tcandle { display: none; }
+@media (prefers-reduced-motion: reduce) { .turnbox .tcandle .fl { animation: none; } .turnbox .tcandle.gutter .fl { transform: scale(0.8, 0.7) rotate(6deg); opacity: 0.8; } }

@@ -5,6 +5,8 @@ import type { Player } from '../../../shared/sim/types.ts';
 import { type Ctx, ui, esc, ROMAN, pendingOrder, dropOrder, leftover, lockWhy } from './modal-util.ts';
 import { enamel, enamelBoss } from '../art/bible.ts';
 import { ownerHi } from '../art/bible.ts';
+import { waxSealHtml } from '../fx/stage.ts';
+import { TEMPERS, rulerImg } from './houses.ts';
 
 /** VP sources, matched on vpLog reasons (shared/sim/resolve.ts addVp calls). */
 /** Each source is an enamel colour (its pegs on the rail): lamp gold, amethyst, cinnabar, verdigris, malachite, amber. */
@@ -79,6 +81,7 @@ export function scoreBody(c: Ctx): string {
     const E = enamel(p.color);
     return `<article class="pc ${you ? 'you' : ''} ${p.eliminated ? 'out' : ''}" style="--pc:${esc(E.hi)};--pcb:${esc(E.base)};--pcl:${esc(E.lo)}">
       <header class="pc-h"><span class="crest" aria-hidden="true"></span><b>${esc(p.name)}</b>${you ? '<small class="m-tag">YOU</small>' : p.kind === 'ai' ? '<small class="m-tag dim">AI</small>' : ''}</header>
+      ${p.kind === 'ai' && !you ? (() => { const t = TEMPERS[p.aiLevel] ?? TEMPERS.standard; return `<div class="pc-temper">${rulerImg(p.aiLevel, E.base, 30)}<span><b>${esc(t.title)}</b>, ${esc(t.epithet)}<q>${esc(t.motto)}</q></span></div>`; })() : ''}
       <div class="pc-vp"><b data-num="mvp-${p.id}">${p.vp}</b><span class="gold">♛</span>${st.winner === p.id ? '<span class="m-tag gold">WINNER</span>' : ''}</div>
       ${rail(p, target, sums)}
       ${hold}
@@ -100,7 +103,8 @@ function oathHtml(c: Ctx, p: Player): string {
   const vend = (p.vendettas ?? []).filter(v => v.until >= c.g.st.turn);
   if (!ob.length && !debts.length && !vend.length) return '';
   const T = c.g.live ? 'C' : 'T';
-  return `<div class="pc-oath">${ob.map(o => `<div class="brand-row"><span class="brand">OATHBREAKER</span><small>${T}${o.turn} · vs <b style="color:${esc(ownerHi(c.g.color(o.victim)))}">${esc(c.g.pname(o.victim))}</b></small>${o.words ? `<q>${esc(o.words)}</q>` : ''}</div>`).join('')}
+  // a broken pact: the torn half of the parchment stays here for the rest of the game, the breaker's seal cracked
+  return `<div class="pc-oath">${ob.map(o => `<div class="brand-row"><span class="pact-sheet torn" aria-hidden="true"><span class="ps-seals">${waxSealHtml({ seat: o.victim, color: c.g.color(o.victim) }, 22)}${waxSealHtml({ seat: p.id, color: c.g.color(p.id) }, 22, 'cracked')}</span></span><span class="brand">OATHBREAKER</span><small>${T}${o.turn} · vs <b style="color:${esc(ownerHi(c.g.color(o.victim)))}">${esc(c.g.pname(o.victim))}</b></small>${o.words ? `<q>${esc(o.words)}</q>` : ''}</div>`).join('')}
     ${debts.map(d => `<div class="debt-row" title="Blood-debt: ${esc(c.g.pname(d.creditor))} hits harder against them"><i>✠</i>Owes <b style="color:${esc(ownerHi(c.g.color(d.creditor)))}">${esc(c.g.pname(d.creditor))}</b> for ${esc(d.victim)}</div>`).join('')}
     ${vend.map(v => `<div class="debt-row" title="Vengeance for a razed world"><i>♨</i>Vendetta vs <b style="color:${esc(ownerHi(c.g.color(v.vs)))}">${esc(c.g.pname(v.vs))}</b> · ${T}${v.until}</div>`).join('')}</div>`;
 }
@@ -114,7 +118,8 @@ function diplo(c: Ctx, p: Player): string {
   }).join('');
   if (you === null || p.id === you) return others ? `<div class="pc-dip">${others}</div>` : '';
   const withYou = theirPacts.find(x => x.a === you || x.b === you);
-  if (withYou) return `<div class="pc-dip"><span class="pact on">⚭ Pact · until ${g.live ? 'C' : 'T'}${withYou.until}</span>${(withYou.words ?? []).map(w => `<q class="sworn" title="Sworn by ${esc(g.pname(w.by))}">${esc(w.text)}</q>`).join('')}${others}</div>`;
+  // a pact is one parchment with both houses' seals pressed into it (DELIGHT #73)
+  if (withYou) return `<div class="pc-dip"><div class="pact-sheet" role="group" aria-label="Pact with ${esc(g.pname(p.id))}"><span class="ps-seals">${waxSealHtml({ seat: you, color: g.color(you) }, 30)}${waxSealHtml({ seat: p.id, color: g.color(p.id) }, 30)}</span><div class="ps-text"><b>Pact</b><small>until ${g.live ? 'cycle' : 'turn'} ${withYou.until}</small>${(withYou.words ?? []).map(w => `<q class="sworn" title="Sworn by ${esc(g.pname(w.by))}">${esc(w.text)}</q>`).join('')}</div></div>${others}</div>`;
   if (p.eliminated) return '';
   const offered = (p.prevPactOffers ?? []).includes(you) || (p.pactOffers ?? []).includes(you);
   const k = pendingOrder(g, o => o.type === 'pact' && o.with === p.id);

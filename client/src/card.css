@@ -403,13 +403,19 @@
   background: radial-gradient(120% 140% at 0% 50%, color-mix(in srgb, var(--pc, #2f6ea6) 14%, #1c1d22) 0%, #111217 60%, #0a0b0e 100%); }
 .card.wc .fl-art::after { display: none; }
 .card.wc .fl-art .bn { flex: none; line-height: 0; filter: drop-shadow(0.1rem 0.25rem 0.25rem rgba(0, 0, 0, 0.7)); }
+/* the commander's portrait, a brass-framed miniature, with the banner pinned at its foot */
+.card.wc .fl-port { position: relative; display: block; width: 2.875rem; height: 3.625rem; margin-right: 0.5rem; }
+.card.wc .fl-port .portrait { display: block; width: 2.875rem; height: 3.625rem; }
+.card.wc .fl-port .fl-pin { position: absolute; right: -0.75rem; bottom: -0.3125rem; line-height: 0; filter: drop-shadow(0.06rem 0.15rem 0.12rem rgba(0, 0, 0, 0.8)); pointer-events: none; }
+.card.wc .fl-id .fl-cmd { margin-top: 0.125rem; font: 600 var(--fs-xs)/1.2 var(--k-display, var(--display)); letter-spacing: 0.06em; color: var(--wc-dim, #958a74);
+  overflow-wrap: anywhere; }
 .card.wc .fl-art .picket { display: grid; place-items: center; width: 2.75rem; height: 3.25rem; color: var(--wc-dim); }
 .card.wc .fl-art .picket .ic { width: 1.75rem; height: 1.75rem; }
-.card.wc .fl-id { min-width: 0; flex: 1; }
+.card.wc .fl-id { min-width: 6rem; flex: 1 1 6rem; }
 .card.wc .fl-id .wc-name { font-size: 1.25rem; }
 .card.wc .fl-id .wc-epi { font-size: var(--fs-sm); }
 .card.wc .fl-id .brand { margin-left: 0.375rem; }
-.card.wc .fl-art .vow { flex: none; max-width: 8.5rem; text-align: right; font: italic var(--fs-sm)/1.15 var(--k-prose, 'IM Fell English', Georgia, serif); color: #e8dcc0; overflow-wrap: anywhere; }
+.card.wc .fl-art .vow { flex: 0 1 auto; min-width: 0; max-width: 8.5rem; text-align: right; font: italic var(--fs-sm)/1.15 var(--k-prose, 'IM Fell English', Georgia, serif); color: #e8dcc0; overflow-wrap: anywhere; }
 .card.wc .fl-art .vow small { display: block; font: 600 var(--fs-xs)/1.2 var(--font); font-style: normal; color: var(--wc-dim); }
 .card.wc .fl-art .vow.owner { font: 700 var(--fs-sm)/1.1 var(--font); font-style: normal; color: var(--wc-ink); display: inline-flex; align-items: center; gap: 0.3125rem; }
 .card.wc .fl-art .vow .dot { width: 0.625rem; height: 0.75rem; background: var(--pc); clip-path: polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%); }
@@ -570,3 +576,10 @@
 .touch .card.wc .lx, .touch .card.wc .lk-go { min-height: 2.75rem; }
 /* the ribbon is a label on the art, not a control: taps go through to the bodies under it */
 .card.wc .ribbon { pointer-events: none; }
+
+/* the Story verb's commander: the portrait beside the record, the marks it bears said in words */
+.card.wc .cmd-por { display: flex; gap: 0.75rem; align-items: flex-start; }
+.card.wc .cmd-por .portrait { flex: none; width: 4rem; height: 5rem; filter: drop-shadow(0.12rem 0.25rem 0.2rem rgba(0, 0, 0, 0.7)); }
+.card.wc .cmd-por > div { min-width: 0; }
+.card.wc .cmd-por .cmd-marks { margin: 0.25rem 0 0; font: italic var(--fs-sm)/1.3 var(--k-prose, 'IM Fell English', Georgia, serif); color: var(--k-parchment, #c4b89c); }
+.card.wc .cmd-por .cmd-bark { margin: 0.35rem 0 0; font: italic var(--fs-md)/1.3 var(--k-prose, 'IM Fell English', Georgia, serif); color: #ece3cf; }

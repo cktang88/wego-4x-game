@@ -99,3 +99,21 @@ export function battleStakes(rep: BattleReport, st: GameState, you: PlayerId | n
   const mine = you !== null && rep.sides.some(s => s.owner === you) ? 3 : 0;
   return ships + lost * 1.5 + kind + mine + (rep.winner !== null && !rep.ongoing ? 1 : 0);
 }
+
+/** BY A THREAD (DELIGHT #57): ships that came out of this report alive at 5% hull or less. Their final hull is their
+ *  hull when they first fought this turn minus every hit that landed on them (misses and Twists of Fate excluded). */
+export function byAThread(rep: BattleReport): { name: string; owner: number; hp: number; maxHp: number }[] {
+  const dmg = new Map<number, number>(), killed = new Set<number>();
+  for (const r of rep.rounds) for (const s of r.shots) {
+    if (s.miss || s.twist) continue;
+    dmg.set(s.to, (dmg.get(s.to) ?? 0) + Math.max(0, s.dmg));
+    if (s.kill) killed.add(s.to);
+  }
+  const out: { name: string; owner: number; hp: number; maxHp: number }[] = [];
+  for (const side of rep.sides) for (const sh of side.ships) {
+    if (killed.has(sh.id) || !dmg.has(sh.id)) continue;
+    const hp = sh.hp - (dmg.get(sh.id) ?? 0);
+    if (hp > 0 && sh.maxHp > 0 && hp / sh.maxHp <= 0.05) out.push({ name: sh.name, owner: side.owner, hp, maxHp: sh.maxHp });
+  }
+  return out;
+}

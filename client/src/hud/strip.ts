@@ -8,6 +8,8 @@ import { LocalSource } from '../net.ts';
 import { LAW } from '../../../shared/config/empire.ts';
 import { nextTickAt } from '../../../shared/sim/live.ts';
 import { esc } from '../ui/dom.ts';
+import { audio } from '../audio/audio.ts';
+import { haptic } from '../fx/haptics.ts';
 import { ORDER_ICON, shortName, tip, romanN, fmtClock } from './util.ts';
 import { ic, icFor } from '../art/icons.ts';
 import { planNags } from './notify.ts';
@@ -144,7 +146,11 @@ export function bindStrip(g: GameScreen, strip: HTMLElement, prim: HTMLElement) 
     if (!t) return;
     const local = g.src instanceof LocalSource ? g.src : null;
     if (t.hasAttribute('data-submit')) { g.submit(e.shiftKey); return; }
-    if (t.hasAttribute('data-unsubmit')) { g.src.unsubmit(); return; }
+    if (t.hasAttribute('data-unsubmit')) {
+      // unsealing cracks your own seal, with a small guilty sound; the crest's wax is gone for everyone (DELIGHT #24)
+      audio.waxCrack(3); haptic('slot');
+      g.src.unsubmit(); return;
+    }
     if (e.shiftKey && !g.live && !g.submitted && g.canPlan) { g.submit(true); return; }
     switch (t.dataset.p ?? t.dataset.x) {
       case 'idle': g.nextIdle(); break;

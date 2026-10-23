@@ -33,6 +33,10 @@ import { postureMap } from './hud/signature.ts';
 import { FATE_USES, POSTURES, WORLD_POSTURES } from '../../shared/config/content.ts';
 import { maybeHerald, openHerald, heraldOpen, closeHerald } from './ui/herald.ts';
 import { openSaga, sagaOpen, closeSaga } from './ui/saga.ts';
+import { setTab, forgetTab } from './ui/tab.ts';
+import { byAThread } from './fx/battlefacts.ts';
+import { portraitImg } from './art/portraits.ts';
+import { fleetPortrait } from './hud/portrait.ts';
 import { audio } from './audio/audio.ts';
 import { direct, flopArrows, SOUL_STAMP, type Beat } from './fx/director.ts';
 import { ReplayClock, reduced as reducedFx } from './fx/motion.ts';
@@ -332,7 +336,7 @@ export class GameScreen {
     try { n = Number(localStorage.getItem(this.seenTurnKey()) ?? 0) || 0; } catch { /* */ }
     return n >= this.st.turn ? 0 : n;
   }
-  onVisible = () => { if (!document.hidden) { document.title = 'Three Crowns'; document.removeEventListener('visibilitychange', this.onVisible); } };
+  onVisible = () => { if (!document.hidden) { document.title = 'Three Crowns'; forgetTab(); this.renderAll(); document.removeEventListener('visibilitychange', this.onVisible); } };
 
   // ================================================================== data helpers
   get st(): GameState { return this.src.view.state; }
@@ -597,8 +601,16 @@ export class GameScreen {
     this.targetSlot = null;
     this.replacing = null;
     this.savePlan();
-    audio.ui('order');
+    // the chip drops into its brass socket, pitched up the scale I → V; the last one resolves the chord and the
+    // strip's rim glints once (DELIGHT #11)
+    const full = this.plan.orders.every(Boolean);
+    audio.chip(k, full);
     haptic('slot');
+    if (full) {
+      const sEl = this.hud.h.strip;
+      sEl.classList.remove('dl-glint'); void sEl.offsetWidth; sEl.classList.add('dl-glint');
+      window.setTimeout(() => sEl.classList.remove('dl-glint'), 950);
+    }
     this.afterAction();
     return true;
   }
@@ -1077,7 +1089,17 @@ export class GameScreen {
           break;
         }
         case 'retreat': { const f = R.fleets.get(e.fleet); if (f) { f.region = e.to; f.alpha = 1; R.moving.add(e.fleet); } break; }
-        case 'battle': this.fx.push({ kind: 'battle', pos: st.regions[e.region].site, color: '#ffb36b', t0: now, dur: 1100 * 1.3, text: e.name }); focus ??= st.regions[e.region].site; break;
+        case 'battle': {
+          this.fx.push({ kind: 'battle', pos: st.regions[e.region].site, color: '#ffb36b', t0: now, dur: 1100 * 1.3, text: e.name }); focus ??= st.regions[e.region].site;
+          // a ship that came through at 5% hull or less: a stamp once the smoke clears, and one heartbeat (DELIGHT #57)
+          const rep = R.result.battles.find(b => b.id === e.battle);
+          const thin = rep && !rep.ongoing ? byAThread(rep) : [];
+          if (thin.length) {
+            this.fx.push({ kind: 'stamp', pos: st.regions[e.region].site, color: '#e9dcbc', t0: now + 1250, dur: 1500, text: 'BY A THREAD' });
+            if (!R.preview) audio.heartbeat({ delay: 1.3 });
+          }
+          break;
+        }
         case 'clash': {
           const a = st.regions[e.a].site, b = st.regions[e.b].site;
           this.fx.push({ kind: 'clash', pos: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, color: '#ff6b6b', t0: now, dur: 1200, text: 'CLASH!' });
@@ -1187,7 +1209,11 @@ export class GameScreen {
     } else if (beat.kind === 'hold' && beat.battle !== undefined) {
       const rep = R.result.battles.find(b => b.id === beat.battle);
       const site = rep ? st.regions[rep.region]?.site : undefined;
-      if (rep && site) this.stage.hold(rep, site, o => this.color(o), o => this.pname(o), beat.dur * k);
+      if (rep && site) this.stage.hold(rep, site, o => this.color(o), o => this.pname(o), beat.dur * k, (o, cmd) => {
+        // the commander as they came into this turn (start-of-turn fleets: no scar this battle gives yet)
+        const f = R.result.startFleets?.find(x => x.owner === o && x.commander.name === cmd) ?? st.fleets.find(x => x.owner === o && x.commander.name === cmd);
+        return f ? portraitImg(fleetPortrait(st, f, this.color(o)), 40, 'portrait', cmd) : '';
+      });
     } else if (beat.kind === 'title' && beat.label) {
       this.stage.title(`…and at ${beat.label}.`, beat.dur * k);
       audio.sfx('ui_banner', { vol: 0.55, rate: 0.9 });
@@ -1216,6 +1242,16 @@ export class GameScreen {
         if (e.outcome === 'called') {
           this.clock.hitPause(120, 204 * k);
           this.later(() => { if (this.replay === R) this.stage.thump(this.el.stage, 3); }, 204 * k + 120);
+        } else {
+          // CAUGHT OUT gets a double take (DELIGHT #52): the camera leans in for 100 ms and straight back
+          const site = st.regions[e.region]?.site;
+          if (site && !reducedMotion() && !this.gest.busy && !this.curtain) this.later(() => {
+            if (this.replay !== R || this.gest.busy) return;
+            const prev = { ...this.map.cam };
+            const lean = { x: prev.x + (site.x - prev.x) * 0.12, y: prev.y + (site.y - prev.y) * 0.12 };
+            this.map.flyTo(lean, prev.z * 1.07, 100);
+            this.later(() => { if (this.replay === R && !this.gest.busy) this.map.flyTo({ x: prev.x, y: prev.y }, prev.z, 180); }, 110);
+          }, 204 * k);
         }
         if (this.you !== null && e.owner === this.you && !R.preview) haptic(e.outcome === 'called' ? 'called' : 'caught');
         else if (this.you !== null && e.outcome === 'called' && e.with?.includes(this.you) && !R.preview) haptic('caught');
@@ -1445,7 +1481,7 @@ export class GameScreen {
       ...this.supplyOverlay(),
     };
     // UX v2 renderer inputs (docs/UX-V2.md §8): the drag arrow, the lens, a fanned stack, Space-peek
-    Object.assign(input, { drag: this.blockingReplay ? null : this.gest.drawDrag(now), lens: this.lens, expanded: this.expanded, peek: this.peek, postures: this.replay ? null : postureMap(this) });
+    Object.assign(input, { lift: this.blockingReplay ? null : this.gest.liftedFleet(), drag: this.blockingReplay ? null : this.gest.drawDrag(now), lens: this.lens, expanded: this.expanded, peek: this.peek, postures: this.replay ? null : postureMap(this) });
     this.map.draw(input);
     this.fx = this.fx.filter(f => vnow - f.t0 < f.dur);
     this.stage.frame(p => this.map.toScreen(p));
@@ -1483,6 +1519,9 @@ export class GameScreen {
   // ================================================================== rendering
   renderAll() {
     if (this.sel?.kind === 'fleet' && !this.fleet(this.sel.id)) this.sel = null;
+    // the tab wears a wax drop while it is your move (WEGO: you can plan and have not sealed)
+    const seat = this.you !== null ? this.src.meta.seats[this.you] : undefined;
+    setTab(!this.live && this.you !== null && this.canPlan && this.st.winner === null && !seat?.submitted && !this.replay ? 'move' : 'rest', this.st.turn);
     // the Reckoning ribbon never sits over a card's or a modal's controls
     if (this.sel || this.hud.modalOpen()) this.reck.dismiss();
     this.hud.render();

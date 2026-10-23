@@ -7,6 +7,7 @@ import { LENSES } from '../game.ts';
 import { LocalSource } from '../net.ts';
 import { incomeDetail, currentLeader, upkeepOf } from '../../../shared/sim/resolve.ts';
 import { nextTickAt, tickMs, tickInCycle, orderMs } from '../../../shared/sim/live.ts';
+import { aiHouseLine } from '../ui/houses.ts';
 import { esc, overlay, toast } from '../ui/dom.ts';
 import { helpHtml } from '../ui/help.ts';
 import { empireHtml, bindEmpire } from '../ui/empire.ts';
@@ -163,7 +164,7 @@ export class Hud {
     const dl = g.src.meta.deadline ? ` <span class="dl"${tip('Turn deadline')}>⏱ <b data-deadline>${fmtClock(g.src.meta.deadline - Date.now())}</b></span>` : '';
     const html = g.live
       ? `<div class="turnbox live"><div><b><span class="livedot"></span>CYCLE ${st.turn}</b><span data-el="phase">${esc(ph)} · ⏱ <b data-countdown="${nextTickAt(st)}"></b></span><i class="tickbar"><i></i></i></div></div>`
-      : `<div class="turnbox"><div><b>TURN ${st.turn}<small>/${st.rules.victory.turnLimit}</small></b><span data-el="phase" class="ph-${esc(ph.split(' ')[0].toLowerCase())}">${esc(ph)}</span>${dl}</div></div>`;
+      : `<div class="turnbox"${tip(candleTip(st.turn, st.rules.victory.turnLimit))}>${candle(st.turn, st.rules.victory.turnLimit, st.winner !== null)}<div><b>TURN ${st.turn}<small>/${st.rules.victory.turnLimit}</small></b><span data-el="phase" class="ph-${esc(ph.split(' ')[0].toLowerCase())}">${esc(ph)}</span>${dl}</div></div>`;
     if (this.g.setHtml(this.h.turn, html)) { this.g.el.phase = this.h.turn.querySelector('[data-el=phase]')!; this.tick(); }
   }
   renderRes() {
@@ -196,10 +197,19 @@ export class Hud {
       const sealed = !g.live && s?.submitted && st.winner === null;
       const oath = (p.oathbreaker ?? []).length;
       const nem = nemesis.has(p.id);
+      // a friend still planning: trickling sand on their crest (DELIGHT #22); AIs plan instantly and show nothing
+      const sand = !g.live && !sealed && st.winner === null && p.kind === 'human' && p.id !== g.you && !p.eliminated && !!s && !g.replay;
+      // within 3 VP of victory, the crest trembles for everyone (DELIGHT #75): the truth, not a guess
+      const left = target - p.vp;
+      const near = st.winner === null && !p.eliminated && left > 0 && left <= 3;
       // an enamel heater shield with the house signet in a metal rim (gold for the leader); the VP on a cartouche
       const shield = bannerSvg(signetOf(p.id), enamel(p.color).base, 64, { rim: leader === p.id ? 'gold' : 'silver', broken: !!oath, cls: 'cb-shield' });
-      return `<div class="pcrest ${p.id === g.you ? 'you' : ''} ${p.eliminated ? 'out' : ''} ${oath ? 'oath' : ''} ${nem ? 'nemesis' : ''}" style="--pc:${esc(p.color)}" data-crest="${p.id}"${tip(`${p.name}: ${p.vp} of ${target} victory points (♛)${leader === p.id ? ' · in the lead' : ''}${sealed ? ' · orders sealed' : ''}${oath ? ' · Oathbreaker' : ''}${nem ? ' · your nemesis in this League' : ''}`)}>
-        <span class="cb">${shield}<b class="vp" data-vp="${p.id}">${vp}</b>${oath ? '<i class="crack" aria-label="Oathbreaker"></i>' : ''}${sealed ? '<i class="sealed wax" aria-label="Orders sealed"></i>' : ''}${nem ? `<i class="nem" aria-label="Your nemesis">${ic('blade')}</i>` : ''}</span>${leader === p.id ? '<i class="lead" aria-label="In the lead">♛</i>' : ''}
+      const ai = aiHouseLine(p);
+      // a blood-debt this house owes you: a red wax drop on its crest; avenged last turn, the drop lies shattered (DELIGHT #74)
+      const owes = g.you !== null && p.id !== g.you ? (st.soul?.debts ?? []).filter(d => d.debtor === p.id && d.creditor === g.you) : [];
+      const debt = owes.some(d => !d.cleared) ? 'owed' : owes.some(d => d.cleared === st.turn - 1) ? 'paid' : '';
+      return `<div class="pcrest ${p.id === g.you ? 'you' : ''} ${p.eliminated ? 'out' : ''} ${oath ? 'oath' : ''} ${nem ? 'nemesis' : ''} ${near ? 'near-win' : ''}" style="--pc:${esc(p.color)}" data-crest="${p.id}"${tip(`${p.name}${ai ? `, ${ai.replace(/^the \S+, /, '')}` : ''}: ${p.vp} of ${target} victory points (♛)${near ? ` · ${left} from victory` : ''}${leader === p.id ? ' · in the lead' : ''}${sealed ? ' · orders sealed' : sand ? ' · still planning' : ''}${oath ? ' · Oathbreaker' : ''}${nem ? ' · your nemesis in this League' : ''}${debt === 'owed' ? ' · owes you a blood-debt' : debt === 'paid' ? ' · blood-debt avenged' : ''}`)}>
+        <span class="cb">${shield}<b class="vp" data-vp="${p.id}">${vp}</b>${oath ? '<i class="crack" aria-label="Oathbreaker"></i>' : ''}${sealed ? '<i class="sealed wax" aria-label="Orders sealed"></i>' : ''}${sand ? '<i class="sand" aria-label="Still planning"><i></i></i>' : ''}${debt ? `<i class="debt ${debt}" aria-label="${debt === 'owed' ? 'Owes you a blood-debt' : 'Blood-debt avenged'}"></i>` : ''}${nem ? `<i class="nem" aria-label="Your nemesis">${ic('blade')}</i>` : ''}</span>${leader === p.id ? '<i class="lead" aria-label="In the lead">♛</i>' : ''}
         <span class="nm">${s?.online && g.src.kind === 'remote' ? '<i class="on"></i>' : ''}${esc(shortName(p.name, 1))}</span><i class="vpbar"><i style="width:${(frac * 100).toFixed(1)}%"></i></i></div>`;
     }).join('');
     g.setHtml(this.h.crests, `<button class="crests" aria-label="Score: victory points of each player">${html}</button>`);
@@ -413,4 +423,15 @@ const LEGEND: [string, string][] = [
 ];
 function legendHtml(): string {
   return `<div class="legend" role="list"><div class="lg-h">Map key</div>${LEGEND.map(([i, t]) => `<div class="lg" role="listitem">${i}<span>${esc(t)}</span></div>`).join('')}<div class="lg-f">Hover or tap anything for details.</div></div>`;
+}
+
+/** The turn candle (DELIGHT #20): its wax burns down with the turns; in the last five the flame gutters. */
+function candle(turn: number, limit: number, over: boolean): string {
+  const left = Math.max(0, limit - turn + 1);
+  const k = Math.max(0.08, Math.min(1, left / Math.max(1, limit)));
+  return `<i class="tcandle${!over && left <= 5 ? ' gutter' : ''}${over ? ' out' : ''}" style="--wax:${k.toFixed(3)}" aria-hidden="true"><i class="fl"></i></i>`;
+}
+function candleTip(turn: number, limit: number): string {
+  const left = Math.max(0, limit - turn + 1);
+  return left <= 1 ? 'The last turn: the candle gutters out after this one' : `${left} turns of candle left`;
 }

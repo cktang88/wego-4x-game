@@ -67,6 +67,12 @@ The engine picks the format with `canPlayType` and falls back to the other one i
 | All 25 SFX and stings | 0.39 MB | 0.34 MB |
 | Music and ambience (3 loops) | 1.25 MB | 1.34 MB |
 
+**Pairings without new files** (`audio.ts` `touch()`, `chip()`, `heartbeat()`; the delight wave 2, docs/DELIGHT.md):
+the Saga's leaf is `ui_page` at 0.82×; its cover is `ui_close` at 0.62× under a slow page; a ruler's banner set at a
+lobby chair is `ui_banner` at 1.2×, quiet; a piece set back on the felt is `ui_click` at 0.55× (the wooden tok); the
+ink running in the Herald is a faint `ui_page` at 1.5×; order chips are `game_order` pitched up the major scale I→V,
+the fifth over a soft synthesized triad; a ship that lived by a thread gets one synthesized lub-dub.
+
 Not shipped: Kenney UI Audio, Digital Audio and Music Jingles were reviewed and not used, because they are too synthetic or cartoony for the tabletop tone.
 
 Rejected for licence: "Evil Awaits", "Tragic ambient main menu", "Ambient Soundscape", "10 Fanfares" and "space fanfare". These pages list CC-BY or OGA-BY alongside CC0.

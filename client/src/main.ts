@@ -12,6 +12,9 @@ import { LocalSource, RemoteSource, api, tokens, type LocalSave } from './net.ts
 import { esc, toast, overlay } from './ui/dom.ts';
 import { ic } from './art/icons.ts';
 import { openTweaks, loadOverrides, countOverrides } from './ui/tweaks.ts';
+import { seatPlate } from './ui/houses.ts';
+import { resetTab } from './ui/tab.ts';
+import { waxSealHtml } from './fx/stage.ts';
 import { audio } from './audio/audio.ts';
 import { installAudioHooks, openSoundSettings, soundIcon } from './audio/hooks.ts';
 import { openGraphicsSettings } from './ui/graphics.ts';
@@ -69,7 +72,7 @@ function route() {
   // modal dialogs, battle viewers and toasts live on <body>: don't let them leak into the next screen
   // (the Herald and the Saga too: left open on Back, they covered the lobby and kept acting on the old game)
   document.querySelectorAll('.overlay, .bv-overlay, .toast, .tooltip, .herald-ov, .saga-ov, .mdl-root, .tcl-ov, .ksel-list').forEach(e => { if (!app.contains(e)) e.remove(); });
-  document.title = 'Three Crowns';
+  resetTab();
   app.innerHTML = '';
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   if (parts[0] === 'local') return openLocal('tc.local.autosave');
@@ -275,7 +278,8 @@ const MODES: [string, string, string][] = [
   ...Object.entries(LIVE_SPEEDS).map(([k, v]): [string, string, string] => [`live-${k}`, `Live ${v.label.toLowerCase()} · ${k === 'normal' ? 'over days' : k === 'fast' ? 'an evening' : 'testing'}`, `Real time. ${v.desc}`]),
 ];
 const modeOpts = (sel: string) => MODES.map(([v, l]) => `<option value="${v}"${v === sel ? ' selected' : ''}>${esc(l)}</option>`).join('');
-const AI_OPTS = (sel: string, human: string) => [['novice', 'AI novice'], ['standard', 'AI standard'], ['expert', 'AI expert'], ['human', human]]
+// the AI levels as rival houses (ui/houses.ts): the level stays in the label, the ruler sits beside it
+const AI_OPTS = (sel: string, human: string) => [['novice', 'AI novice · the Young Heir'], ['standard', 'AI standard · the Steward'], ['expert', 'AI expert · the Old Admiral'], ['human', human]]
   .map(([v, l]) => `<option value="${v}"${v === sel ? ' selected' : ''}>${l}</option>`).join('');
 const SEAT_OPTS = '<option value="human" selected>Human</option><option value="novice">AI novice</option><option value="standard">AI standard</option><option value="expert">AI expert</option>';
 const tweaksLabel = () => { const n = countOverrides(); return `${ic('industry')} Tweaks${n ? ` <span class="lb-count">${n} changed</span>` : ''}`; };
@@ -297,7 +301,9 @@ function lobby() {
         <div class="form">
           <label for="l-name">Your name</label><input id="l-name" data-l="name" maxlength="40" autocomplete="nickname" value="${esc(name)}" placeholder="Azure Compact">
           <label for="l-ai1">Rival 1</label><select id="l-ai1" data-l="ai1">${AI_OPTS('standard', 'Human (hotseat)')}</select>
+          <div class="lb-house-slot" data-l="h1" aria-live="polite">${seatPlate(1, 'standard')}</div>
           <label for="l-ai2">Rival 2</label><select id="l-ai2" data-l="ai2">${AI_OPTS('expert', 'Human (hotseat)')}</select>
+          <div class="lb-house-slot" data-l="h2" aria-live="polite">${seatPlate(2, 'expert')}</div>
           <label for="l-mode">Mode</label><select id="l-mode" data-l="mode">${modeOpts('wego')}</select>
           <p class="lb-hint" data-l="hint" aria-live="polite"></p>
           <label for="l-seed">Seed</label><input id="l-seed" data-l="seed" placeholder="Random map" inputmode="numeric" pattern="[0-9]*">
@@ -336,6 +342,19 @@ function lobby() {
   };
   const hintOnline = () => { q('[data-o="hint"]').textContent = MODES.find(x => x[0] === q('[data-o="mode"]').value)?.[2] ?? ''; };
   ['ai1', 'ai2', 'mode'].forEach(k => q(`[data-l="${k}"]`).addEventListener('change', hintPlay));
+  // the rival's chair: a ruler takes it (a cloth sound as the banner is set), or a friend does
+  const plate = (i: number, anim: boolean) => {
+    const slot = app.querySelector<HTMLElement>(`[data-l="h${i}"]`);
+    if (!slot) return;
+    const live = q('[data-l="mode"]').value.startsWith('live'), v = q(`[data-l="ai${i}"]`).value;
+    const k = `${live && v === 'human' ? 'standard' : v}`;
+    if ((slot.dataset.v ?? (i === 1 ? 'standard' : 'expert')) === k) return;
+    slot.dataset.v = k;
+    slot.innerHTML = seatPlate(i, v, live);
+    if (anim) { slot.firstElementChild?.classList.add('set'); audio.touch('cloth'); }
+  };
+  for (const i of [1, 2]) q(`[data-l="ai${i}"]`).addEventListener('change', () => plate(i, true));
+  q('[data-l="mode"]').addEventListener('change', () => { plate(1, true); plate(2, true); });
   q('[data-o="mode"]').addEventListener('change', hintOnline);
   hintPlay(); hintOnline();
   q('[data-l="start"]').addEventListener('click', () => {
@@ -457,12 +476,19 @@ function lobby() {
     if (gen !== routeGen) return;
     const el = q('[data-o="list"]');
     if (!games.length) { el.innerHTML = '<p class="lb-empty">No games yet. Create one above and send the link.</p>'; return; }
-    el.innerHTML = games.slice(0, 30).map(g => {
+    // games waiting on you are sealed letters on the table (DELIGHT #4): the wax is the colour of a friend who sealed
+    // and waits; a letter whose deadline is near has its corner curling. They lie on top of the pile.
+    const waitingOn = (g: (typeof games)[number]) => { const m = tokens.get(g.id); return !!m && m.seat >= 0 && g.winner === null && g.mode !== 'live' && !g.seats[m.seat]?.submitted; };
+    const pile = games.slice(0, 30).map((g, i) => ({ g, i, w: waitingOn(g) })).sort((a, b) => Number(b.w) - Number(a.w) || a.i - b.i);
+    el.innerHTML = pile.map(({ g, w: waiting }) => {
       const mine = tokens.get(g.id);
       const open = g.seats.filter(s => s.kind === 'human' && !s.claimed).length;
       const act = mine ? 'Continue' : open && g.winner === null ? 'Join' : 'Watch';
-      const meta = [`Turn ${Number(g.turn)}`, g.mode === 'live' ? 'Live' : '', g.winner !== null ? 'Finished' : open ? `${open} open seat${open > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ');
-      return `<div class="gamerow"><div class="lb-ghead"><b class="lb-gname">${esc(g.name)}</b><span class="lb-meta">${meta}</span></div>
+      const meta = [waiting ? '<b class="lb-yours">Your move</b>' : '', `Turn ${Number(g.turn)}`, g.mode === 'live' ? 'Live' : '', g.winner !== null ? 'Finished' : open ? `${open} open seat${open > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ');
+      const waiter = waiting ? g.seats.find(s => s.submitted && s.seat !== mine!.seat && s.kind === 'human') ?? g.seats.find(s => s.seat !== mine!.seat) : undefined;
+      const curl = waiting && !!g.deadline && g.deadline - Date.now() < 3 * 3600e3;
+      const letter = waiter ? `<span class="lb-letter${curl ? ' curl' : ''}"${curl ? ' title="The deadline is near"' : ''} aria-hidden="true">${waxSealHtml({ seat: Number(waiter.seat), color: seatColor(Number(waiter.seat)) }, 22)}</span>` : '';
+      return `<div class="gamerow${waiting ? ' letter' : ''}">${letter}<div class="lb-ghead"><b class="lb-gname">${esc(g.name)}</b><span class="lb-meta">${meta}</span></div>
         <div class="seatline">${g.seats.map(s => `<span class="lb-tag${s.online && s.kind === 'human' ? ' online' : ''}" style="--pc:${seatColor(Number(s.seat))}"><i class="lb-dot" aria-hidden="true"></i>${esc(s.name)}${s.kind === 'ai' ? ' <small>AI</small>' : s.claimed ? '' : ' <small>open</small>'}${s.submitted && s.kind === 'human' ? ` ${ic('check', { title: 'Orders sealed' })}` : ''}</span>`).join('')}</div>
         <a class="lb-btn${act === 'Watch' ? '' : ' primary'}" href="#/g/${esc(encodeURIComponent(g.id))}">${act}</a></div>`;
     }).join('');
