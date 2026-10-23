@@ -536,11 +536,22 @@ STYLE-EXPLORE §2) at every tier, on a battle and the most crowded star, with an
 iPad and phone, on a mid-game and a turn-1 (fogged) board. Target: no indicator under 4.5:1 (resting lanes are quiet
 by design and reported apart). Keep it as the regression test.
 
+A line is measured on its own ground: a lane or route probe sits on the calmest point of its leg (at least 12 px from a
+wall or the bezel's rim when there is one), a lane under a printed route or under a piece's strength badge is not
+measured there, and a route leaves its star and breaks round every system it passes through (a route printed over a
+small stone hid it). Selected and lit marks get an ink keyline, never glow: the reach wall is solid gilt in a 5 px
+groove (only its tint breathes), a pip's keyline is the bright end of the gold over an ivory-to-ink face.
+
 ### 13.8 The battle viewer and the lobby
 
 The same dial, closer (`art/orrery-bg.ts`): velvet, the black enamel with cloisonné and guilloché, the gold bezel with
 pearls and its degree scale, the sides' enamels inlaid inside the bezel in the viewer; baked once per size. The lobby
 needs no frames at all.
+
+The defended world is set like the board's bodies: a cabochon of its kind in a gold collet with the holder's enamel
+inlaid round it (no painted planet, no halo). Fire is flat house ink in a groove with an ivory head (Azure lances
+included); only fire itself (muzzle flashes, explosions, a burning world) and the Fate gold still glow. The Saga's room
+is the board's velvet, and the crowning's title stands on a dark veil so the board's names never cross it.
 
 ### 13.9 Graphics setting, and what retired
 

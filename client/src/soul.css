@@ -315,3 +315,5 @@ q.sworn.mine { border-left-color: var(--gold); }
 /* phone: the Fate coins lie in a small stack, so the top bar fits beside the turn plate */
 .phone .fatepill { padding: 0 0.375rem; }
 .phone .fatepill .coins i + i { margin-left: -0.5em; }
+/* narrow tablets (iPad mini portrait): the word goes and the coins stay, so the pill clears the crests */
+@media (max-width: 49rem) { .lay-narrow .fatepill .fl { display: none; } .lay-narrow .fatepill { padding: 0 0.5rem; } }

@@ -285,8 +285,9 @@ button.primary .lb-count { color: #2a1a06; background: rgba(255, 245, 210, 0.35)
 .lobby .lb-sheet .form > label { white-space: nowrap; }
 /* the dial under the lobby is quieter than the board's: a veil over it, so the sheet and plates lead */
 .lb-table.orrery::after { content: ''; position: absolute; inset: 0; background: radial-gradient(90% 80% at 42% 32%, rgba(6, 6, 8, 0.3), rgba(6, 6, 8, 0.5) 70%, rgba(4, 4, 5, 0.72)); }
-/* narrow sheets (phones, a phone on its side): each article's label above its line, the fields full width */
-@media (max-width: 760px), (max-height: 500px) {
+/* narrow sheets (phones, a phone on its side, portrait tablets where the two cards share the width): each article's
+   label above its line, the fields full width, so the longest choice ("AI expert · the Old Admiral") fits whole */
+@media (max-width: 1023px), (max-height: 500px) {
   .lobby .lb-sheet .form { grid-template-columns: minmax(0, 1fr); row-gap: 0.15rem; }
   .lobby .lb-sheet .form > label { margin-top: 0.45rem; }
   .lobby .lb-sheet .lb-hint { grid-column: 1; margin-top: 0.15rem; }
@@ -322,7 +323,7 @@ button.primary .lb-count { color: #2a1a06; background: rgba(255, 245, 210, 0.35)
 .lb-house.set { animation: lb-house-set 0.34s cubic-bezier(0.22, 0.9, 0.25, 1) both; }
 @keyframes lb-house-set { from { opacity: 0; transform: translate(-0.4rem, -0.35rem) rotate(-1.2deg); } 70% { transform: translate(0, 0) rotate(0.25deg); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .lb-house.set { animation: lb-fade 0.2s both; } @keyframes lb-fade { from { opacity: 0; } } }
-@media (max-width: 760px), (max-height: 500px) { .lobby .lb-sheet .form > .lb-house-slot { grid-column: 1; margin-top: 0.25rem; } }
+@media (max-width: 1023px), (max-height: 500px) { .lobby .lb-sheet .form > .lb-house-slot { grid-column: 1; margin-top: 0.25rem; } }
 
 /* ---- a game waiting on you is a sealed letter (DELIGHT #4): folded vellum with the waiting friend's wax on it; near
    the deadline its corner curls up */
@@ -339,3 +340,10 @@ button.primary .lb-count { color: #2a1a06; background: rgba(255, 245, 210, 0.35)
 .lb-letter.curl::after { content: ''; position: absolute; right: 0; bottom: 0; width: 0.875rem; height: 0.875rem; border-top-left-radius: 0.6rem;
   background: linear-gradient(135deg, #b8a074 0%, #f3e8cc 45%, #d9c49a 100%); box-shadow: -0.1rem -0.1rem 0.2rem rgba(0, 0, 0, 0.35); }
 .lb-yours { color: var(--k-fate, #f1d488); font-weight: 700; }
+/* portrait tablets: the online card is half the width, so its labels stand above the fields too */
+@media (min-width: 720px) and (max-width: 1023px) {
+  .lobby .lb-online .form { grid-template-columns: minmax(0, 1fr); row-gap: 0.25rem; }
+  .lobby .lb-online .form > label { margin-top: 0.375rem; }
+  .lobby .lb-online .form > * { grid-column: 1; }
+  .lobby .lb-online .lb-league .tcl-picker { grid-template-columns: minmax(0, 1fr); row-gap: 0.375rem; }
+}

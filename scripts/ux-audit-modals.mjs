@@ -150,7 +150,7 @@ const DETECT = ({ roots, touch, floor }) => {
     }
     return { left: l, right: rt, top: t, bottom: bt };
   };
-  const rects = el => { const inl = getComputedStyle(el).display === 'inline'; return inl ? [...el.getClientRects()] : [clipR(el, el.getBoundingClientRect())]; };
+  const rects = el => { const inl = getComputedStyle(el).display === 'inline'; return inl ? [...el.getClientRects()].map(r => clipR(el, r)) : [clipR(el, el.getBoundingClientRect())]; };
   const pinned = el => { for (let a = el; a; a = a.parentElement) { const cs = getComputedStyle(a); if (cs.position === 'sticky' || cs.position === 'fixed' || (cs.position === 'absolute' && cs.zIndex !== 'auto')) return a; } return null; };
   for (let i = 0; i < shown.length; i++) for (let j = i + 1; j < shown.length; j++) {
     const a = shown[i], b = shown[j];

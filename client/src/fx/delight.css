@@ -171,7 +171,7 @@
   padding: 1.5rem 1rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; animation: none;
 }
 .overlay.crowning > .dialog.cr-stage::before, .overlay.crowning > .dialog.cr-stage::after { display: none; }
-.cr-room { position: fixed; inset: 0; background: radial-gradient(ellipse 75% 65% at 50% 42%, rgba(7, 8, 12, 0.5), rgba(7, 8, 12, 0.93) 78%); animation: cr-dim 0.7s ease-out both; }
+.cr-room { position: fixed; inset: 0; background: radial-gradient(ellipse 75% 65% at 50% 42%, rgba(6, 6, 8, 0.68), rgba(6, 6, 8, 0.94) 78%); animation: cr-dim 0.7s ease-out both; }
 @keyframes cr-dim { from { opacity: 0; } }
 .cr-lamp { position: fixed; left: 50%; top: -0.25rem; width: 0; height: 0; transform-origin: 0 0; z-index: 2; pointer-events: none; }
 .cr-cord { position: absolute; left: -1px; top: 0; width: 2px; height: 3.25rem; background: linear-gradient(#1b1d23, #6b4a1c); }
@@ -184,7 +184,7 @@
 .cr-pool { position: absolute; left: -9.5rem; top: calc(var(--len, 18rem) - 6.5rem); width: 19rem; height: 13rem; border-radius: 50%;
   background: radial-gradient(closest-side, rgba(255, 217, 160, 0.38), rgba(255, 217, 160, 0.12) 58%, rgba(255, 217, 160, 0)); opacity: 0.45; transition: opacity 0.6s ease-out; }
 .crowning.lit .cr-pool { opacity: 1; }
-.cr-head { text-align: center; opacity: 0; transform: translateY(0.5rem); transition: opacity 0.6s ease-out, transform 0.6s var(--k-ease-heavy); }
+.cr-head { text-align: center; padding: 0.75rem 3rem; background: radial-gradient(closest-side, rgba(6, 6, 8, 0.9), rgba(6, 6, 8, 0.75) 60%, rgba(6, 6, 8, 0)); opacity: 0; transform: translateY(0.5rem); transition: opacity 0.6s ease-out, transform 0.6s var(--k-ease-heavy); }
 .crowning.titled .cr-head { opacity: 1; transform: none; }
 .cr-title { margin: 0; font-family: var(--k-display); font-size: 2.25rem; font-weight: 800; color: var(--pc); letter-spacing: 0.06em; text-shadow: 0 0.125rem 0 #000, 0 0 1.5rem rgba(7, 8, 12, 0.9); }
 .cr-sub { margin: 0.125rem 0 0; font-family: var(--k-display); font-size: 1rem; letter-spacing: 0.3em; text-transform: uppercase; color: var(--k-engraved); }

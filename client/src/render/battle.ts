@@ -7,14 +7,14 @@ import { drawShip as drawShipArt, gunPoints } from '../art/ships.ts';
 type ShipOpts = Parameters<typeof drawShipArt>[9];
 import { scheme } from '../art/palette.ts';
 import { drawBase, drawStand, BASE_SQUASH } from '../art/minis.ts';
-import { drawPlanet, drawBodyShadow, type WorldType } from '../art/planets.ts';
-import { drawGlow, beam, tracer, fireball, smoke, shieldHit } from '../art/fx.ts';
+import { drawBodyShadow, type WorldType } from '../art/planets.ts';
+import { drawGlow, fireball, smoke, shieldHit } from '../art/fx.ts';
 import { css as artCss, rgb as artRgb } from '../art/util.ts';
 import { drawStructure } from '../art/structures.ts';
 import { uiScale } from '../ui/dom.ts';
 import { iconizeDom, iconizeHtml, ic, drawIcon, fillIconText } from '../art/icons.ts';
 import { orreryBackdrop } from '../art/orrery-bg.ts';
-import { houseOf } from '../art/orrery.ts';
+import { houseOf, inkOf, GROOVE, cabochon, STONE, type Stone } from '../art/orrery.ts';
 import { gfxQuality } from '../art/gfx.ts';
 import { enamel, retint, SEMANTIC } from '../art/bible.ts';
 // the art bible's tokens and kit (battle-demo.html loads the viewer without the app's stylesheets)
@@ -927,8 +927,10 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
   }
 
   const WORLDS: WorldType[] = ['terran', 'desert', 'ocean', 'garden', 'ice', 'lava', 'barren', 'toxic'];
-  const worldBody = { type: WORLDS[Math.abs(report.region) % WORLDS.length], seed: Math.abs(report.region * 7919) % 100000, dev: 3 };
-  /** The defended world: a painted planet with its orbital gun platforms; it burns when the garrison falls. */
+  // the world as the board sets it (ART-BIBLE §13.4): a cabochon in a gold collet, its stone the world's kind
+  const WORLD_STONE: Partial<Record<WorldType, Stone>> = { terran: STONE.ocean, desert: STONE.gas, ocean: STONE.ocean, garden: STONE.garden, ice: STONE.ice, lava: STONE.lava, barren: STONE.rock, toxic: STONE.garden };
+  const worldStone = WORLD_STONE[WORLDS[Math.abs(report.region) % WORLDS.length]] ?? STONE.rock;
+  /** The defended world: a cabochon in its collet with its orbital gun platforms; it burns when the garrison falls. */
   function drawGarrison(u: Unit, tt: number, color: string) {
     const { x, y } = pose(u, tt);
     const r = u.s;
@@ -936,16 +938,18 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     const dead = tt >= u.deathT || hpNow <= 0;
     const recent = u.hits.some(h => h.t <= tt && tt - h.t < 0.14);
     drawBodyShadow(g, x + r * 0.45, y + r * 0.9, r * 1.2, 0.55);
-    // the owner's colour as a faint halo of territory
-    drawGlow(g, x, y, r * 2.2, artRgb(enamel(color).base), dead ? 0.06 : 0.16, 0);
+    // the owner's enamel as a ring inlaid round the setting (printed, flat: no halo)
+    g.save(); g.globalAlpha *= dead ? 0.35 : 1; g.beginPath(); g.arc(x, y, r * 1.42, 0, Math.PI * 2);
+    g.lineWidth = 5; g.strokeStyle = GROOVE; g.stroke(); g.lineWidth = 2; g.strokeStyle = enamel(color).base; g.stroke(); g.restore();
     // orbital batteries behind the world (upper half), then the world, then the near ones
     const n = 6, rot = reduced ? 0 : tt * 0.18;
     const plats = Array.from({ length: n }, (_, i) => { const a = rot + (i / n) * Math.PI * 2; return { a, x: x + Math.cos(a) * r * 1.5, y: y + Math.sin(a) * r * 0.55, front: Math.sin(a) > 0 }; });
     const live = (i: number) => !dead || i % 3 !== 0;
     const ps = Math.max(5, r * 0.2);
     for (let i = 0; i < n; i++) if (!plats[i].front && live(i)) drawStructure(g, 'battery', color, plats[i].x, plats[i].y, ps, ps * dpr);
-    drawPlanet(g, x, y, r, r * dpr, worldBody);
-    if (recent) drawGlow(g, x, y, r * 1.3, [255, 255, 255], 0.25);
+    cabochon(g, x, y, r, worldStone, 1, false, true, dead ? 0.5 : 0);
+    // a hit rings the collet in ivory for an instant (no flash of light over the stone)
+    if (recent) { g.save(); g.beginPath(); g.arc(x, y, r * 1.18 + 2, 0, Math.PI * 2); g.lineWidth = 1.6; g.strokeStyle = 'rgba(255,244,214,0.9)'; g.stroke(); g.restore(); }
     if (dead) {
       // the fall: fires across the night side, a pall of smoke
       g.save(); g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.clip();
@@ -1006,8 +1010,19 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
     return { l: 0, t: 0, r: 20 * U + Math.min(230 * U, W * 0.44) + 8 * U, b: 16 * U + (sides.length - 1) * 27 * U + 16 * U };
   }
 
-  /** Weapon fire in each house's style: Azure lances (instant beams), Crimson broadsides (shell salvos from the
-   *  flank batteries), Gilded plasma (slow glowing bolts), Warden arcs, garrison flak; shield shimmer, impacts. */
+  /** A bolt as the board draws it (ART-BIBLE §13.5): flat house ink in a dark groove with an ivory head, never a
+   *  glowing beam. `head` puts the ivory bead at (x1, y1). */
+  function bolt(x0: number, y0: number, x1: number, y1: number, color: string, w: number, alpha: number, head = true) {
+    if (alpha <= 0.01) return;
+    g.save(); g.globalAlpha *= Math.min(1, alpha); g.lineCap = 'round';
+    g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1);
+    g.strokeStyle = GROOVE; g.lineWidth = w * 1.6 + 2; g.stroke();
+    g.strokeStyle = inkOf(color); g.lineWidth = w * 0.9; g.stroke();
+    if (head) { g.beginPath(); g.arc(x1, y1, w * 0.75 + 1, 0, Math.PI * 2); g.fillStyle = '#fff4d6'; g.fill(); }
+    g.restore();
+  }
+  /** Weapon fire in each house's style: Azure lances (instant, the whole line at once), Crimson broadsides (shell
+   *  salvos from the flank batteries), Gilded bolts (slow), Warden arcs, garrison flak; shield shimmer, impacts. */
   function drawShots(tt: number) {
     g.save();
     for (const sh of shots) {
@@ -1031,8 +1046,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
       if (style === 'azure' || style === 'warden' || style === 'neutral') {
         // lance: charges, fires for an instant, fades
         const e = tt - (sh.t1 - 0.1);
-        if (e > -0.1 && e < 0) drawGlow(g, A[0], A[1], 4 + 6 * (1 + e / 0.1), wcol, 0.8);
-        if (e >= 0 && e < 0.28) beam(g, A[0], A[1], B[0], B[1], wcol, w, 1 - e / 0.28);
+        if (e > -0.1 && e < 0) { g.save(); g.beginPath(); g.arc(A[0], A[1], 1.5 + 2 * (1 + e / 0.1), 0, Math.PI * 2); g.fillStyle = '#fff4d6'; g.fill(); g.restore(); }
+        if (e >= 0 && e < 0.28) bolt(A[0], A[1], B[0], B[1], color, w * 1.3, 1 - e / 0.28);
       } else {
         const salvo = style === 'crimson' ? 3 : 1;
         const travel = style === 'gilded' ? TRAVEL * 1.25 : TRAVEL;
@@ -1045,8 +1060,8 @@ export function openBattleViewer(report: BattleReport, ctx: BattleViewerCtx): vo
           const a0: P = [A[0] + jx, A[1] + jy], b0: P = [B[0] + jx * 0.3, B[1] + jy * 0.3];
           const hx = lerp(a0[0], b0[0], clamp(p)), hy = lerp(a0[1], b0[1], clamp(p));
           const fade = sh.rec.miss ? 1 - clamp((p - 0.6) / 0.5) : 1;
-          if (style === 'gilded') { drawGlow(g, hx, hy, 6 + w * 2, wcol, fade); drawGlow(g, lerp(a0[0], b0[0], clamp(p - 0.08)), lerp(a0[1], b0[1], clamp(p - 0.08)), 4, wcol, 0.5 * fade); }
-          else tracer(g, lerp(a0[0], b0[0], clamp(p - 0.18)), lerp(a0[1], b0[1], clamp(p - 0.18)), hx, hy, style === 'flak' ? [255, 214, 140] : wcol, w, fade);
+          if (style === 'gilded') bolt(lerp(a0[0], b0[0], clamp(p - 0.1)), lerp(a0[1], b0[1], clamp(p - 0.1)), hx, hy, color, w * 1.6, fade);
+          else bolt(lerp(a0[0], b0[0], clamp(p - 0.18)), lerp(a0[1], b0[1], clamp(p - 0.18)), hx, hy, style === 'flak' ? '#d4b47a' : color, w, fade);
           // muzzle flash and a puff of gun smoke at the battery
           const mf = (tt - t0) / 0.12;
           if (mf >= 0 && mf <= 1) drawGlow(g, a0[0], a0[1], 5 + w * 3, wcol, 1 - mf);

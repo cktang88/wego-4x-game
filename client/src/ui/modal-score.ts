@@ -93,7 +93,7 @@ export function scoreBody(c: Ctx): string {
       ${diplo(c, p)}
     </article>`;
   }).join('');
-  return `<div class="sco"><div class="sco-cols" style="--n:${st.players.length}">${cols}</div><div class="sco-row">${edictsHtml(c)}${intelHtml(c)}</div></div>${ui.chatOpen ? chatHtml(c) : ''}`;
+  return `<div class="sco"><div class="sco-cols" style="--n:${st.players.length}">${cols}</div><div class="sco-row">${edictsHtml(c)}${intelHtml(c)}</div>${courtHtml(c)}</div>${ui.chatOpen ? chatHtml(c) : ''}`;
 }
 
 /** Broken sworn pacts: the Oathbreaker brand, with the words that were broken. */
@@ -143,6 +143,45 @@ function edictsHtml(c: Ctx): string {
   const th = st.throne.owner !== null ? `<b style="color:${esc(ownerHi(g.color(st.throne.owner)))}">${esc(g.pname(st.throne.owner))}</b> · streak ${st.throne.streak}` : '<span class="dim">Unclaimed</span>';
   const wd = st.wardenAwake ? (st.wardenDefeated ? '<span class="dim">Destroyed</span>' : '<b class="neg">⚠ Awake</b>') : `<span class="dim">Asleep · ${st.loreFound}/${st.rules.warden.wakeAtLore} relics</span>`;
   return `<section class="mpanel"><h3>Edicts</h3>${ed}<div class="kvl"><span>Throne</span><span>${th}</span><span>Warden</span><span>${wd}</span></div></section>`;
+}
+
+/** The Court (docs/SOUL.md §4): per house, the captives it holds and has taken (and lost), its answer to the Throne
+ *  (knelt, defied, broke its knee), and in exile its whisper and Exile points. Everything comes from the view: a
+ *  capture between two other houses is their secret, and so is an exile's whisper (unless it is yours, or the war is
+ *  over). Absent when the Court is off. */
+function courtHtml(c: Ctx): string {
+  const g = c.g, st = g.st, ct = st.court;
+  if (!ct) return '';
+  const T = g.live ? 'C' : 'T';
+  const you = g.you, open = you !== null && st.winner === null;
+  const who = (p: number) => `<b style="color:${esc(ownerHi(g.color(p)))}">${esc(g.pname(p))}</b>`;
+  const rows = st.players.map(p => {
+    const holds = ct.captives.filter(x => x.captor === p.id).length;
+    const taken = ct.records.filter(r => r.kind === 'captured' && r.captor === p.id).length;
+    const lost = ct.records.filter(r => r.kind === 'captured' && r.owner === p.id).length;
+    const d = [...ct.decrees].reverse().find(x => x.p === p.id);
+    const answer = d ? (d.answer === 'kneel' ? `Knelt to ${who(d.holder)}` : d.answer === 'broke' ? `Broke its knee to ${who(d.holder)}` : `${d.auto ? 'Silent, so defied' : 'Defied'} ${who(d.holder)}`) + ` <small>${T}${d.turn}</small>`
+      : ct.coronation && ct.coronation.holder === p.id ? `Crowned <small>${T}${ct.coronation.since}</small>`
+      : ct.coronation && st.winner === null ? `<span class="dim">Has not answered ${who(ct.coronation.holder)}</span>` : '<span class="dim">Owes no fealty</span>';
+    const ex = ct.exiles.find(e => e.p === p.id);
+    let exile = '';
+    if (ex) {
+      const known = !open || ex.p === you;
+      const wh = known ? (ex.whisper !== null ? `whispers against ${who(ex.whisper)}` : 'no whisper') : 'its whisper is secret';
+      exile = `<div class="ctx-ex">In exile since ${T}${ex.since} · ${wh}${ex.vote !== null ? ` · ghost vote ${who(ex.vote)}` : ''}${ex.points ? ` · <b class="k-num">${ex.points}</b> Exile pts` : ''}</div>`;
+    }
+    return `<li class="ctx-row" style="--pc:${esc(ownerHi(p.color))}"><span class="ctx-who">${esc(p.name)}</span>
+      <span class="ctx-n" title="Captives held now"><small>Holds</small><b class="k-num">${holds}</b></span>
+      <span class="ctx-n" title="Commanders it has taken"><small>Taken</small><b class="k-num">${taken}</b></span>
+      <span class="ctx-n" title="Its commanders taken"><small>Lost</small><b class="k-num">${lost}</b></span>
+      <span class="ctx-ans">${answer}</span>${exile}</li>`;
+  }).join('');
+  const held = ct.captives.map(x => `<li>${esc(x.cmd.name)} of ${who(x.owner)}, held by ${who(x.captor)} <small>free at the end of ${T}${x.until}</small></li>`).join('');
+  const cor = ct.coronation && st.winner === null ? `<p class="ctx-cor">${who(ct.coronation.holder)} holds the Throne: every rival kneels or defies by the end of ${T}${ct.coronation.until}.</p>` : '';
+  const quiet = !held && !ct.records.length && !ct.decrees.length && !ct.exiles.length && !ct.coronation;
+  return `<section class="mpanel sco-court"><h3>Court</h3>${cor}<ul class="ctx-rows">${rows}</ul>
+    ${held ? `<h4>In chains</h4><ul class="ctx-held">${held}</ul>` : ''}
+    ${quiet ? '<p class="dim ctx-note">No prisoners, no oaths of fealty yet. Beat a banner with a commander aboard to take one.</p>' : open ? '<p class="dim ctx-note">What you can know: captures between the other houses stay their secret.</p>' : ''}</section>`;
 }
 
 function intelHtml(c: Ctx): string {

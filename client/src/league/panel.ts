@@ -32,6 +32,7 @@ function tableTab(v: LeagueView): string {
       <span class="tcl-stat" title="Crowns won"><span class="tcl-crowns">${crown(16)}</span><b class="k-num">${m.wins}</b></span>
       <span class="tcl-stat" title="Games played"><small>Games</small><b class="k-num">${m.games}</b></span>
       <span class="tcl-stat tcl-wide" title="Crown worlds held at the end of games"><small>Crowns held</small><b class="k-num">${m.crowns}</b></span>
+      <span class="tcl-stat" title="Exile points: what this house cost the winners from exile"><small>Exile</small><b class="k-num">${m.exilePoints ?? 0}</b></span>
       ${m.ugly ? `<span class="tcl-ugly" title="The Ugly Trophy: last place in the latest game, kept until the next one">${GOBLET}</span>` : '<span class="tcl-ugly"></span>'}
     </li>`).join('');
   const ug = v.ugly ? `<p class="tcl-note k-prose">${GOBLET}<span><b>${esc(v.ugly.name)}</b> keeps the Ugly Trophy, a dented tin goblet, from game ${v.ugly.index}, until someone else finishes last.</span></p>` : '';

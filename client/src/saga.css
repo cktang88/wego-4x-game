@@ -6,9 +6,10 @@
    ============================================================================ */
 .saga-ov { position: fixed; inset: 0; z-index: 56; overflow: hidden; opacity: 0; transition: opacity 0.3s;
   background:
-    radial-gradient(80% 70% at 30% 18%, rgba(255, 217, 160, 0.13), rgba(255, 217, 160, 0) 60%),
+    /* the board's room: black velvet under the lamp (ART-BIBLE §13.2), not a brown table */
+    radial-gradient(80% 70% at 30% 18%, rgba(255, 217, 160, 0.08), rgba(255, 217, 160, 0) 60%),
     var(--k-grain) 0 0 / 160px,
-    radial-gradient(ellipse at 40% 30%, #2a2119 0%, #15110d 55%, #070605 100%);
+    radial-gradient(ellipse at 40% 30%, #121216 0%, #0a0a0d 55%, #060608 100%);
   background-blend-mode: normal, soft-light, normal; }
 .saga-ov.show { opacity: 1; }
 .saga-ov.out { opacity: 0; transition-duration: 0.2s; }
@@ -174,10 +175,24 @@
   .sg-acts .k-btn { flex: 1 1 40%; padding: 0 0.6em; letter-spacing: 0.06em; }
   .sg-fleet .sg-por { width: 4.75rem; height: 5.9375rem; }
 }
-@media (max-height: 30rem) { .saga { flex-direction: row; } .sg-foot { width: 15rem; flex-direction: column; } .sg-acts { flex-direction: column; } .sg-acts .k-btn { width: 100%; flex: none; } }
+@media (max-height: 30rem) { .saga { flex-direction: row; align-items: stretch; } .sg-book { max-height: 100%; } .sg-foot { width: 15rem; flex-direction: column; flex-wrap: nowrap; justify-content: center; max-height: 100%; overflow-y: auto; } .sg-acts { flex-direction: column; } .sg-acts .k-btn { width: 100%; flex: none; }
+  /* a phone on its side: the page turner stays on one line (it wrapped, and pushed the Close button off the screen) */
+  .sg-nav { flex-wrap: nowrap; width: 100%; } .sg-at { min-width: 0; flex: 1; } }
 @media (prefers-reduced-motion: reduce) { .saga-ov { transition: none; } }
 .sg-page > .sg-pin { min-height: 100%; display: flow-root; }
 .sg-pin:has(> .sg-front) { display: flex; flex-direction: column; }
 .sg-pin > .sg-front { flex: 1 0 auto; min-height: 0; }
 .sg-beats li > span:last-child .ic { width: 1em; height: 1em; vertical-align: -0.12em; }
 .sg-acts .k-btn.primary { background-color: #c8964a; }
+/* the Court page: sub-heads in the rubric's small caps; executions and broken knees in the rubric's red */
+.sg-h3 { margin: 0.9rem 0 0.2rem; font: 700 var(--fs-xs)/1.2 var(--k-display, 'Cinzel', serif); letter-spacing: 0.16em; text-transform: uppercase; color: #6b4a1c; }
+.sg-beats.sg-court { margin-top: 0.25rem; }
+.sg-ct.executed .bi, .sg-ct.broke .bi, .sg-ct.defy .bi { color: #8e1f1f; }
+.sg-ct.turned span:last-child { font-style: italic; }
+.sg-xp { color: #6b4a1c; font-variant-numeric: tabular-nums; }
+/* a phone on its side: the frontispiece plate shrinks so the whole title (who, crowned, why) stands on the page */
+@media (max-height: 30rem) {
+  .sg-plate { padding: 0.6rem 0.8rem 0.7rem; }
+  .sg-plate .sg-hero, .sg-plate .sg-hero-ban { width: 6.4rem; height: 8rem; }
+  .sg-front { gap: 0.4rem; padding: 0; }
+}

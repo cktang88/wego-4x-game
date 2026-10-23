@@ -114,11 +114,13 @@ export function gem(g: G, kind: StarKind, x: number, y: number, R: number, u: nu
     case 'blue': cabochon(g, x, y, R * 0.52, STONE.sapphire, u, false, true, dim); break;
     case 'white': cabochon(g, x, y, R * 0.56, STONE.moonstone, u, false, true, dim); break;
     case 'binary': {
-      g.beginPath(); g.moveTo(x - R * 0.3, y + R * 0.16); g.lineTo(x + R * 0.38, y - R * 0.2);
-      groove(g, Math.max(R * 0.34, 2.6 * u) + 2 * u); g.stroke();
-      g.lineWidth = Math.max(R * 0.34, 2.6 * u); g.strokeStyle = '#f8e2a4'; g.stroke();
-      cabochon(g, x - R * 0.3, y + R * 0.16, R * 0.44, STONE.citrine, u, false, true, dim);
-      cabochon(g, x + R * 0.4, y - R * 0.22, Math.max(R * 0.3, 2.6 * u), STONE.sapphire, u, false, true, dim);
+      // two settings on a polished bar, each large enough to read at the strategic tier (a small pair under a name
+      // or beside a wall read at 4.3:1)
+      g.beginPath(); g.moveTo(x - R * 0.32, y + R * 0.18); g.lineTo(x + R * 0.4, y - R * 0.22);
+      groove(g, Math.max(R * 0.42, 3.4 * u) + 2 * u); g.stroke();
+      g.lineWidth = Math.max(R * 0.42, 3.4 * u); g.strokeStyle = '#fdf0c8'; g.stroke();
+      cabochon(g, x - R * 0.32, y + R * 0.18, Math.max(R * 0.5, 3.2 * u), STONE.citrine, u, false, true, dim);
+      cabochon(g, x + R * 0.42, y - R * 0.24, Math.max(R * 0.34, 2.8 * u), STONE.sapphire, u, false, true, dim);
       break;
     }
     case 'pulsar': {
@@ -289,8 +291,10 @@ export function pip(g: G, x: number, y: number, ang: number, r: number, color: s
   g.save(); g.translate(x, y); g.rotate(ang);
   chevron(g, r * 1.32);
   g.lineJoin = 'round'; g.lineWidth = (sel ? 5.4 : 4.6) * u; g.strokeStyle = '#020204'; g.stroke();
-  g.lineWidth = (sel ? 2.6 : 1.8) * u; g.strokeStyle = sel ? '#fff0bd' : goldBox(g, 0, 0, r); g.stroke();
-  const eg = g.createLinearGradient(-r, -r, r, r); eg.addColorStop(0, '#fbf3e2'); eg.addColorStop(0.4, h); eg.addColorStop(1, h);
+  // the keyline is the bright end of the gold (a pip often stands on a bronze wall, and must outshine it)
+  g.lineWidth = (sel ? 2.6 : 2) * u; g.strokeStyle = sel ? '#fff0bd' : '#f8e4b0'; g.stroke();
+  // the lit face runs ivory → the house ink → the lifted enamel, so a pip holds 4.5:1 even beside a bronze wall
+  const eg = g.createLinearGradient(-r, -r, r, r); eg.addColorStop(0, '#fffaf0'); eg.addColorStop(0.5, inkOf(color)); eg.addColorStop(1, h);
   g.fillStyle = eg; g.fill();
   g.restore();
 }

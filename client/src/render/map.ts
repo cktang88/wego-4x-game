@@ -483,6 +483,41 @@ export class MapRenderer {
   /** the empire lettering drawn this frame (screen boxes): lines under it are not measured there */
   private letterBoxes: { x0: number; y0: number; x1: number; y1: number }[] = [];
   private lastInput: DrawInput | null = null;
+  /** the routes printed this frame (screen segments with their groove width), while probing: a lane under a route is
+   *  not that lane's reading (the route's own probe measures it) */
+  private routeSegsS: { a: Pt; b: Pt; w: number }[] = [];
+  private noteRoute(pts: Pt[], wDesign: number) {
+    if (!this.probes) return;
+    for (let i = 1; i < pts.length; i++) this.routeSegsS.push({ a: this.toScreen(pts[i - 1]), b: this.toScreen(pts[i]), w: wDesign * this.cam.z });
+  }
+  /** The ground's bright lines while probing (territory walls and the bezel's rim, world segments). */
+  private wallSegs: { a: Pt; b: Pt }[] | null = null;
+  /** Where along a line (world a→b) to probe it: the first of a few points (from `t0` outward) at least 12 css px
+   *  from the ground's bright lines, else the one farthest from them. A line crossing a wall or running by the bezel
+   *  reads against that wall there, not against its own ground (the same rule that keeps the wall probes inland). */
+  private calmPoint(ax: number, ay: number, bx: number, by: number, t0 = 0.4): Pt {
+    const I = this.lastInput;
+    if (!this.wallSegs && I) {
+      const st = I.state, edges = regionEdges(st), out: { a: Pt; b: Pt }[] = [];
+      for (const r of st.regions) {
+        if (isLane(r) || r.poly.length < 3) continue;
+        for (const e of edges[r.id]) {
+          if (e.other >= 0 && (e.other < r.id || isLane(st.regions[e.other]) || I.owners[e.other] === I.owners[r.id])) continue;
+          out.push({ a: e.a, b: e.b });
+        }
+      }
+      this.wallSegs = out;
+    }
+    const W = this.wallSegs ?? [];
+    const dist = (p: Pt) => { let m = 1e9; for (const w of W) { const dx = w.b.x - w.a.x, dy = w.b.y - w.a.y, L2 = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((p.x - w.a.x) * dx + (p.y - w.a.y) * dy) / L2)); m = Math.min(m, Math.hypot(p.x - w.a.x - dx * t, p.y - w.a.y - dy * t)); } return m * this.cam.z; };
+    let best: Pt = { x: ax + (bx - ax) * t0, y: ay + (by - ay) * t0 }, bd = -1;
+    for (const t of [t0, 0.5, 0.6, 0.3, 0.7, 0.25, 0.75]) {
+      const p = { x: ax + (bx - ax) * t, y: ay + (by - ay) * t }, d = dist(p);
+      if (d >= 12 * this.ui) return p;
+      if (d > bd) { bd = d; best = p; }
+    }
+    return best;
+  }
   /** A probe on a world point (w, h in design px). */
   private probe(kind: string, wx: number, wy: number, w: number, h: number, bg = 1) {
     if (!this.probes) return;
@@ -507,7 +542,7 @@ export class MapRenderer {
     if (!I) return [];
     const g = this.ctx, W = this.canvas.width, H = this.canvas.height;
     this.syncBake = true;
-    this.probes = []; this.letterBoxes = [];
+    this.probes = []; this.letterBoxes = []; this.routeSegsS = []; this.wallSegs = null;
     this.lastNow = I.now; this.draw(I);
     const C = g.getImageData(0, 0, W, H).data;
     // a line under a piece, a star or a name is not that line's reading: those probes are dropped
@@ -517,7 +552,10 @@ export class MapRenderer {
     const trS = tokR(this.zr, this.coarse) * this.ui * 1.25;
     const toks = this.tokHits.map(h => { const c = this.toScreen(h); return { x0: c.x - trS, y0: c.y - trS, x1: c.x + trS, y1: c.y + trS }; });
     const over = (p: { x: number; y: number; w: number; h: number }, os: typeof occ) => os.some(o => p.x + p.w / 2 > o.x0 && p.x - p.w / 2 < o.x1 && p.y + p.h / 2 > o.y0 && p.y - p.h / 2 < o.y1);
-    const probes = this.probes.filter(p => !((p.kind === 'contested' || p.kind.startsWith('star')) && over(p, toks)) && !(linear(p.kind) && over(p, occ)));
+    const segD = (p: { x: number; y: number }, a: Pt, b: Pt) => { const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2)); return Math.hypot(p.x - a.x - dx * t, p.y - a.y - dy * t); };
+    const underRoute = (p: { x: number; y: number; w: number; h: number }) => this.routeSegsS.some(r => segD(p, r.a, r.b) < r.w / 2 + Math.max(p.w, p.h) / 2);
+    const probes = this.probes.filter(p => !((p.kind === 'contested' || p.kind.startsWith('star')) && over(p, toks)) && !(linear(p.kind) && over(p, occ))
+      && !(p.kind.startsWith('lane') && underRoute(p)));
     this.probes = null;
     // the backgrounds (docs/STYLE-EXPLORE.md §2): the dial with its territories and walls (for every mark), and the
     // dial alone (for the walls themselves)
@@ -963,6 +1001,10 @@ export class MapRenderer {
       // a territory too small for a readable name gets none
       if (fs < 13) continue;
       ctx.save();
+      // the lettering stops short of every star in it (a stone set in the middle of a word lost to the letters)
+      { const v = this.view; ctx.beginPath(); ctx.rect(v.x0, v.y0, v.x1 - v.x0, v.y1 - v.y0);
+        for (const r of st.regions) { if (isLane(r) || r.kind === 'void') continue; const q = r.site; if (q.x < v.x0 || q.x > v.x1 || q.y < v.y0 || q.y > v.y1) continue; const rr = (this.siteR(r) * 1.45 + 3) * S; ctx.moveTo(q.x + rr, q.y); ctx.arc(q.x, q.y, rr, 0, TAU); }
+        ctx.clip('evenodd'); }
       ctx.font = displayFont(fs * S);
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       // engraved in the glaze: a dark cut under each letter, the house's lifted enamel as the face (fogged
@@ -1264,8 +1306,10 @@ export class MapRenderer {
       path(ctx, r.poly);
       ctx.fillStyle = hexA(col, 0.1 * k * pulse); ctx.fill();
       ctx.save(); ctx.clip();
-      ctx.strokeStyle = O.GROOVE; ctx.lineWidth = (4 + 2 * k) * S; ctx.stroke();
-      ctx.strokeStyle = hexA(O.mixHex(col, '#fff4e0', 0.25), (0.78 + 0.22 * k) * pulse); ctx.lineWidth = (1.6 + 1.4 * k) * S; ctx.stroke();
+      // the gilt is solid, in an ink keyline (only the tint breathes): a pulsing, half-transparent wire lost to the
+      // enamel under it (3.6:1 at the low of its pulse)
+      ctx.strokeStyle = O.GROOVE; ctx.lineWidth = (5.2 + 2 * k) * S; ctx.stroke();
+      ctx.strokeStyle = O.mixHex(col, '#fff4e0', 0.4); ctx.lineWidth = (2.4 + 1.4 * k) * S; ctx.stroke();
       ctx.restore();
     }
   }
@@ -1640,7 +1684,13 @@ export class MapRenderer {
       if (mine && t.idle && !sel && W.s < 0.1) this.probe('idle rim', d.x - tr * 1.42 * S, d.y + lift, 7, 7);
       if (t.oos) this.probe('out-of-supply rim', d.x + tr * 1.26 * S, d.y + lift, 5, 5);
       if (t.fleets.length > 1) this.probe('stack count', d.x + tr * 0.95 * S, d.y + ry * 0.95 * S + lift, 9, 9);
-      if (sel && W.s < 0.5) this.probe('strength', d.x + 4 * S, d.y + lift - (tr + 10 + W.d * (this.miniGeom().stand + this.miniGeom().len * 0.7)) * S, 12, 10);
+      if (sel && W.s < 0.5) {
+        const sy = d.y + lift - (tr + 10 + W.d * (this.miniGeom().stand + this.miniGeom().len * 0.7)) * S;
+        this.probe('strength', d.x + 4 * S, sy, 12, 10);
+        // the badge is part of the piece: a line under it is not that line's reading
+        const c = this.toScreen({ x: d.x, y: sy }), hw = 24 * this.ui, hh = 10 * this.ui;
+        this.letterBoxes.push({ x0: c.x - hw, y0: c.y - hh, x1: c.x + hw, y1: c.y + hh });
+      }
     }
     // selected: its strength (attack power) over it
     if (sel && W.s < 0.98) {
@@ -2031,7 +2081,7 @@ export class MapRenderer {
       // eased in and out, but at full value once lit (a half-transparent wire loses to the field under it)
       ctx.globalAlpha = target ? Math.min(1, a / target) : Math.min(1, a * 3);
       O.litLane(ctx, x0, y0, x1, y1, target || a, S, strat);
-      if (this.probes && target >= 0.3 && target < 1 && a >= target * 0.95) this.probe('lane (lit)', x0 * 0.6 + x1 * 0.4, y0 * 0.6 + y1 * 0.4, 6, 6);
+      if (this.probes && target >= 0.3 && target < 1 && a >= target * 0.95) { const q = this.calmPoint(x0, y0, x1, y1); this.probe('lane (lit)', q.x, q.y, 6, 6); }
       ctx.globalAlpha = 1;
       for (const id of [g.u, g.v]) if (isLane(st.regions[id])) dots.set(id, Math.max(dots.get(id) ?? 0, a));
     }
@@ -2155,6 +2205,7 @@ export class MapRenderer {
     const trace = () => { ctx.beginPath(); pts.forEach((pp, i) => (i ? ctx.lineTo(pp.x, pp.y) : ctx.moveTo(pp.x, pp.y))); };
     // printed, flat: the house's enamel dashes inlaid in a groove, a gilt-keyed head (hollow for a join)
     O.routeStroke(ctx, trace, color, s, reducedMotion() ? 0 : -(this.now / 60) * s);
+    this.noteRoute(pts, 8.2 * s);
     if (this.probes && alpha >= 0.9) { const q = pts[Math.floor(pts.length / 2)]; this.probe('route (planned)', q.x, q.y, 12, 12); }
     const ang = Math.atan2(p2.y - pb.y, p2.x - pb.x);
     if (seize && grow >= 0.9 && to >= 0) this.reticle(b, to, color);
@@ -2184,15 +2235,37 @@ export class MapRenderer {
     const ang = Math.atan2(end.y - prev.y, end.x - prev.x);
     ctx.save();
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    const trace = () => { ctx.beginPath(); pts.slice(0, -1).forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.lineTo(tip.x, tip.y); };
+    // the route leaves its star and breaks round each system it passes through, so the setting stays whole (a route printed over a
+    // stone hid it: a binary under a route read at 3.3:1)
+    const st = this.lastState;
+    const legs = [...pts.slice(0, -1), tip];
+    const gapAt = (p: Pt, i: number) => {
+      if (i === legs.length - 1 || !st) return 0;
+      const rid = this.regionAtSite(p);
+      const rr = rid >= 0 ? st.regions[rid] : null;
+      return rr && !isLane(rr) ? (this.siteR(rr) + 4) * s : 0;
+    };
+    const segs: [Pt, Pt][] = [];
+    for (let i = 1; i < legs.length; i++) {
+      const p0 = legs[i - 1], p1 = legs[i], dx = p1.x - p0.x, dy = p1.y - p0.y, LL = Math.hypot(dx, dy) || 1;
+      const g0 = gapAt(p0, i - 1), g1 = gapAt(p1, i);
+      if (g0 + g1 >= LL - 1) continue;
+      segs.push([{ x: p0.x + (dx / LL) * g0, y: p0.y + (dy / LL) * g0 }, { x: p1.x - (dx / LL) * g1, y: p1.y - (dy / LL) * g1 }]);
+    }
+    const trace = () => {
+      ctx.beginPath();
+      let last: Pt | null = null;
+      for (const [a, b] of segs) { if (!last || Math.hypot(a.x - last.x, a.y - last.y) > 0.01) ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); last = b; }
+    };
     // rivals' routes: the groove at full value, the enamel a little quieter (never below the 4.5:1 line)
     O.routeStroke(ctx, trace, color, s, reducedMotion() ? 0 : -(this.now / 60) * s, mine ? 1 : 0.8);
+    for (const [a, b] of segs) this.noteRoute([a, b], 8.2 * s);
     if (this.probes) {
       // the middle of its longest leg (clear of the stars at either end)
-      const legs = [...pts.slice(0, -1), tip];
       let q0 = legs[0], q1 = legs[1], best = 0;
       for (let i = 1; i < legs.length; i++) { const L = Math.hypot(legs[i].x - legs[i - 1].x, legs[i].y - legs[i - 1].y); if (L > best) { best = L; q0 = legs[i - 1]; q1 = legs[i]; } }
-      this.probe(seize ? 'route (seize)' : 'route (move)', (q0.x + q1.x) / 2, (q0.y + q1.y) / 2, 12, 12); }
+      const q = this.calmPoint(q0.x, q0.y, q1.x, q1.y, 0.5);
+      this.probe(seize ? 'route (seize)' : 'route (move)', q.x, q.y, 12, 12); }
     if (seize) this.reticle(end, dest, color);
     else O.routeHead(ctx, tip.x, tip.y, ang, color, s);
     ctx.restore();

@@ -13,7 +13,7 @@ import { esc, toast } from './dom.ts';
 import { bannerSvg, drawSigil, goldPaint, sigilSvg } from '../art/sigils.ts';
 import { headlineIcon } from './herald.ts';
 import { beatIcon } from '../hud/soul.ts';
-import { iconizeDom, ic, icFor, glyphHtml } from '../art/icons.ts';
+import { iconizeDom, ic, icFor, glyphHtml, type IconKey } from '../art/icons.ts';
 import { enamel, ownerHi, ownerText } from '../art/bible.ts';
 import { drawPortrait, type PortraitSpec } from '../art/portraits.ts';
 import { sagaPortrait, portraitTag } from '../hud/portrait.ts';
@@ -102,6 +102,21 @@ function pagesOf(g: GameScreen, S: Saga): string[] {
   pages.push(`<h2 class="sg-h">The Hollow Throne</h2>${reigns ? `<div class="sg-reigns"><div class="bar">${reigns}</div><div class="axis"><span>${T} 1</span><span>${T} ${lastTurn}</span></div><ul>${S.reigns.map(r => `<li>${pn(r.player)} <small>${T} ${r.from}–${r.to ?? (st.winner !== null ? 'end' : 'now')}</small></li>`).join('')}</ul></div>` : '<p class="sg-none">No one ever sat the Throne. It waits for the next war.</p>'}
     <h2 class="sg-h">Oaths broken</h2>${oaths ? `<ul class="sg-list">${oaths}</ul>` : '<p class="sg-none">Every word was kept.</p>'}
     <h2 class="sg-h">Blood-debts</h2>${debts ? `<ul class="sg-list">${debts}</ul>` : '<p class="sg-none">No blood owed.</p>'}`);
+
+  // III b. the Court: the Coronation's answers, the captives' fates (executions and turncoats first in the eye), the
+  // exiles and their points. Only what the reader may know: the Saga reads the (fogged) view.
+  if (st.court) {
+    const C = S.court;
+    const decree = C.filter(l => l.kind === 'kneel' || l.kind === 'defy' || l.kind === 'broke');
+    const caps = C.filter(l => !decree.includes(l));
+    const ico: Record<string, IconKey> = { kneel: 'crown', defy: 'attack', broke: 'skull', captured: 'chain', ransomed: 'purse', executed: 'skull', turned: 'banner', released: 'chain' };
+    const line = (l: Saga['court'][number]) => `<li class="sg-ct ${esc(l.kind)}"><span class="bi">${ic(ico[l.kind] ?? 'chain')}</span><small>${T} ${l.turn}</small><span>${esc(l.text)}</span></li>`;
+    const exiles = S.exiles.map(e => `<li>${pn(e.player)} went into exile <small>${T} ${e.since}</small>${e.vote !== null ? ` and cast its ghost vote for ${pn(e.vote)}` : ''}. <b class="sg-xp">${e.points} Exile point${e.points === 1 ? '' : 's'}</b>${st.winner === null ? ' <span class="dim">so far</span>' : ''}</li>`).join('');
+    pages.push(`<h2 class="sg-h">The Court</h2>
+      <h3 class="sg-h3">The Coronation</h3>${decree.length ? `<ol class="sg-beats sg-court">${decree.map(line).join('')}</ol>` : '<p class="sg-none">No one was crowned long enough to ask for knees.</p>'}
+      <h3 class="sg-h3">The captives</h3>${caps.length ? `<ol class="sg-beats sg-court">${caps.slice(-14).map(line).join('')}</ol>` : '<p class="sg-none">No commander was taken alive, or none that you heard of.</p>'}
+      <h3 class="sg-h3">The exiles</h3>${exiles ? `<ul class="sg-list">${exiles}</ul>` : '<p class="sg-none">No house was driven from the table.</p>'}`);
+  }
 
   // IV. a chapter per banner, with its commander's portrait
   S.fleets.forEach((f, i) => {
@@ -315,6 +330,12 @@ export function sagaText(g: GameScreen, S: Saga = sagaOf(g.st)): string {
     L.push('');
   }
   if (S.debts.length) { L.push('BLOOD-DEBTS'); for (const d of S.debts) L.push(`· ${g.pname(d.debtor)} owed ${g.pname(d.creditor)} for ${d.victim}${d.cleared ? ` (avenged T${d.cleared})` : ' (unpaid)'}`); L.push(''); }
+  if (S.court.length || S.exiles.length) {
+    L.push('THE COURT');
+    for (const l of S.court) L.push(`· T${l.turn}: ${l.text}`);
+    for (const e of S.exiles) L.push(`· ${e.name} in exile from T${e.since}: ${e.points} Exile point${e.points === 1 ? '' : 's'}`);
+    L.push('');
+  }
   if (S.memorials.length) { L.push('THE MEMORIAL ROLL'); for (const m of S.memorials.slice(0, 20)) L.push(`· ${m.text}`); }
   return L.join('\n').trim();
 }

@@ -499,6 +499,13 @@
 .phone .hud > .card.wc::after { content: ''; position: absolute; z-index: 6; top: 0.3125rem; left: 50%; width: 2.5rem; height: 0.25rem; margin-left: -1.25rem; border-radius: 2px; pointer-events: none;
   background: linear-gradient(180deg, #efd59a, #8a5f22); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.7); }
 .phone.landscape .hud > .card.wc::after { display: none; }
+/* on its side the card is a side sheet on the right (the bottom-sheet rule above would stretch it across the top,
+   over the plan strip): from under the top bar to just above the strip, its body scrolls */
+.phone.landscape .hud > .card.wc { left: auto !important; right: calc(0.25rem + var(--safe-r)) !important; width: min(24rem, 56vw);
+  top: calc(3.5rem + var(--safe-t)); bottom: calc(4.75rem + var(--safe-b)); max-height: none; animation: sheetleft 0.22s ease-out; }
+.phone.landscape .hud > .card.wc { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.phone.landscape .hud > .card.wc > * { flex: none; }
+.phone.landscape .card.wc .wc-body { overflow: visible; min-height: 0; }
 .phone .card.wc .wc-art { --art-k: 0.857; }
 .phone:not(.landscape) .card.wc[data-snap=full] .wc-art:not(.fl-art) { --art-k: 0.643; }
 .phone:not(.landscape) .card.wc[data-snap=full] .wc-art .wc-crest { bottom: 0.3125rem; }
