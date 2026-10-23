@@ -1,0 +1,144 @@
+/* Style lab HUD chrome: the same HUD (docs/UX-V2.md §1) in each direction's material, so the board and the chrome
+   are judged together. Class on #lab: .dirA (printed chart), .dirB (painted diorama), .dirC (enamel and gold). */
+html, body { margin: 0; height: 100%; background: #07080c; overflow: hidden; }
+body.scroll { overflow: auto; height: auto; }
+#lab { position: relative; width: 100vw; height: 100vh; font-family: 'Alegreya Sans', sans-serif; }
+#lab canvas.board { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.hud { position: absolute; inset: 0; pointer-events: none; }
+.hud .ic { width: 1.15em; height: 1.15em; vertical-align: -0.2em; }
+.hud .row { position: absolute; display: flex; gap: 8px; align-items: stretch; }
+.hud .turn { top: 12px; left: 12px; }
+.hud .res { top: 12px; left: 50%; transform: translateX(-50%); }
+.hud .crests { top: 10px; right: 12px; gap: 6px; }
+.hud .strip { bottom: 14px; left: 50%; transform: translateX(-50%); }
+.hud .btns { bottom: 14px; right: 12px; }
+.hud .plate { display: flex; flex-direction: column; justify-content: center; padding: 6px 14px; min-height: 40px; box-sizing: border-box; }
+.hud .tok { display: flex; align-items: center; gap: 6px; padding: 0 12px; height: 40px; font-weight: 800; font-size: 18px; font-variant-numeric: tabular-nums lining-nums; }
+.hud .tok small { font-size: 13px; font-weight: 700; }
+.hud .crest { width: 56px; height: 58px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: Cinzel, serif; font-weight: 700; font-size: 18px; }
+.hud .crest .sh { width: 26px; height: 30px; display: grid; place-items: center; font-size: 15px; }
+.hud .crest span { font-size: 12px; font-family: 'Alegreya Sans', sans-serif; font-weight: 700; margin-top: 1px; }
+.hud .slot { width: 96px; height: 50px; display: grid; place-items: center; font-family: Cinzel, serif; font-weight: 700; font-size: 15px; }
+.hud .slot.full { font-family: 'Alegreya Sans', sans-serif; font-size: 14px; gap: 2px; }
+.hud .prim { min-width: 140px; height: 50px; display: flex; align-items: center; justify-content: center; gap: 8px; font-family: Cinzel, serif; font-weight: 700; font-size: 16px; letter-spacing: .08em; }
+.hud .rb { width: 50px; height: 50px; display: grid; place-items: center; font-size: 20px; }
+.hud .tip { position: absolute; width: 238px; padding: 10px 13px 11px; box-sizing: border-box; font-family: 'IM Fell English', serif; font-size: 15px; line-height: 1.3; }
+.hud .tip b { font-family: Cinzel, serif; font-size: 15px; letter-spacing: .06em; display: block; margin-bottom: 2px; }
+.hud .tip i { display: block; font-size: 14px; opacity: .9; margin-bottom: 4px; }
+.hud .tip p { margin: 3px 0 0; }
+.hud .tip .k { font-family: 'Alegreya Sans', sans-serif; font-weight: 800; font-variant-numeric: tabular-nums; }
+.switch { position: absolute; left: 12px; bottom: 80px; display: flex; gap: 4px; pointer-events: auto; z-index: 5; }
+.switch button { font: 700 13px 'Alegreya Sans', sans-serif; padding: 6px 10px; border-radius: 3px; border: 1px solid #c8964a; background: #1b1d23; color: #efd59a; cursor: pointer; }
+.switch button[aria-pressed=true] { background: #c8964a; color: #1b1208; }
+
+/* phone: one compact top row, the strip and the button in the thumb zone, modal buttons fold into the menu */
+.phone .hud .turn { top: 8px; left: 8px; }
+.phone .hud .res { top: 8px; left: 92px; transform: none; gap: 4px; }
+.phone .hud .turn .plate { width: 78px; white-space: nowrap; }
+.phone .hud .turn .plate b { font-size: 14px !important; letter-spacing: .02em !important; }
+.phone .hud .turn .plate small { display: none; }
+.phone .hud .tok { height: 44px; padding: 0 7px; font-size: 15px; flex-direction: column; gap: 0; justify-content: center; }
+.phone .hud .tok small { display: none; }
+.phone .hud .crests { top: 62px; right: 8px; flex-direction: column; }
+.phone .hud .crest { width: 44px; height: 50px; font-size: 15px; }
+.phone .hud .crest span { display: none; }
+.phone .hud .plate { min-height: 44px; padding: 4px 9px; }
+.phone .hud .strip { bottom: 10px; left: 8px; right: 8px; transform: none; gap: 4px; }
+.phone .hud .slot { flex: 1; width: auto; height: 46px; font-size: 13px; }
+.phone .hud .slot.full { font-size: 12px; }
+.phone .hud .prim { min-width: 0; flex: 1.6; height: 46px; font-size: 13px; }
+.phone .hud .btns { bottom: 66px; right: 8px; flex-direction: column; }
+.phone .hud .btns .rb:not(.keep) { display: none; }
+.phone .hud .tip { width: 210px; font-size: 14px; }
+.phone .switch { bottom: 130px; }
+
+/* ================================================================ A: the printed star chart
+   Chrome = atlas furniture: vellum cartouches with double ink rules, sepia ink lettering, red rubrics, a wax seal. */
+.dirA .hud { color: #21170c; }
+.dirA .plate, .dirA .tok, .dirA .slot, .dirA .rb, .dirA .tip, .dirA .crest {
+  background: #ecdfbe url(/tex/parchment.webp); background-size: 512px; background-blend-mode: soft-light;
+  border: 1.5px solid #21170c; outline: 1px solid #21170c; outline-offset: -5px; border-radius: 2px;
+  box-shadow: 3px 5px 10px rgba(10, 5, 0, .45);
+}
+.dirA .turn .plate b { font-family: Cinzel, serif; font-size: 18px; letter-spacing: .08em; }
+.dirA .turn .plate em { font-style: normal; font-family: Cinzel, serif; font-weight: 700; font-size: 12px; letter-spacing: .2em; color: #8e1f1f; }
+.dirA .tok small { color: #3f6b3a; }
+.dirA .tok small.neg { color: #8e1f1f; }
+.dirA .tok .ic { color: #21170c; }
+.dirA .crest { border-radius: 2px; }
+.dirA .crest .sh { clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%); color: #f1e6c8; border: 0; }
+.dirA .crest.you { outline: 2px solid #b8862c; outline-offset: 2px; }
+.dirA .slot { color: #5a4630; font-size: 15px; outline-style: dashed; }
+.dirA .slot.full { color: #21170c; outline-style: solid; }
+.dirA .prim { border-radius: 50%; min-width: 64px; width: 64px; height: 64px; margin-top: -8px; color: #f6e6c4; font-size: 0;
+  background: radial-gradient(circle at 35% 30%, #d0503f, #8e1f1f 55%, #4a0d0e); box-shadow: 3px 6px 10px rgba(30, 5, 0, .5), inset 0 0 0 5px rgba(0,0,0,.18), inset 0 0 0 6px rgba(255,210,180,.35); }
+.dirA .prim .ic { width: 30px; height: 30px; }
+.dirA.phone .hud .prim { flex: 0 0 56px; width: 56px; min-width: 56px; height: 56px; font-size: 0; margin-top: -6px; }
+.dirA .tip { border-width: 1px; background-color: #efe3c4; clip-path: polygon(0 2%, 3% 0, 30% 1%, 60% 0, 97% 1%, 100% 0, 99% 50%, 100% 97%, 96% 100%, 50% 99%, 4% 100%, 0 97%, 1% 50%); }
+.dirA .tip b { color: #21170c; }
+.dirA .tip i { color: #5a4630; }
+
+/* ================================================================ B: the painted diorama
+   Chrome = painted wood and brass: the same hand as the minis; soft painted bevels, warm rim light, no glass. */
+.dirB .hud { color: #ece3cf; }
+.dirB .plate, .dirB .tok, .dirB .slot, .dirB .rb, .dirB .crest {
+  background: linear-gradient(160deg, #3b3026 0%, #251d16 45%, #17120d 100%);
+  border: 2px solid #8a6a3a; border-radius: 6px;
+  box-shadow: inset 2px 2px 0 rgba(255, 230, 180, .16), inset -2px -3px 0 rgba(0, 0, 0, .45), 3px 6px 12px rgba(0, 0, 0, .55);
+}
+.dirB .plate::after, .dirB .tok::after { content: ''; }
+.dirB .turn .plate b { font-family: Cinzel, serif; font-size: 18px; color: #f1d488; letter-spacing: .06em; }
+.dirB .turn .plate em { font-style: normal; font-family: Cinzel, serif; font-weight: 700; font-size: 12px; letter-spacing: .2em; color: #e8c890; }
+.dirB .tok .ic { color: #e9cf95; }
+.dirB .tok small { color: #9fd0a0; }
+.dirB .tok small.neg { color: #f09a84; }
+.dirB .crest .sh { clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%); color: #f6ecd6; }
+.dirB .crest.you { border-color: #f1d488; box-shadow: 0 0 0 2px rgba(241, 212, 136, .45), 3px 6px 12px rgba(0, 0, 0, .55); }
+.dirB .slot { color: #a89878; border-style: dashed; }
+.dirB .slot.full { color: #ece3cf; border-style: solid; }
+.dirB .prim { border-radius: 6px; color: #2a1a06; background: linear-gradient(170deg, #f3d891 0%, #d4a24e 40%, #9c6b25 100%);
+  border: 2px solid #5a3b10; box-shadow: inset 2px 2px 0 rgba(255,250,225,.55), inset -2px -3px 0 rgba(70,40,5,.5), 3px 6px 12px rgba(0,0,0,.55); text-shadow: 0 1px 0 rgba(255,245,210,.5); }
+.dirB .tip { color: #2a1d10; background: linear-gradient(170deg, #efe2c2, #dcc79c); border-radius: 6px; box-shadow: inset 1px 1px 0 rgba(255,255,240,.6), 4px 8px 16px rgba(0,0,0,.55); }
+.dirB .tip i { color: #6b5638; }
+
+/* ================================================================ C: the enamel and gold orrery
+   Chrome = black enamel plates in polished gold bezels; gold engraving; jewels for buttons. */
+.dirC .hud { color: #efe3c4; }
+.dirC .plate, .dirC .tok, .dirC .slot, .dirC .rb, .dirC .crest, .dirC .tip {
+  background: radial-gradient(120% 140% at 30% 20%, #1c1d24 0%, #0b0c10 70%);
+  border: 2px solid transparent; border-radius: 4px;
+  background-clip: padding-box;
+  box-shadow: 0 0 0 1px #3a2a10, 0 0 0 3px #d9ad57, 0 0 0 4px #5a3e12, inset 1px 1px 0 rgba(255, 240, 210, .08), 3px 6px 12px rgba(0, 0, 0, .7);
+}
+.dirC .turn .plate b { font-family: Cinzel, serif; font-size: 18px; letter-spacing: .08em;
+  background: linear-gradient(180deg, #fff1c4, #e2b25a 55%, #9c6b25); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.dirC .turn .plate em { font-style: normal; font-family: Cinzel, serif; font-weight: 700; font-size: 12px; letter-spacing: .2em; color: #9fc0e6; }
+.dirC .tok .ic { color: #e6be6a; }
+.dirC .tok small { color: #8fcf9a; }
+.dirC .tok small.neg { color: #f0907c; }
+.dirC .crest { border-radius: 50%; width: 54px; height: 54px; }
+.dirC .crest .sh { border-radius: 50%; width: 24px; height: 24px; box-shadow: inset -3px -4px 6px rgba(0,0,0,.45), inset 2px 2px 3px rgba(255,255,255,.35), 0 0 0 1.5px #d9ad57; color: #fff4d6; }
+.dirC .crest.you { box-shadow: 0 0 0 1px #3a2a10, 0 0 0 3px #fff0bd, 0 0 0 5px #a87a35, 3px 6px 12px rgba(0, 0, 0, .7); }
+.dirC .slot { color: #8f8470; }
+.dirC .slot.full { color: #efe3c4; }
+.dirC .prim { border-radius: 26px; color: #fff4d6; background: radial-gradient(circle at 35% 30%, #d0564a, #8e1f1f 60%, #3d090b);
+  box-shadow: 0 0 0 1px #3a2a10, 0 0 0 3px #d9ad57, 0 0 0 4px #5a3e12, inset 0 2px 3px rgba(255,220,200,.35), 3px 6px 12px rgba(0,0,0,.7); }
+.dirC .rb { border-radius: 50%; }
+.dirC .tip i { color: #c9b98f; }
+.dirC .tip b { color: #f1d488; }
+
+/* legend sheet */
+.legend { position: absolute; inset: 0; pointer-events: none; }
+.legend .cell { position: absolute; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-end; }
+.legend .lab { font: 700 13px 'Alegreya Sans', sans-serif; padding: 3px 6px; line-height: 1.2; }
+.legend .lab em { font-style: normal; font-weight: 800; float: right; font-variant-numeric: tabular-nums; }
+.legend .lab em.bad { color: #ff7a6a; }
+.legend h1 { position: absolute; left: 20px; top: 8px; margin: 0; font: 700 22px Cinzel, serif; letter-spacing: .08em; }
+.legend h1 small { font: italic 16px 'IM Fell English', serif; letter-spacing: 0; margin-left: 12px; }
+.dirA .legend .lab { background: rgba(236, 223, 190, .94); color: #21170c; border-top: 1px solid #21170c; }
+.dirA .legend h1 { color: #21170c; }
+.dirB .legend .lab { background: rgba(23, 18, 13, .9); color: #ece3cf; border-top: 2px solid #8a6a3a; }
+.dirB .legend h1 { color: #f1d488; }
+.dirC .legend .lab { background: rgba(11, 12, 16, .92); color: #efe3c4; border-top: 1px solid #d9ad57; }
+.dirC .legend h1 { color: #e6be6a; }
+.legend .cellframe { position: absolute; inset: 0; border: 1px solid rgba(128, 110, 80, .35); pointer-events: none; }
