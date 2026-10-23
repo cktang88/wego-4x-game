@@ -21,15 +21,19 @@ const CATS: { id: string; name: string; color: string; re: RegExp }[] = [
 /** The victory track as an object: a brass rail with one notch per VP to win and an enamel peg in each one earned,
  *  coloured by where the point came from (ART-BIBLE §5: never a flat bar). A mark every fifth notch for counting. */
 function rail(p: Player, target: number, sums: Map<string, number>): string {
-  const pegs: string[] = [];
-  for (const x of CATS) for (let i = 0; i < (sums.get(x.id) ?? 0); i++) pegs.push(x.color);
+  // one recessed track that fills from the left, a segment per source in its enamel (never a bead-per-point barcode)
   const shown = Math.max(0, Math.min(target, p.vp));
-  // spent or lost points (a broken pact) come off the end: the rail shows the standing total
-  const cells = Array.from({ length: target }, (_, i) => {
-    const q = (i + 1) % 5 === 0 ? ' q' : '';
-    return i < shown ? `<i class="pg${q}" style="--en:${pegs[i] ?? '#d9b04a'}"></i>` : `<i class="${q.trim()}"></i>`;
-  }).join('');
-  return `<div class="pc-rail" role="img" aria-label="${p.vp} of ${target} victory points" title="${p.vp} of ${target} to win" style="--n:${target}"><span class="rail">${cells}</span><span class="rail-end">${target}</span></div>`;
+  let left = 0;
+  const segs: string[] = [];
+  for (const x of CATS) {
+    const n = Math.min(sums.get(x.id) ?? 0, shown - left);
+    if (n <= 0) continue;
+    segs.push(`<i style="left:${(left / target) * 100}%;width:${(n / target) * 100}%;--en:${x.color}"></i>`);
+    left += n;
+  }
+  if (left < shown) segs.push(`<i style="left:${(left / target) * 100}%;width:${((shown - left) / target) * 100}%;--en:#d9b04a"></i>`);
+  const ticks = Array.from({ length: Math.max(0, Math.floor((target - 1) / 10)) }, (_, i) => `<u style="left:${(((i + 1) * 10) / target) * 100}%"></u>`).join('');
+  return `<div class="pc-rail" role="img" aria-label="${p.vp} of ${target} victory points" title="${p.vp} of ${target} victory points to win"><span class="rail">${segs.join('')}${ticks}</span><span class="rail-end">${p.vp} / ${target}</span></div>`;
 }
 function vpBreakdown(p: Player) {
   const sums = new Map<string, number>();

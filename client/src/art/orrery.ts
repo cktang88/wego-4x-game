@@ -245,8 +245,10 @@ export function tribute(g: G, x: number, y: number, R: number, to: string, u: nu
 export function litLane(g: G, x0: number, y0: number, x1: number, y1: number, lit: number, u: number, strat: boolean) {
   const k = strat ? 0.92 : 1;
   g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1);
-  groove(g, (6.4 + lit * 1.6) * k * u); g.stroke();
-  g.lineWidth = (2 + lit * 1.2) * k * u; g.strokeStyle = lit >= 0.75 ? '#fff6dc' : '#ffeab8'; g.stroke();
+  // a fine gilt wire in a slim groove: a route reads clearly, a hovered star's lanes only quietly (never a cable)
+  const route = lit >= 0.75;
+  groove(g, (route ? 3.4 : 2.6) * k * u); g.stroke();
+  g.lineWidth = (route ? 1.7 : 1.1) * k * u; g.strokeStyle = route ? '#f3d38c' : 'rgba(226,190,120,0.8)'; g.stroke();
 }
 /** A waypoint bead on a lit lane. */
 export function waypoint(g: G, x: number, y: number, u: number, r = 2.1) {

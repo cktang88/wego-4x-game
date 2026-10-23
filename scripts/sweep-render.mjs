@@ -99,7 +99,8 @@ async function lanes(tag, dev) {
     await page.waitForTimeout(450);
     const fl = await laneLit(page);
     await page.screenshot({ path: `${out}/${tag}-3-fleet-selected.png` });
-    check(fl.n > 0, `${tag}: selected fleet lights its reach (${fl.n}) ${fl.n ? "" : JSON.stringify(await page.evaluate(() => ({ sel: window.tc.screen.sel, key: window.tc.screen.map.laneMemo.key })))}`);
+    // a selected fleet no longer lights a web of every reachable lane (legal targets are tinted instead)
+    check(fl.n === 0, `${tag}: selected fleet draws no reach web (${fl.n})`);
     await page.evaluate(() => window.tc.screen.deselect());
     await page.waitForTimeout(300);
 

@@ -287,16 +287,13 @@
 .pc-vp { display: flex; align-items: baseline; gap: 0.5rem; margin-top: 0.875rem; }
 .pc-vp b { font-family: var(--display); font-size: 3.25rem; font-weight: 700; line-height: 0.9; color: var(--k-ivory); text-shadow: 0 -1px 0 #000, 0.05em 0.08em 0.1em rgba(0, 0, 0, 0.6); }
 .pc-vp span:not(.m-tag) { font-size: 1.5rem; }
-/* the victory track: a brass rail with one notch per VP; earned notches hold an enamel peg (ART-BIBLE §5) */
-.pc-rail { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.875rem; }
-.pc-rail .rail { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(var(--n, 40), minmax(0, 1fr)); gap: 1px; height: 1.15rem; padding: 0.2rem 0.25rem; border-radius: 3px;
-  background: var(--k-grain) 0 0 / 160px, linear-gradient(180deg, #f4dc9c 0%, #c8964a 30%, #8a5f22 70%, #5e4116 100%); background-blend-mode: soft-light, normal;
-  box-shadow: inset 1px 1px 0 rgba(255, 252, 230, 0.6), inset -1px -1px 0 rgba(70, 40, 6, 0.6), 0.1rem 0.2rem 0.3rem rgba(0, 0, 0, 0.6); }
-.pc-rail .rail i { display: block; border-radius: 3px; background: linear-gradient(180deg, #2a1c08, #4a3412); box-shadow: inset 1px 1px 1px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 245, 210, 0.35); }
-.pc-rail .rail i.q { box-shadow: inset 1px 1px 1px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 245, 210, 0.35), 1px 0 0 rgba(42, 26, 6, 0.9); }
-.pc-rail .rail i.pg { border-radius: 50%; margin: -1px 0; background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--en) 55%, #fff), var(--en) 55%, color-mix(in srgb, var(--en) 50%, #000) 100%);
-  box-shadow: 0 0 0 0.5px rgba(42, 26, 6, 0.9), 0.04rem 0.08rem 0.08rem rgba(0, 0, 0, 0.6); }
-.pc-rail .rail-end { flex: none; font-family: var(--display); font-weight: 700; font-size: var(--fs-xs); color: var(--k-brass-200); }
+/* the victory track: one recessed groove that fills from the left in the enamels of where the points came from */
+.pc-rail { display: flex; align-items: center; gap: 0.625rem; margin-top: 0.875rem; }
+.pc-rail .rail { position: relative; flex: 1; min-width: 0; height: 0.625rem; border-radius: 3px; overflow: hidden;
+  background: linear-gradient(180deg, #0b0906, #1d170f); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 236, 190, 0.22), 0 0 0 1px rgba(150, 112, 50, 0.55); }
+.pc-rail .rail i { position: absolute; top: 0; bottom: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--en) 70%, #fff), var(--en) 45%, color-mix(in srgb, var(--en) 65%, #000)); box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.35); }
+.pc-rail .rail u { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255, 236, 190, 0.18); }
+.pc-rail .rail-end { flex: none; font-family: var(--display); font-weight: 700; font-size: var(--fs-xs); color: var(--k-brass-200); white-space: nowrap; }
 /* the last-turn warning: a wax stamp, not a pulsing alert */
 .pc-alert { margin-top: 0.75rem; padding: 0.5rem 0.75rem; border-radius: 3px; color: #fde9d8; font-family: var(--display); font-weight: 700; letter-spacing: 0.04em; text-align: center; text-shadow: 0 -1px 0 rgba(40, 0, 0, 0.8);
   background:radial-gradient(120% 160% at 30% 20%, #b23a30, #8e1f1f 55%, #4a0d0e) #8e1f1f; box-shadow: inset 1px 1px 0 rgba(255, 200, 180, 0.3), var(--k-cast); }
@@ -569,7 +566,7 @@
 .pact-sheet .dl-wax.cracked { clip-path: polygon(0 0, 46% 0, 56% 38%, 44% 60%, 58% 100%, 0 100%); filter: saturate(0.7) brightness(0.85); }
 .brand-row .pact-sheet.torn { flex: none; align-self: center; }
 /* an AI house's ruler, temper and motto under its name (DELIGHT #3) */
-.pc-temper { display: flex; align-items: center; gap: 0.625rem; margin: -0.25rem 0 0.25rem; padding: 0 1.125rem; }
+.pc-temper { display: flex; align-items: center; gap: 0.625rem; margin: 0.75rem 0 0.25rem; padding: 0 1.125rem; }
 .pc-temper .portrait { flex: none; width: 1.875rem; height: 2.34375rem; filter: drop-shadow(0.06rem 0.15rem 0.12rem rgba(0, 0, 0, 0.7)); }
 .pc-temper span { min-width: 0; font: italic var(--fs-sm)/1.3 var(--prose, 'IM Fell English', Georgia, serif); color: var(--m-dim, #c4b89c); }
 .pc-temper b { font-style: normal; font-family: var(--display); font-weight: 700; letter-spacing: 0.03em; color: #e9d7ae; }

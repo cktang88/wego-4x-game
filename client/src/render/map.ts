@@ -30,7 +30,7 @@ import { STARS } from '../../../shared/config/systems.ts';
 import { battleViewerOpen } from './battle.ts';
 import { uiScale } from '../ui/dom.ts';
 import { drawIcon, fillIconText, measureIconText, icFor, type IconName } from '../art/icons.ts';
-import {
+import { sstep,
   type Tier, type Lens, type ZoomW, coarsePointer, medianRegionRadius, tierFor, slotFor, anchorOf, powerOf, garrisonPower,
   garrisonMax, regionEdges, empireLabels, nearestRegion, isLane, hyperlanes, zoomW, starPx, tokR, artGrow, setViewer,
 } from './mapmodel.ts';
@@ -980,7 +980,10 @@ export class MapRenderer {
   private drawEmpireNames(I: DrawInput) {
     const hushed = this.lettersHushed(this.now);
     this.hushA += ((hushed ? 0 : 1) - this.hushA) * (reducedMotion() ? 1 : 1 - Math.exp(-this.dt / 140));
-    const a0 = this.zw.s * (I.peek ? 0.3 : 1) * this.hushA;
+    // empire names are lettering printed on the board: one size in world units, the same for every zoom, so no
+    // territory's name pops in or out as you zoom; they fade only with the zoom itself (full when zoomed out, faint
+    // in the middle, gone up close where system names take over), all together
+    const a0 = (this.zw.s + 0.3 * this.zw.o) * (I.peek ? 0.3 : 1) * this.hushA;
     if (a0 < 0.02) return;
     const { ctx } = this;
     const st = I.state;
@@ -988,18 +991,28 @@ export class MapRenderer {
     const key = `${this.objId(st.regions)}|${I.owners.join(',')}`;
     if (this.empMemo.key !== key) this.empMemo = { key, v: empireLabels(st, I.owners) };
     const political = (I.lens ?? 'political') === 'political';
+    // the board's lettering size, in world units: a fraction of the map's width (the same at every zoom)
+    let x0 = Infinity, x1 = -Infinity;
+    for (const r of st.regions) { if (r.site.x < x0) x0 = r.site.x; if (r.site.x > x1) x1 = r.site.x; }
+    const capW = Math.max(1, (x1 - x0) / (this.compact ? 15 : 19));
+    const toScr = this.cam.z / this.ui;
     for (const L of this.empMemo.v) {
       const pl = st.players[L.owner];
       const name = pl.name.toUpperCase();
-      const span = L.span * this.cam.z / this.ui;
-      // one line if it fits, else split at the middle word; size measured to the territory's width
+      // one line if it fits, else split at the middle word (decided in world units: never flips with the zoom)
       const words = name.split(/\s+/);
-      const lines = words.length > 1 && span < name.length * 14 ? [words.slice(0, Math.ceil(words.length / 2)).join(' '), words.slice(Math.ceil(words.length / 2)).join(' ')] : [name];
+      const lines = words.length > 1 && L.span < name.length * capW * 0.62 ? [words.slice(0, Math.ceil(words.length / 2)).join(' '), words.slice(Math.ceil(words.length / 2)).join(' ')] : [name];
       ctx.font = displayFont(24);
       const w24 = Math.max(...lines.map(l => ctx.measureText(l).width + 24 * 0.3 * (l.length - 1)));
-      const fs = Math.min(this.compact ? 17 : 22, (24 * span * 0.85) / Math.max(1, w24));
-      // a territory too small for a readable name gets none
-      if (fs < 13) continue;
+      // every house's lettering is (nearly) one size, so they all read and fade together; a long name may overrun
+      // a small territory a little rather than shrink into illegibility. Only a sliver of a territory gets none.
+      const fit = (24 * L.span * 0.85) / Math.max(1, w24);
+      if (fit < capW * 0.35) continue;
+      const fsW = Math.max(capW * 0.75, Math.min(capW, fit));
+      // too small on screen to read (fully zoomed out on a phone): fade, never pop
+      const fs = fsW * toScr;
+      const legible = sstep(9, 12, fs);
+      if (legible < 0.02) continue;
       ctx.save();
       // the lettering stops short of every star in it (a stone set in the middle of a word lost to the letters)
       { const v = this.view; ctx.beginPath(); ctx.rect(v.x0, v.y0, v.x1 - v.x0, v.y1 - v.y0);
@@ -1009,7 +1022,7 @@ export class MapRenderer {
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       // engraved in the glaze: a dark cut under each letter, the house's lifted enamel as the face (fogged
       // or not, the house name is public)
-      ctx.globalAlpha = a0 * (political ? 1 : 0.45);
+      ctx.globalAlpha = a0 * legible * (political ? 1 : 0.45);
       ctx.lineWidth = 4 * S; ctx.strokeStyle = O.GROOVE; ctx.lineJoin = 'round';
       ctx.fillStyle = O.inkOf(pl.color);
       const lh = fs * 1.15 * S;
@@ -1297,9 +1310,10 @@ export class MapRenderer {
         ctx.beginPath(); ctx.arc(r.site.x, r.site.y, this.px(5), 0, TAU); ctx.fillStyle = hexA(col, 0.35 + 0.5 * k); ctx.fill();
         continue;
       }
-      if (k <= 0.02) {
-        // far from the pointer: just a faint dotted rim so the reach still reads
-        path(ctx, r.poly); ctx.save(); ctx.setLineDash([2 * S, 6 * S]); ctx.strokeStyle = hexA(col, 0.22); ctx.lineWidth = 1.2 * S; ctx.stroke(); ctx.restore();
+      if (!D || k <= 0.35) {
+        // a legal target at rest (or far from the dragged pointer): a faint tint and a thin rim, nothing louder
+        path(ctx, r.poly); ctx.fillStyle = hexA(col, 0.06); ctx.fill();
+        ctx.save(); ctx.clip(); ctx.strokeStyle = hexA(col, 0.45); ctx.lineWidth = 1.6 * S; ctx.stroke(); ctx.restore();
         continue;
       }
       // the region's enamel lifts a little (a flat tint, no light under the marks) and its wall is gilt
@@ -1308,8 +1322,8 @@ export class MapRenderer {
       ctx.save(); ctx.clip();
       // the gilt is solid, in an ink keyline (only the tint breathes): a pulsing, half-transparent wire lost to the
       // enamel under it (3.6:1 at the low of its pulse)
-      ctx.strokeStyle = O.GROOVE; ctx.lineWidth = (5.2 + 2 * k) * S; ctx.stroke();
-      ctx.strokeStyle = O.mixHex(col, '#fff4e0', 0.4); ctx.lineWidth = (2.4 + 1.4 * k) * S; ctx.stroke();
+      ctx.strokeStyle = O.GROOVE; ctx.lineWidth = 3.4 * S; ctx.stroke();
+      ctx.strokeStyle = O.mixHex(col, '#fff4e0', 0.35); ctx.lineWidth = 1.8 * S; ctx.stroke();
       ctx.restore();
     }
   }
@@ -2029,7 +2043,8 @@ export class MapRenderer {
       try { sp = Math.max(1, fleetSpeed(st, f)); } catch { /* */ }
       // this turn's reach, softly, only for the fleet you selected (not every fleet the mouse passes over)
       const sel = I.fleets.some(d => d.id === f.id && d.selected);
-      if (sel) { const reach = within(st, f.region, sp); segs.forEach((g, si) => { if (reach.has(g.u) && reach.has(g.v)) bump(si, 0.34); }); }
+      // (no reach web: the legal targets are already tinted; lighting every reachable lane drew a cable net)
+      void sel; void sp;
       if (f.route?.path?.length) markPath([f.region, ...f.route.path]);
       // your plan for it this turn: the chain of planned arrows that starts at its token (or its system)
       const near = (a: Pt, b: Pt | undefined) => !!b && Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;
